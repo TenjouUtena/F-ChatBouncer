@@ -1,0 +1,3 @@
+namespace FChatBouncer.Server.Configuration;
+
+    
