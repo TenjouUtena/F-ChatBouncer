@@ -374,8 +374,16 @@ public class AuthController : ControllerBase
 
     private string GenerateJwtToken(BouncerUser user)
     {
-        var jwtSettings = _configuration.GetSection("JwtSettings");
-        var secretKey = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"]!);
+        var jwtSecretKey = Environment.GetEnvironmentVariable("JWT__SecretKey");
+        if (string.IsNullOrEmpty(jwtSecretKey))
+        {
+            throw new InvalidOperationException("JWT__SecretKey environment variable is not set");
+        }
+        var secretKey = Encoding.ASCII.GetBytes(jwtSecretKey);
+        
+        var jwtIssuer = Environment.GetEnvironmentVariable("JWT__Issuer") ?? "F-ChatBouncer";
+        var jwtAudience = Environment.GetEnvironmentVariable("JWT__Audience") ?? "F-ChatBouncer-Users";
+        var jwtExpirationMinutes = int.Parse(Environment.GetEnvironmentVariable("JWT__ExpirationInMinutes") ?? "60");
 
         var claims = new[]
         {
@@ -389,7 +397,9 @@ public class AuthController : ControllerBase
         var tokenDescriptor = new SecurityTokenDescriptor
         {
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.AddMinutes(int.Parse(jwtSettings["ExpirationInMinutes"]!)),
+            Expires = DateTime.UtcNow.AddMinutes(jwtExpirationMinutes),
+            Issuer = jwtIssuer,
+            Audience = jwtAudience,
             SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(secretKey), SecurityAlgorithms.HmacSha256Signature)
         };
 

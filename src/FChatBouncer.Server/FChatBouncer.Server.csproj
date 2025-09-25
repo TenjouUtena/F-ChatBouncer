@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
+    <ContainerRepository>brendanspeer/fchat-bouncer-backend</ContainerRepository>
   </PropertyGroup>
 
   <ItemGroup>

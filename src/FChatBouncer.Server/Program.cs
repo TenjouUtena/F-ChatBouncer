@@ -40,14 +40,39 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
     var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     
+    Console.WriteLine($"DATABASE_URL: {(string.IsNullOrEmpty(databaseUrl) ? "NOT SET" : "SET")}");
+    Console.WriteLine($"DefaultConnection: {(string.IsNullOrEmpty(connectionString) ? "NOT SET" : "SET")}");
+    
     if (!string.IsNullOrEmpty(databaseUrl))
     {
         // Use Railway's DATABASE_URL if available
-        options.UseNpgsql(databaseUrl);
+        Console.WriteLine("Using DATABASE_URL from Railway");
+        try
+        {
+            // Validate the connection string format
+            if (databaseUrl.StartsWith("postgresql://") || databaseUrl.StartsWith("postgres://"))
+            {
+                Console.WriteLine("DATABASE_URL format is valid, configuring Npgsql...");
+                options.UseNpgsql(databaseUrl);
+                Console.WriteLine("Npgsql configured successfully");
+            }
+            else
+            {
+                throw new InvalidOperationException($"Invalid DATABASE_URL format: {databaseUrl}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error with DATABASE_URL: {ex.Message}");
+            Console.WriteLine($"Full exception: {ex}");
+            Console.WriteLine($"Stack trace: {ex.StackTrace}");
+            throw;
+        }
     }
     else if (!string.IsNullOrEmpty(connectionString))
     {
         // Fall back to configuration connection string
+        Console.WriteLine("Using DefaultConnection from configuration");
         options.UseNpgsql(connectionString);
     }
     else
@@ -58,6 +83,9 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
         var database = Environment.GetEnvironmentVariable("PGDATABASE") ?? "fchat_bouncer";
         var username = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
         var password = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "password";
+        
+        Console.WriteLine($"Building connection string from individual variables:");
+        Console.WriteLine($"Host: {host}, Port: {port}, Database: {database}, Username: {username}");
         
         var builtConnectionString = $"Host={host};Port={port};Database={database};Username={username};Password={password}";
         options.UseNpgsql(builtConnectionString);
@@ -87,8 +115,15 @@ builder.Services.AddIdentity<BouncerUser, IdentityRole>(options =>
 .AddDefaultTokenProviders();
 
 // JWT Authentication
-var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = Encoding.ASCII.GetBytes(jwtSettings["SecretKey"]!);
+var jwtSecretKey = Environment.GetEnvironmentVariable("JWT__SecretKey");
+if (string.IsNullOrEmpty(jwtSecretKey))
+{
+    throw new InvalidOperationException("JWT__SecretKey environment variable is not set");
+}
+var secretKey = Encoding.ASCII.GetBytes(jwtSecretKey);
+
+var jwtIssuer = Environment.GetEnvironmentVariable("JWT__Issuer") ?? "F-ChatBouncer";
+var jwtAudience = Environment.GetEnvironmentVariable("JWT__Audience") ?? "F-ChatBouncer-Users";
 
 // Authentication
 var googleSettings = builder.Configuration.GetSection("GoogleOAuth");
@@ -107,8 +142,10 @@ builder.Services.AddAuthentication(options =>
     {
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(secretKey),
-        ValidateIssuer = false,
-        ValidateAudience = false,
+        ValidateIssuer = true,
+        ValidIssuer = jwtIssuer,
+        ValidateAudience = true,
+        ValidAudience = jwtAudience,
         ClockSkew = TimeSpan.Zero
     };
 
@@ -328,27 +365,24 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     }
 });
 
-// Handle test commands
-if (args.Length > 0 && args[0] == "--test-ich")
-{
-    Console.WriteLine("🧪 Running ICH Command Tests...\n");
-    FChatBouncer.Server.Tests.ICHCommandTest.RunAllTests();
-    Console.WriteLine("\n🏁 All Tests Complete!");
-    return;
-}
 
-// Cleanup invalid channels on startup
+
+// Ensure database is created and migrated
 using (var scope = app.Services.CreateScope())
 {
-    var fChatService = scope.ServiceProvider.GetRequiredService<IFChatService>();
+    var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    
     try
     {
-        await fChatService.CleanupInvalidChannelsAsync();
+        logger.LogInformation("Ensuring database is created and migrated...");
+        await context.Database.EnsureCreatedAsync();
+        logger.LogInformation("Database migration completed successfully");
     }
     catch (Exception ex)
     {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Failed to cleanup invalid channels on startup");
+        logger.LogError(ex, "An error occurred while migrating the database");
+        throw;
     }
 }
 
