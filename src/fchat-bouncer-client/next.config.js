@@ -38,7 +38,7 @@ const nextConfig = {
           },
           {
             key: 'Content-Security-Policy',
-            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'} ws://localhost:5001 https://www.f-list.net;`,
+            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'} ws://localhost:5001 wss://${process.env.NEXT_PUBLIC_API_URL?.replace('https://', '') || 'localhost:5001'} https://www.f-list.net;`,
           },
         ],
       },

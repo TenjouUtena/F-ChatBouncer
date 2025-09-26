@@ -44,14 +44,11 @@ export default function CharacterSelection({ onCharacterSelect }: CharacterSelec
     setIsLoading(true);
     setError(null);
     try {
-      console.log('SignalR connection state:', signalRService.connectionState);
-      console.log('SignalR is connected:', signalRService.isConnected);
 
       if (!signalRService.isConnected) {
         throw new Error('SignalR is not connected. Please wait and try again.');
       }
 
-      console.log('Requesting characters via SignalR...');
       const characters = await signalRService.getCharacters();
       
       // Update the available characters directly

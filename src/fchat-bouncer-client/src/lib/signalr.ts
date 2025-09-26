@@ -39,7 +39,6 @@ class SignalRService {
         this.storedCredentials = credentials;
       }
 
-      console.log('Creating new SignalR connection...');
       this.connection = new signalR.HubConnectionBuilder()
         .withUrl(config.signalRUrl, {
           accessTokenFactory: () => this.currentToken!,
@@ -51,7 +50,6 @@ class SignalRService {
       this.setupEventHandlers();
 
       await this.connection.start();
-      console.log('SignalR Connected successfully');
     } catch (err) {
       console.error('SignalR Connection Error:', err);
 
@@ -63,7 +61,6 @@ class SignalRService {
           // Retry connection with new token
           if (this.connection) {
             await this.connection.start();
-            console.log('SignalR Connected after re-authentication');
           }
         } catch (reauthErr) {
           console.error('Re-authentication failed:', reauthErr);
@@ -80,7 +77,6 @@ class SignalRService {
   async disconnect(): Promise<void> {
     if (this.connection) {
       try {
-        console.log('Stopping SignalR connection...');
         // Clean up all event listeners
         this.cleanupAllListeners();
         await this.connection.stop();
@@ -101,7 +97,6 @@ class SignalRService {
   private cleanupAllListeners(): void {
     if (!this.connection) return;
 
-    console.log('Cleaning up all SignalR event listeners...');
 
     // Clean up custom listeners
     this.callbacks.forEach((callbacks, eventName) => {
@@ -234,7 +229,6 @@ class SignalRService {
   private setupEventHandlers(): void {
     if (!this.connection || this.eventListenersSetup) return;
 
-    console.log('Setting up SignalR event handlers...');
 
     this.connection.on('ReceiveMessage', (message: Message) => {
       // This will be handled by the component that sets up the listener

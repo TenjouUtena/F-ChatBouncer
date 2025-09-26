@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using FChatBouncer.Server.Data;
 using FChatBouncer.Server.Hubs;
 using FChatBouncer.Server.Models;
@@ -40,39 +41,30 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
     var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     
-    Console.WriteLine($"DATABASE_URL: {(string.IsNullOrEmpty(databaseUrl) ? "NOT SET" : "SET")}");
-    Console.WriteLine($"DefaultConnection: {(string.IsNullOrEmpty(connectionString) ? "NOT SET" : "SET")}");
     
     if (!string.IsNullOrEmpty(databaseUrl))
     {
         // Use Railway's DATABASE_URL if available
-        Console.WriteLine("Using DATABASE_URL from Railway");
         try
         {
             // Validate the connection string format
             if (databaseUrl.StartsWith("postgresql://") || databaseUrl.StartsWith("postgres://"))
             {
-                Console.WriteLine("DATABASE_URL format is valid, configuring Npgsql...");
                 options.UseNpgsql(databaseUrl);
-                Console.WriteLine("Npgsql configured successfully");
             }
             else
             {
                 throw new InvalidOperationException($"Invalid DATABASE_URL format: {databaseUrl}");
             }
         }
-        catch (Exception ex)
+        catch
         {
-            Console.WriteLine($"Error with DATABASE_URL: {ex.Message}");
-            Console.WriteLine($"Full exception: {ex}");
-            Console.WriteLine($"Stack trace: {ex.StackTrace}");
             throw;
         }
     }
     else if (!string.IsNullOrEmpty(connectionString))
     {
         // Fall back to configuration connection string
-        Console.WriteLine("Using DefaultConnection from configuration");
         options.UseNpgsql(connectionString);
     }
     else
@@ -84,8 +76,6 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
         var username = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
         var password = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "password";
         
-        Console.WriteLine($"Building connection string from individual variables:");
-        Console.WriteLine($"Host: {host}, Port: {port}, Database: {database}, Username: {username}");
         
         var builtConnectionString = $"Host={host};Port={port};Database={database};Username={username};Password={password}";
         options.UseNpgsql(builtConnectionString);
@@ -126,8 +116,14 @@ var jwtIssuer = Environment.GetEnvironmentVariable("JWT__Issuer") ?? "F-ChatBoun
 var jwtAudience = Environment.GetEnvironmentVariable("JWT__Audience") ?? "F-ChatBouncer-Users";
 
 // Authentication
-var googleSettings = builder.Configuration.GetSection("GoogleOAuth");
+var googleClientId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID");
+var googleClientSecret = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET");
 var requireHttps = securitySettings.GetValue<bool>("RequireHttps");
+
+if (string.IsNullOrEmpty(googleClientId) || string.IsNullOrEmpty(googleClientSecret))
+{
+    // Google OAuth credentials not set - Google login will not work
+}
 
 builder.Services.AddAuthentication(options =>
 {
@@ -166,8 +162,8 @@ builder.Services.AddAuthentication(options =>
 })
 .AddGoogle(options =>
 {
-    options.ClientId = googleSettings["ClientId"] ?? "";
-    options.ClientSecret = googleSettings["ClientSecret"] ?? "";
+    options.ClientId = googleClientId ?? "";
+    options.ClientSecret = googleClientSecret ?? "";
     options.CallbackPath = "/api/auth/google-callback";
     options.SaveTokens = true;
     
@@ -286,13 +282,29 @@ builder.Services.AddCors(options =>
     else
     {
         // Production: Strict CORS policy
-        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
-            ?? new[] { "https://fchat.proactiveapathy.com" };
+        var allowedOrigins = new List<string>();
+        
+        // Check for CORS__AllowedOrigins__0 environment variable (Railway format)
+        var corsOrigin0 = Environment.GetEnvironmentVariable("CORS__AllowedOrigins__0");
+        if (!string.IsNullOrEmpty(corsOrigin0))
+        {
+            allowedOrigins.Add(corsOrigin0);
+        }
+        
+        // Fallback to configuration
+        if (allowedOrigins.Count == 0)
+        {
+            var configOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+                ?? new[] { "https://fchat.proactiveapathy.com" };
+            allowedOrigins.AddRange(configOrigins);
+        }
+        
         
         options.AddPolicy("AllowClient", policy =>
         {
-            policy.WithOrigins(allowedOrigins)
-                  .WithHeaders("Authorization", "Content-Type", "X-Requested-With")
+            policy.WithOrigins(allowedOrigins.ToArray())
+                  .WithHeaders("Authorization", "Content-Type", "X-Requested-With", 
+                              "x-signalr-user-agent", "x-requested-with", "x-signalr-connection-token")
                   .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                   .AllowCredentials();
         });
@@ -333,8 +345,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseRouting();
 app.UseCors("AllowClient");
+app.UseRouting();
 app.UseCookiePolicy();
 app.UseSession();
 app.UseAuthentication();

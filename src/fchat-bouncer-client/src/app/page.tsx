@@ -242,9 +242,7 @@ export default function Home() {
 
   const connectToSignalR = async (authToken: string, credentials?: LoginCredentials | null) => {
     try {
-      console.log('Attempting to connect to SignalR...');
       await signalRService.connect(authToken, credentials || undefined);
-      console.log('SignalR connected successfully');
       setConnected(true);
 
       // Set up the ReceiveActiveCharacters listener after connection is established

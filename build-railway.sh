@@ -35,9 +35,10 @@ cd ../..
 echo ""
 echo "📦 Building Frontend Image for AMD64..."
 
-# Build frontend image for AMD64
+# Build frontend image for AMD64 with build-time environment variable
 docker build \
     --platform "$TARGET_PLATFORM" \
+    --build-arg NEXT_PUBLIC_API_URL="${NEXT_PUBLIC_API_URL:-https://api.fchat.proactiveapathy.com}" \
     --tag "$DOCKER_USERNAME/$FRONTEND_IMAGE:$IMAGE_TAG" \
     --file src/fchat-bouncer-client/Dockerfile \
     src/fchat-bouncer-client/

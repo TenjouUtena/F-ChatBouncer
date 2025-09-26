@@ -44,7 +44,6 @@ export default function ChannelSelection({
   useEffect(() => {
     // Set up SignalR listeners for channel data
     signalRService.onReceiveChannelList((channels: Channel[]) => {
-      console.log('Received channels from SignalR:', channels);
       setAvailableChannels(channels);
       setChannelMetadata(channels);
       setIsLoading(false);
@@ -82,14 +81,11 @@ export default function ChannelSelection({
     setIsLoading(true);
     setError(null);
     try {
-      console.log('SignalR connection state:', signalRService.connectionState);
-      console.log('SignalR is connected:', signalRService.isConnected);
 
       if (!signalRService.isConnected) {
         throw new Error('SignalR is not connected. Please wait and try again.');
       }
 
-      console.log('Requesting channel list via SignalR...');
       await signalRService.getChannelList();
     } catch (err) {
       console.error('Error getting channels:', err);

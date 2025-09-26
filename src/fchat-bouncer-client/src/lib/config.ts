@@ -14,8 +14,9 @@ interface AppConfig {
  */
 function getApiUrl(): string {
   // Check for environment variable first (production)
-  if (typeof window !== 'undefined' && process.env.NEXT_PUBLIC_API_URL) {
-    return process.env.NEXT_PUBLIC_API_URL;
+  const envApiUrl = process.env.NEXT_PUBLIC_API_URL;
+  if (envApiUrl) {
+    return envApiUrl;
   }
   
   // Development fallback
@@ -41,7 +42,7 @@ function getSignalRUrl(): string {
  * Get the current environment
  */
 function getEnvironment(): 'development' | 'production' {
-  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production') {
     return 'production';
   }
   return 'development';
@@ -73,17 +74,5 @@ export function getApiEndpoint(endpoint: string): string {
   return `${config.apiUrl}/api${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 }
 
-/**
- * Log configuration (without sensitive data)
- */
-export function logConfig(): void {
-  if (isDevelopment) {
-    console.log('App Configuration:', {
-      apiUrl: config.apiUrl,
-      signalRUrl: config.signalRUrl,
-      environment: config.environment,
-    });
-  }
-}
 
 export default config;

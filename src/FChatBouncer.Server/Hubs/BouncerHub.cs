@@ -40,6 +40,8 @@ public class BouncerHub : Hub
     public override async Task OnConnectedAsync()
     {
         var userId = Context.UserIdentifier;
+        _logger.LogInformation($"SignalR connection attempt - UserId: {userId}, ConnectionId: {Context.ConnectionId}");
+        
         if (userId != null)
         {
             _logger.LogInformation("User {UserId} connected to bouncer hub", userId);
@@ -121,6 +123,11 @@ public class BouncerHub : Hub
                 "Connected to Bouncer",
                 DateTime.UtcNow
             ));
+        }
+        else
+        {
+            _logger.LogWarning("SignalR connection rejected - no valid user identifier found");
+            throw new UnauthorizedAccessException("Authentication required for SignalR connection");
         }
 
         await base.OnConnectedAsync();
