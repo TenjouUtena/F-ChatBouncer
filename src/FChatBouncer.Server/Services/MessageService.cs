@@ -134,4 +134,161 @@ public class MessageService : IMessageService
         _context.QueuedMessages.RemoveRange(queuedMessages);
         await _context.SaveChangesAsync();
     }
+
+    // New log retrieval methods
+    public async Task<List<CharacterLogSummary>> GetCharactersWithLogsAsync(string userId)
+    {
+        var characterLogs = await _context.Messages
+            .Where(m => m.UserId == userId)
+            .GroupBy(m => m.CharacterName)
+            .Select(g => new CharacterLogSummary
+            {
+                CharacterName = g.Key,
+                MessageCount = g.Count(),
+                LastMessageTime = g.Max(m => m.Timestamp),
+                Channels = g.Select(m => m.ChannelName).Distinct().ToArray()
+            })
+            .OrderByDescending(c => c.LastMessageTime)
+            .ToListAsync();
+
+        return characterLogs;
+    }
+
+    public async Task<List<ChannelLogSummary>> GetChannelsWithLogsAsync(string userId)
+    {
+        var channelLogs = await _context.Messages
+            .Where(m => m.UserId == userId)
+            .GroupBy(m => m.ChannelName)
+            .Select(g => new ChannelLogSummary
+            {
+                ChannelName = g.Key,
+                ChannelTitle = g.Key, // Will be updated with actual title if available
+                MessageCount = g.Count(),
+                LastMessageTime = g.Max(m => m.Timestamp),
+                Characters = g.Select(m => m.CharacterName).Distinct().ToArray()
+            })
+            .OrderByDescending(c => c.LastMessageTime)
+            .ToListAsync();
+
+        // Try to get channel titles from the Channels table
+        var channelNames = channelLogs.Select(c => c.ChannelName).ToList();
+        var channelTitles = await _context.Channels
+            .Where(c => c.UserId == userId && channelNames.Contains(c.FChatChannelName))
+            .ToDictionaryAsync(c => c.FChatChannelName, c => c.DisplayName ?? c.FChatChannelName);
+
+        // Update channel titles where available
+        foreach (var channelLog in channelLogs)
+        {
+            if (channelTitles.TryGetValue(channelLog.ChannelName, out var title))
+            {
+                channelLog.ChannelTitle = title;
+            }
+        }
+
+        return channelLogs;
+    }
+
+    public async Task<List<Message>> GetCharacterLogsAsync(string userId, string characterName, DateTime? since = null, DateTime? until = null, int limit = 1000)
+    {
+        var query = _context.Messages
+            .Where(m => m.UserId == userId && m.CharacterName == characterName);
+
+        if (since.HasValue)
+        {
+            query = query.Where(m => m.Timestamp >= since.Value);
+        }
+
+        if (until.HasValue)
+        {
+            query = query.Where(m => m.Timestamp <= until.Value);
+        }
+
+        return await query
+            .OrderByDescending(m => m.Timestamp)
+            .Take(limit)
+            .ToListAsync();
+    }
+
+    public async Task<List<Message>> GetChannelLogsAsync(string userId, string channelName, DateTime? since = null, DateTime? until = null, int limit = 1000)
+    {
+        var query = _context.Messages
+            .Where(m => m.UserId == userId && m.ChannelName == channelName);
+
+        if (since.HasValue)
+        {
+            query = query.Where(m => m.Timestamp >= since.Value);
+        }
+
+        if (until.HasValue)
+        {
+            query = query.Where(m => m.Timestamp <= until.Value);
+        }
+
+        return await query
+            .OrderByDescending(m => m.Timestamp)
+            .Take(limit)
+            .ToListAsync();
+    }
+
+    public async Task<List<Message>> GetCharacterChannelLogsAsync(string userId, string characterName, string channelName, DateTime? since = null, DateTime? until = null, int limit = 1000)
+    {
+        var query = _context.Messages
+            .Where(m => m.UserId == userId && m.CharacterName == characterName && m.ChannelName == channelName);
+
+        if (since.HasValue)
+        {
+            query = query.Where(m => m.Timestamp >= since.Value);
+        }
+
+        if (until.HasValue)
+        {
+            query = query.Where(m => m.Timestamp <= until.Value);
+        }
+
+        return await query
+            .OrderByDescending(m => m.Timestamp)
+            .Take(limit)
+            .ToListAsync();
+    }
+
+    public async Task<List<Message>> SearchLogsAsync(string userId, string? characterName = null, string? channelName = null, string? content = null, string? messageType = null, DateTime? since = null, DateTime? until = null, int limit = 1000)
+    {
+        var query = _context.Messages
+            .Where(m => m.UserId == userId);
+
+        if (!string.IsNullOrEmpty(characterName))
+        {
+            query = query.Where(m => m.CharacterName == characterName);
+        }
+
+        if (!string.IsNullOrEmpty(channelName))
+        {
+            query = query.Where(m => m.ChannelName == channelName);
+        }
+
+        if (!string.IsNullOrEmpty(content))
+        {
+            query = query.Where(m => m.Content.Contains(content));
+        }
+
+        if (!string.IsNullOrEmpty(messageType) && Enum.TryParse<MessageType>(messageType, out var msgType))
+        {
+            query = query.Where(m => m.MessageType == msgType);
+        }
+
+        if (since.HasValue)
+        {
+            query = query.Where(m => m.Timestamp >= since.Value);
+        }
+
+        if (until.HasValue)
+        {
+            query = query.Where(m => m.Timestamp <= until.Value);
+        }
+
+        return await query
+            .OrderByDescending(m => m.Timestamp)
+            .Take(limit)
+            .ToListAsync();
+    }
 }

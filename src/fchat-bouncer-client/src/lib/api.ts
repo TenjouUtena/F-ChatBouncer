@@ -328,4 +328,69 @@ export const api = {
       body: JSON.stringify({ characterName }),
     });
   },
+
+  // Logs API methods
+  async getCharactersWithLogs(token: string): Promise<any> {
+    const response = await fetchWithError(`${API_BASE}/logs/characters`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    return response.json();
+  },
+
+  async getChannelsWithLogs(token: string): Promise<any> {
+    const response = await fetchWithError(`${API_BASE}/logs/channels`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    return response.json();
+  },
+
+  async getCharacterLogs(token: string, characterName: string, since?: string, until?: string, limit?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (since) params.append('since', since);
+    if (until) params.append('until', until);
+    if (limit) params.append('limit', limit.toString());
+    
+    const response = await fetchWithError(`${API_BASE}/logs/character/${encodeURIComponent(characterName)}?${params}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    return response.json();
+  },
+
+  async getChannelLogs(token: string, channelName: string, since?: string, until?: string, limit?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (since) params.append('since', since);
+    if (until) params.append('until', until);
+    if (limit) params.append('limit', limit.toString());
+    
+    const response = await fetchWithError(`${API_BASE}/logs/channel/${encodeURIComponent(channelName)}?${params}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    return response.json();
+  },
+
+  async searchLogs(token: string, characterName?: string, channelName?: string, content?: string, messageType?: string, since?: string, until?: string, limit?: number): Promise<any> {
+    const params = new URLSearchParams();
+    if (characterName) params.append('characterName', characterName);
+    if (channelName) params.append('channelName', channelName);
+    if (content) params.append('content', content);
+    if (messageType) params.append('messageType', messageType);
+    if (since) params.append('since', since);
+    if (until) params.append('until', until);
+    if (limit) params.append('limit', limit.toString());
+    
+    const response = await fetchWithError(`${API_BASE}/logs/search?${params}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    return response.json();
+  },
 };

@@ -55,5 +55,5 @@ next-env.d.ts
 *.sqlite
 
 # Logs
-logs
+src/FChatBouncer.Server/logs
 *.log
