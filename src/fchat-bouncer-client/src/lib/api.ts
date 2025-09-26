@@ -306,4 +306,26 @@ export const api = {
       body: JSON.stringify(searchCriteria),
     });
   },
+
+  async addBookmark(token: string, characterName: string): Promise<void> {
+    await fetchWithError(`${API_BASE}/fchat/bookmark/add`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ characterName }),
+    });
+  },
+
+  async removeBookmark(token: string, characterName: string): Promise<void> {
+    await fetchWithError(`${API_BASE}/fchat/bookmark/remove`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ characterName }),
+    });
+  },
 };

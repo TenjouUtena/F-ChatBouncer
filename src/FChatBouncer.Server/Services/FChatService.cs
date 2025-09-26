@@ -1601,13 +1601,17 @@ public class FChatService : IFChatService
                     // Save the structured profile data
                     await profileService.SaveStructuredProfileAsync(userId, structuredProfile);
 
+                    // Update bookmark status if this character is bookmarked
+                    var bookmarkUpdateResult = await UpdateBookmarkFromProfile(userId, characterName, profileCharacterName, structuredProfile);
+
                     // Notify the client that structured profile was received
                     await _hubContext.Clients.Group($"user-{userId}").SendAsync("ProfileReceived", new
                     {
                         CharacterName = profileCharacterName,
                         ProfileData = structuredProfile, // Send the structured object
                         Message = $"Profile data received for {profileCharacterName} ({structuredProfile.GetSummary()})",
-                        RequestingCharacter = characterName // Add character context
+                        RequestingCharacter = characterName, // Add character context
+                        OnlineStatus = bookmarkUpdateResult // Include online status information
                     });
                 }
                 else
@@ -1623,13 +1627,17 @@ public class FChatService : IFChatService
                 // Fall back to saving raw profile data
                 await profileService.SaveProfileAsync(userId, profileCharacterName, profileData, profileData);
 
+                // Update bookmark status if this character is bookmarked (with null structured profile)
+                var bookmarkUpdateResult = await UpdateBookmarkFromProfile(userId, characterName, profileCharacterName, null);
+
                 // Notify the client that raw profile was received
                 await _hubContext.Clients.Group($"user-{userId}").SendAsync("ProfileReceived", new
                 {
                     CharacterName = profileCharacterName,
                     ProfileData = profileData,
                     Message = $"Profile data received for {profileCharacterName} (raw format)",
-                    RequestingCharacter = characterName // Add character context
+                    RequestingCharacter = characterName, // Add character context
+                    OnlineStatus = bookmarkUpdateResult // Include online status information
                 });
             }
 
@@ -1747,6 +1755,93 @@ public class FChatService : IFChatService
         {
             _logger.LogError(ex, "Error handling status update for character {StatusCharacterName} via {CharacterName} of user {UserId}", 
                 statusCharacterName, characterName, userId);
+        }
+    }
+
+    private async Task<object?> UpdateBookmarkFromProfile(string userId, string characterName, string profileCharacterName, ProfileData? structuredProfile)
+    {
+        try
+        {
+            var connection = await GetCharacterConnectionAsync(userId, characterName);
+            if (connection != null && _connections.TryGetValue(userId, out var userConnections) &&
+                userConnections.TryGetValue(characterName, out var client))
+            {
+                var bookmarks = client.GetBookmarksList();
+                if (bookmarks.Contains(profileCharacterName))
+                {
+                    _logger.LogInformation("Updating bookmark status for {ProfileCharacterName} after profile received", profileCharacterName);
+                    
+                    // Extract gender and status from profile data if available
+                    string? gender = null;
+                    string? status = null;
+                    bool isOnline = false;
+                    
+                    if (structuredProfile != null)
+                    {
+                        gender = structuredProfile.Gender;
+                        // Try to extract status from profile data
+                        if (structuredProfile.Info.TryGetValue("status", out var statusValue))
+                        {
+                            status = statusValue;
+                        }
+                    }
+                    
+                    // Check online status from the online characters cache
+                    var onlineCharacter = client.GetOnlineCharacter(profileCharacterName);
+                    if (onlineCharacter != null)
+                    {
+                        isOnline = true;
+                        status = onlineCharacter.Status;
+                        gender = onlineCharacter.Gender ?? gender; // Use online character gender if available
+                        _logger.LogInformation("Character {ProfileCharacterName} is online with status: {Status}", profileCharacterName, status);
+                    }
+                    else
+                    {
+                        // Check if we have status from profile data
+                        if (!string.IsNullOrEmpty(status))
+                        {
+                            isOnline = status.ToLower() != "offline";
+                        }
+                        _logger.LogInformation("Character {ProfileCharacterName} is offline or status unknown", profileCharacterName);
+                    }
+                    
+                    // Update the bookmark with the new information
+                    var bookmarksWithStatus = client.GetBookmarksWithStatus();
+                    if (bookmarksWithStatus.Any(b => b.Name == profileCharacterName))
+                    {
+                        var bookmark = bookmarksWithStatus.First(b => b.Name == profileCharacterName);
+                        if (!string.IsNullOrEmpty(gender))
+                        {
+                            bookmark.Gender = gender;
+                        }
+                        if (!string.IsNullOrEmpty(status))
+                        {
+                            bookmark.Status = status;
+                        }
+                        bookmark.IsOnline = isOnline;
+                        
+                        _logger.LogInformation("Updated bookmark {ProfileCharacterName} with gender: {Gender}, status: {Status}, isOnline: {IsOnline}", 
+                            profileCharacterName, gender ?? "unknown", status ?? "unknown", isOnline);
+                    }
+                    
+                    // Return online status information for the frontend
+                    return new
+                    {
+                        IsOnline = isOnline,
+                        Status = status ?? "offline",
+                        Gender = gender,
+                        LastSeen = DateTime.UtcNow
+                    };
+                }
+            }
+            
+            return null;
+        }
+        catch (Exception bookmarkEx)
+        {
+            _logger.LogWarning(bookmarkEx, "Failed to update bookmark status for {ProfileCharacterName}", profileCharacterName);
+            // Don't fail the profile processing if bookmark update fails
+            return null;
         }
     }
 
@@ -2121,6 +2216,122 @@ public class FChatService : IFChatService
         {
             _logger.LogError(ex, "Error getting character details for {CharacterName}", characterName);
             return null;
+        }
+    }
+
+    #endregion
+
+    #region Bookmark Methods
+
+    public async Task<bool> AddBookmarkAsync(string userId, string characterName, string bookmarkCharacterName)
+    {
+        try
+        {
+            _logger.LogInformation("Adding bookmark for user {UserId}, character {CharacterName}, bookmark {BookmarkCharacterName}", 
+                userId, characterName, bookmarkCharacterName);
+
+            var connection = await GetCharacterConnectionAsync(userId, characterName);
+            if (connection == null)
+            {
+                _logger.LogWarning("No connection found for user {UserId}, character {CharacterName}", userId, characterName);
+                return false;
+            }
+
+            if (!_connections.TryGetValue(userId, out var userConnections) ||
+                !userConnections.TryGetValue(characterName, out var client))
+            {
+                _logger.LogWarning("No WebSocket client found for user {UserId}, character {CharacterName}", userId, characterName);
+                return false;
+            }
+
+            var success = await client.AddBookmarkAsync(bookmarkCharacterName);
+            if (success)
+            {
+                _logger.LogInformation("Successfully added bookmark {BookmarkCharacterName} for user {UserId}, character {CharacterName}", 
+                    bookmarkCharacterName, userId, characterName);
+                
+                // Request profile data for the newly bookmarked character to get online status, gender, etc.
+                try
+                {
+                    _logger.LogInformation("Requesting profile data for newly bookmarked character {BookmarkCharacterName}", bookmarkCharacterName);
+                    await client.RequestProfileAsync(bookmarkCharacterName);
+                }
+                catch (Exception profileEx)
+                {
+                    _logger.LogWarning(profileEx, "Failed to request profile for newly bookmarked character {BookmarkCharacterName}", bookmarkCharacterName);
+                    // Don't fail the bookmark operation if profile request fails
+                }
+                
+                // Broadcast bookmark added event to SignalR clients
+                await _hubContext.Clients.Group($"user-{userId}").SendAsync("BookmarkAdded", new
+                {
+                    CharacterName = bookmarkCharacterName,
+                    Timestamp = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                _logger.LogWarning("Failed to add bookmark {BookmarkCharacterName} for user {UserId}, character {CharacterName}", 
+                    bookmarkCharacterName, userId, characterName);
+            }
+
+            return success;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding bookmark for user {UserId}, character {CharacterName}, bookmark {BookmarkCharacterName}", 
+                userId, characterName, bookmarkCharacterName);
+            return false;
+        }
+    }
+
+    public async Task<bool> RemoveBookmarkAsync(string userId, string characterName, string bookmarkCharacterName)
+    {
+        try
+        {
+            _logger.LogInformation("Removing bookmark for user {UserId}, character {CharacterName}, bookmark {BookmarkCharacterName}", 
+                userId, characterName, bookmarkCharacterName);
+
+            var connection = await GetCharacterConnectionAsync(userId, characterName);
+            if (connection == null)
+            {
+                _logger.LogWarning("No connection found for user {UserId}, character {CharacterName}", userId, characterName);
+                return false;
+            }
+
+            if (!_connections.TryGetValue(userId, out var userConnections) ||
+                !userConnections.TryGetValue(characterName, out var client))
+            {
+                _logger.LogWarning("No WebSocket client found for user {UserId}, character {CharacterName}", userId, characterName);
+                return false;
+            }
+
+            var success = await client.RemoveBookmarkAsync(bookmarkCharacterName);
+            if (success)
+            {
+                _logger.LogInformation("Successfully removed bookmark {BookmarkCharacterName} for user {UserId}, character {CharacterName}", 
+                    bookmarkCharacterName, userId, characterName);
+                
+                // Broadcast bookmark removed event to SignalR clients
+                await _hubContext.Clients.Group($"user-{userId}").SendAsync("BookmarkRemoved", new
+                {
+                    CharacterName = bookmarkCharacterName,
+                    Timestamp = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                _logger.LogWarning("Failed to remove bookmark {BookmarkCharacterName} for user {UserId}, character {CharacterName}", 
+                    bookmarkCharacterName, userId, characterName);
+            }
+
+            return success;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing bookmark for user {UserId}, character {CharacterName}, bookmark {BookmarkCharacterName}", 
+                userId, characterName, bookmarkCharacterName);
+            return false;
         }
     }
 

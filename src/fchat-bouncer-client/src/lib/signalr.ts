@@ -213,6 +213,8 @@ class SignalRService {
   private onFChatConnectionEstablished?: (characterName: string) => void;
   private onFChatConnectionFailed?: (error: string) => void;
   private onSearchResultsReceived?: (data: { Results: any[]; Timestamp: string }) => void;
+  private onBookmarkAdded?: (data: { characterName: string }) => void;
+  private onBookmarkRemoved?: (data: { characterName: string }) => void;
 
   public setFChatConnectionCallbacks(
     onEstablished: (characterName: string) => void,
@@ -223,7 +225,15 @@ class SignalRService {
   }
 
   public setSearchResultsCallback(callback: (data: { Results: any[]; Timestamp: string }) => void): void {
-    this.onSearchResultsReceived = callback;
+this.onSearchResultsReceived = callback;
+  }
+
+  public setBookmarkCallbacks(
+    onAdded: (data: { characterName: string }) => void,
+    onRemoved: (data: { characterName: string }) => void
+  ): void {
+    this.onBookmarkAdded = onAdded;
+    this.onBookmarkRemoved = onRemoved;
   }
 
   private setupEventHandlers(): void {
@@ -356,6 +366,16 @@ class SignalRService {
       console.log('Search results received:', data);
       // Emit event for UI to handle search results
       this.onSearchResultsReceived?.(data);
+    });
+
+    this.connection.on('BookmarkAdded', (data: { characterName: string }) => {
+      console.log('Bookmark added:', data);
+      this.onBookmarkAdded?.(data);
+    });
+
+    this.connection.on('BookmarkRemoved', (data: { characterName: string }) => {
+      console.log('Bookmark removed:', data);
+      this.onBookmarkRemoved?.(data);
     });
 
     this.eventListenersSetup = true;

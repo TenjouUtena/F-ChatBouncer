@@ -58,6 +58,8 @@ public interface IFChatService
     
     // Friends and bookmarks methods
     Task<(List<Friend> Friends, List<string> Bookmarks, List<Friend> BookmarksWithStatus)> GetFriendsAndBookmarksAsync(string userId);
+    Task<bool> AddBookmarkAsync(string userId, string characterName, string bookmarkCharacterName);
+    Task<bool> RemoveBookmarkAsync(string userId, string characterName, string bookmarkCharacterName);
     
     // Search methods
     Task SearchCharactersAsync(string userId, string characterName, Dictionary<string, object> searchCriteria);

@@ -2,7 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { signalRService } from '@/lib/signalr';
+import { useFriendsStore } from '@/stores/friendsStore';
+import { useAuthStore } from '@/stores/authStore';
 import Character, { CharacterData } from './Character';
+import UserContextMenu from './UserContextMenu';
+import { api } from '@/lib/api';
 
 interface ChannelCharacter {
   characterName: string;
@@ -16,15 +20,22 @@ interface ChannelCharacter {
 interface ChannelCharacterListProps {
   channelId: string;
   className?: string;
+  onOpenPM?: (characterName: string) => void;
 }
 
-export default function ChannelCharacterList({ channelId, className = '' }: ChannelCharacterListProps) {
+export default function ChannelCharacterList({ channelId, className = '', onOpenPM }: ChannelCharacterListProps) {
+  const { bookmarks, addBookmark, removeBookmark } = useFriendsStore();
+  const { token } = useAuthStore();
   const [characters, setCharacters] = useState<ChannelCharacter[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isHovered, setIsHovered] = useState(false);
   const [screenWidth, setScreenWidth] = useState(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  const [userContextMenu, setUserContextMenu] = useState<{
+    username: string;
+    position: { x: number; y: number };
+  } | null>(null);
 
   useEffect(() => {
     if (channelId && isExpanded) {
@@ -158,6 +169,59 @@ export default function ChannelCharacterList({ channelId, className = '' }: Chan
   // Determine if we should show the expanded list based on screen width and hover state
   const shouldShowExpanded = screenWidth >= 1200 || (screenWidth < 1200 && (isExpanded || isHovered));
 
+  // Context menu handlers
+  const handleCharacterRightClick = (characterName: string, event: React.MouseEvent) => {
+    setUserContextMenu({
+      username: characterName,
+      position: { x: event.clientX, y: event.clientY }
+    });
+  };
+
+  const handleOpenPM = (username: string) => {
+    if (onOpenPM) {
+      onOpenPM(username);
+    }
+  };
+
+  const handleOpenProfile = (username: string) => {
+    const profileUrl = `https://www.f-list.net/c/${encodeURIComponent(username.toLowerCase())}/`;
+    window.open(profileUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleAddBookmark = async (username: string) => {
+    if (!token) {
+      console.error('No authentication token available');
+      return;
+    }
+
+    try {
+      await api.addBookmark(token, username);
+      addBookmark(username);
+      console.log('Bookmark added for:', username);
+    } catch (error) {
+      console.error('Error adding bookmark:', error);
+    }
+  };
+
+  const handleRemoveBookmark = async (username: string) => {
+    if (!token) {
+      console.error('No authentication token available');
+      return;
+    }
+
+    try {
+      await api.removeBookmark(token, username);
+      removeBookmark(username);
+      console.log('Bookmark removed for:', username);
+    } catch (error) {
+      console.error('Error removing bookmark:', error);
+    }
+  };
+
+  const handleCloseContextMenu = () => {
+    setUserContextMenu(null);
+  };
+
   return (
     <div 
       className={`bg-gray-800 border border-gray-700 rounded-lg flex flex-col h-full ${className} ${
@@ -222,11 +286,26 @@ export default function ChannelCharacterList({ channelId, className = '' }: Chan
                   variant="detailed"
                   showLastSeen={true}
                   className="mb-1"
+                  onRightClick={handleCharacterRightClick}
                 />
               ))}
             </div>
           )}
         </div>
+      )}
+
+      {/* User Context Menu */}
+      {userContextMenu && (
+        <UserContextMenu
+          username={userContextMenu.username}
+          position={userContextMenu.position}
+          onOpenPM={handleOpenPM}
+          onOpenProfile={handleOpenProfile}
+          onAddBookmark={handleAddBookmark}
+          onRemoveBookmark={handleRemoveBookmark}
+          isBookmarked={bookmarks.includes(userContextMenu.username)}
+          onClose={handleCloseContextMenu}
+        />
       )}
     </div>
   );

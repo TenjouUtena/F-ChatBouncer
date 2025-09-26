@@ -32,7 +32,7 @@ export default function Home() {
   const { setConnected, setSelectedChannels, setJoinedChannels, mergeHistoryMessages, getLastMessageTime } = useChatStore();
   const { activeCharacter, setActiveCharacter, addConnection, clearActiveCharacter } = useCharacterStore();
   const { initialize, hasStoredCredentials, retrieveCredentials } = useCredentialsStore();
-  const { updateFriendStatus, setFriendOnline, isFriendOrBookmark } = useFriendsStore();
+  const { updateFriendStatus, setFriendOnline, isFriendOrBookmark, addBookmark, removeBookmark } = useFriendsStore();
   const [isLoading, setIsLoading] = useState(false);
   const [isAutoLogging, setIsAutoLogging] = useState(false);
   const [isCharacterRestoring, setIsCharacterRestoring] = useState(!!activeCharacter);
@@ -309,6 +309,18 @@ export default function Home() {
         }
 
       });
+
+      // Set up bookmark event listeners
+      signalRService.setBookmarkCallbacks(
+        (data) => {
+          console.log('Bookmark added:', data);
+          addBookmark(data.characterName);
+        },
+        (data) => {
+          console.log('Bookmark removed:', data);
+          removeBookmark(data.characterName);
+        }
+      );
 
       signalRService.onUserOnline((data) => {
         // Only update if this character is actually a friend or bookmark

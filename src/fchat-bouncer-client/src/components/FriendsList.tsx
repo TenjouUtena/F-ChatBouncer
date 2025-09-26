@@ -2,11 +2,14 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useFriendsStore } from '@/stores/friendsStore';
+import { useAuthStore } from '@/stores/authStore';
 import { Friend } from '@/types';
 import { ChevronDownIcon, ChevronRightIcon, UserIcon, BookmarkIcon } from '@heroicons/react/24/outline';
 import Character, { CharacterData, getCharacterStatusColor, getCharacterStatusIcon } from './Character';
 import { getCharacterColor } from '@/lib/genderColors';
 import { bbcodeToHtml } from '@/lib/bbcode';
+import UserContextMenu from './UserContextMenu';
+import { api } from '@/lib/api';
 
 interface FriendsListProps {
   className?: string;
@@ -14,9 +17,14 @@ interface FriendsListProps {
 }
 
 const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) => {
-  const { friends, bookmarks, bookmarksWithStatus, isCollapsed, toggleCollapsed, isLoading, deduplicateFriends } = useFriendsStore();
+  const { friends, bookmarks, bookmarksWithStatus, isCollapsed, toggleCollapsed, isLoading, deduplicateFriends, addBookmark, removeBookmark } = useFriendsStore();
+  const { token } = useAuthStore();
   const [hoveredFriend, setHoveredFriend] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [userContextMenu, setUserContextMenu] = useState<{
+    username: string;
+    position: { x: number; y: number };
+  } | null>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Deduplicate friends by name to prevent React key conflicts
@@ -65,6 +73,58 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
     if (onOpenPM) {
       onOpenPM(friendName);
     }
+  };
+
+  const handleFriendRightClick = (friendName: string, event: React.MouseEvent) => {
+    setUserContextMenu({
+      username: friendName,
+      position: { x: event.clientX, y: event.clientY }
+    });
+  };
+
+  const handleOpenPM = (username: string) => {
+    if (onOpenPM) {
+      onOpenPM(username);
+    }
+  };
+
+  const handleOpenProfile = (username: string) => {
+    const profileUrl = `https://www.f-list.net/c/${encodeURIComponent(username.toLowerCase())}/`;
+    window.open(profileUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleAddBookmark = async (username: string) => {
+    if (!token) {
+      console.error('No authentication token available');
+      return;
+    }
+
+    try {
+      await api.addBookmark(token, username);
+      addBookmark(username);
+      console.log('Bookmark added for:', username);
+    } catch (error) {
+      console.error('Error adding bookmark:', error);
+    }
+  };
+
+  const handleRemoveBookmark = async (username: string) => {
+    if (!token) {
+      console.error('No authentication token available');
+      return;
+    }
+
+    try {
+      await api.removeBookmark(token, username);
+      removeBookmark(username);
+      console.log('Bookmark removed for:', username);
+    } catch (error) {
+      console.error('Error removing bookmark:', error);
+    }
+  };
+
+  const handleCloseContextMenu = () => {
+    setUserContextMenu(null);
   };
 
   if (isLoading) {
@@ -118,6 +178,7 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
                       variant="compact"
                       showStatusMessage={true}
                       onClick={handleFriendClick}
+                      onRightClick={handleFriendRightClick}
                       onMouseEnter={setHoveredFriend}
                       onMouseLeave={() => setHoveredFriend(null)}
                     />
@@ -141,6 +202,7 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
                       variant="compact"
                       showStatusMessage={true}
                       onClick={handleFriendClick}
+                      onRightClick={handleFriendRightClick}
                       onMouseEnter={setHoveredFriend}
                       onMouseLeave={() => setHoveredFriend(null)}
                     />
@@ -163,6 +225,7 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
                       variant="compact"
                       showStatusMessage={false}
                       onClick={handleFriendClick}
+                      onRightClick={handleFriendRightClick}
                       onMouseEnter={setHoveredFriend}
                       onMouseLeave={() => setHoveredFriend(null)}
                     />
@@ -225,6 +288,20 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
             );
           })()}
         </div>
+      )}
+
+      {/* User Context Menu */}
+      {userContextMenu && (
+        <UserContextMenu
+          username={userContextMenu.username}
+          position={userContextMenu.position}
+          onOpenPM={handleOpenPM}
+          onOpenProfile={handleOpenProfile}
+          onAddBookmark={handleAddBookmark}
+          onRemoveBookmark={handleRemoveBookmark}
+          isBookmarked={bookmarks.includes(userContextMenu.username)}
+          onClose={handleCloseContextMenu}
+        />
       )}
     </div>
   );

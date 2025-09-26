@@ -24,6 +24,7 @@ interface CharacterProps {
   showStatusMessage?: boolean;
   showLastSeen?: boolean;
   onClick?: (characterName: string) => void;
+  onRightClick?: (characterName: string, event: React.MouseEvent) => void;
   className?: string;
   onMouseEnter?: (characterName: string) => void;
   onMouseLeave?: () => void;
@@ -35,6 +36,7 @@ export default function Character({
   showStatusMessage = false,
   showLastSeen = false,
   onClick,
+  onRightClick,
   className = '',
   onMouseEnter,
   onMouseLeave
@@ -138,6 +140,13 @@ export default function Character({
     }
   };
 
+  const handleRightClick = (event: React.MouseEvent) => {
+    event.preventDefault();
+    if (onRightClick) {
+      onRightClick(characterName, event);
+    }
+  };
+
   const handleMouseEnter = () => {
     if (onMouseEnter) {
       onMouseEnter(characterName);
@@ -155,6 +164,7 @@ export default function Character({
       <div
         className={`flex items-center space-x-2 px-1 py-0.5 rounded hover:bg-gray-700 transition-colors cursor-pointer ${className}`}
         onClick={handleClick}
+        onContextMenu={handleRightClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
@@ -183,6 +193,7 @@ export default function Character({
       <div
         className={`flex items-center justify-between p-2 hover:bg-gray-700 rounded transition-colors cursor-pointer ${className}`}
         onClick={handleClick}
+        onContextMenu={handleRightClick}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         title={character.statusMessage ? renderStatusMessage(character.statusMessage) : undefined}
@@ -215,6 +226,7 @@ export default function Character({
     <div
       className={`flex items-center space-x-2 px-1 py-0.5 rounded hover:bg-gray-700 transition-colors cursor-pointer ${className}`}
       onClick={handleClick}
+      onContextMenu={handleRightClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >

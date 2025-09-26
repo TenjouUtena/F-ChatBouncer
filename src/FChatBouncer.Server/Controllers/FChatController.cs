@@ -438,6 +438,80 @@ public class FChatController : ControllerBase
         }
     }
 
+    [HttpPost("bookmark/add")]
+    public async Task<ActionResult> AddBookmark([FromBody] BookmarkRequest request)
+    {
+        try
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId == null)
+            {
+                return Unauthorized();
+            }
+
+            // Get active character
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            if (activeCharacter == null)
+            {
+                return BadRequest(new { message = "No character selected" });
+            }
+
+            var success = await _fChatService.AddBookmarkAsync(userId, activeCharacter, request.CharacterName);
+
+            if (success)
+            {
+                return Ok(new { message = "Bookmark added successfully" });
+            }
+            else
+            {
+                return StatusCode(500, new { message = "Failed to add bookmark" });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to add bookmark for character {CharacterName} (User: {UserId})",
+                request.CharacterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            return StatusCode(500, new { message = "Failed to add bookmark" });
+        }
+    }
+
+    [HttpPost("bookmark/remove")]
+    public async Task<ActionResult> RemoveBookmark([FromBody] BookmarkRequest request)
+    {
+        try
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId == null)
+            {
+                return Unauthorized();
+            }
+
+            // Get active character
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            if (activeCharacter == null)
+            {
+                return BadRequest(new { message = "No character selected" });
+            }
+
+            var success = await _fChatService.RemoveBookmarkAsync(userId, activeCharacter, request.CharacterName);
+
+            if (success)
+            {
+                return Ok(new { message = "Bookmark removed successfully" });
+            }
+            else
+            {
+                return StatusCode(500, new { message = "Failed to remove bookmark" });
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to remove bookmark for character {CharacterName} (User: {UserId})",
+                request.CharacterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            return StatusCode(500, new { message = "Failed to remove bookmark" });
+        }
+    }
+
 }
 
 // DTOs
@@ -525,4 +599,9 @@ public class SearchRequest
     public string[]? Languages { get; set; }
     public string[]? Furryprefs { get; set; }
     public string[]? Roles { get; set; }
+}
+
+public class BookmarkRequest
+{
+    public string CharacterName { get; set; } = string.Empty;
 }

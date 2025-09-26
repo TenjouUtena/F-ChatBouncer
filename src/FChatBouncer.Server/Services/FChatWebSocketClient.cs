@@ -654,6 +654,24 @@ public class FChatWebSocketClient : IDisposable
         return _bookmarksWithStatus.Values.ToList();
     }
 
+    public FChatCharacter? GetOnlineCharacter(string characterName)
+    {
+        if (string.IsNullOrEmpty(_username))
+        {
+            _logger.LogError("Cannot get online character: username not set");
+            throw new InvalidOperationException("Credentials not set. Call ConnectAsync first.");
+        }
+
+        if (_onlineCharactersCache.TryGetValue(characterName, out var onlineCharacter))
+        {
+            _logger.LogDebug("Found online character: {CharacterName} with status: {Status}", characterName, onlineCharacter.Status);
+            return onlineCharacter;
+        }
+
+        _logger.LogDebug("Character {CharacterName} not found in online characters cache", characterName);
+        return null;
+    }
+
     public Dictionary<string, string> GetFriendGenders()
     {
         if (string.IsNullOrEmpty(_username))
@@ -1322,6 +1340,156 @@ public class FChatWebSocketClient : IDisposable
 
         var proData = new { character = characterName };
         await SendCommandAsync("PRO", proData);
+    }
+
+    public async Task<bool> AddBookmarkAsync(string characterName)
+    {
+        if (string.IsNullOrEmpty(_ticket) || string.IsNullOrEmpty(_username))
+        {
+            _logger.LogError("Cannot add bookmark: No valid ticket or username available");
+            return false;
+        }
+
+        try
+        {
+            _logger.LogInformation("Adding bookmark for character: {CharacterName}", characterName);
+
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+            var bookmarkData = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("account", _username),
+                new KeyValuePair<string, string>("ticket", _ticket),
+                new KeyValuePair<string, string>("name", characterName)
+            });
+
+            var response = await httpClient.PostAsync("https://www.f-list.net/json/api/bookmark-add.php", bookmarkData);
+            var content = await response.Content.ReadAsStringAsync();
+
+            _logger.LogDebug("Bookmark add response: {StatusCode}, Content: {Content}", response.StatusCode, content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to add bookmark: {StatusCode}, {Content}", response.StatusCode, content);
+                return false;
+            }
+
+            var bookmarkResponse = JsonSerializer.Deserialize<JsonElement>(content);
+            
+            if (bookmarkResponse.TryGetProperty("error", out var errorElement))
+            {
+                var errorMessage = errorElement.GetString();
+                if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    _logger.LogError("F-List API error adding bookmark: {Error}", errorMessage);
+                    return false;
+                }
+            }
+
+            // Add to local bookmarks list
+            if (!_bookmarksList.Contains(characterName))
+            {
+                _bookmarksList.Add(characterName);
+                _logger.LogInformation("Successfully added bookmark: {CharacterName}", characterName);
+                
+                // Add to friends list as well (bookmarks are automatically friends)
+                if (!_friendsList.Contains(characterName))
+                {
+                    _friendsList.Add(characterName);
+                    _logger.LogInformation("Added {CharacterName} to friends list as part of bookmark", characterName);
+                }
+                
+                // Create initial bookmark entry with offline status (will be updated when profile data comes in)
+                if (!_bookmarksWithStatus.ContainsKey(characterName))
+                {
+                    _bookmarksWithStatus[characterName] = new Friend
+                    {
+                        Name = characterName,
+                        IsOnline = false,
+                        Status = "offline",
+                        LastSeen = DateTime.UtcNow,
+                        Gender = null
+                    };
+                    _logger.LogInformation("Created initial bookmark entry for {CharacterName}", characterName);
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error adding bookmark for character: {CharacterName}", characterName);
+            return false;
+        }
+    }
+
+    public async Task<bool> RemoveBookmarkAsync(string characterName)
+    {
+        if (string.IsNullOrEmpty(_ticket) || string.IsNullOrEmpty(_username))
+        {
+            _logger.LogError("Cannot remove bookmark: No valid ticket or username available");
+            return false;
+        }
+
+        try
+        {
+            _logger.LogInformation("Removing bookmark for character: {CharacterName}", characterName);
+
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(30);
+
+            var bookmarkData = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("account", _username),
+                new KeyValuePair<string, string>("ticket", _ticket),
+                new KeyValuePair<string, string>("name", characterName)
+            });
+
+            var response = await httpClient.PostAsync("https://www.f-list.net/json/api/bookmark-remove.php", bookmarkData);
+            var content = await response.Content.ReadAsStringAsync();
+
+            _logger.LogDebug("Bookmark remove response: {StatusCode}, Content: {Content}", response.StatusCode, content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to remove bookmark: {StatusCode}, {Content}", response.StatusCode, content);
+                return false;
+            }
+
+            var bookmarkResponse = JsonSerializer.Deserialize<JsonElement>(content);
+            
+            if (bookmarkResponse.TryGetProperty("error", out var errorElement))
+            {
+                var errorMessage = errorElement.GetString();
+                if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    _logger.LogError("F-List API error removing bookmark: {Error}", errorMessage);
+                    return false;
+                }
+            }
+
+            // Remove from local bookmarks list
+            if (_bookmarksList.Contains(characterName))
+            {
+                _bookmarksList.Remove(characterName);
+                _logger.LogInformation("Successfully removed bookmark: {CharacterName}", characterName);
+                
+                // Remove from friends list as well (bookmarks are automatically friends)
+                if (_friendsList.Contains(characterName))
+                {
+                    _friendsList.Remove(characterName);
+                    _logger.LogInformation("Removed {CharacterName} from friends list as part of bookmark removal", characterName);
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing bookmark for character: {CharacterName}", characterName);
+            return false;
+        }
     }
 
     private async Task SendCommandAsync(string command, object data)

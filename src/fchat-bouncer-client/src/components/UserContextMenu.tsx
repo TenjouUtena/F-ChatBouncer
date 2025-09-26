@@ -7,6 +7,9 @@ interface UserContextMenuProps {
   position: { x: number; y: number };
   onOpenPM: (username: string) => void;
   onOpenProfile: (username: string) => void;
+  onAddBookmark?: (username: string) => void;
+  onRemoveBookmark?: (username: string) => void;
+  isBookmarked?: boolean;
   onClose: () => void;
 }
 
@@ -15,6 +18,9 @@ export default function UserContextMenu({
   position,
   onOpenPM,
   onOpenProfile,
+  onAddBookmark,
+  onRemoveBookmark,
+  isBookmarked = false,
   onClose
 }: UserContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -83,6 +89,16 @@ export default function UserContextMenu({
     onClose();
   };
 
+  const handleAddBookmarkClick = () => {
+    onAddBookmark?.(username);
+    onClose();
+  };
+
+  const handleRemoveBookmarkClick = () => {
+    onRemoveBookmark?.(username);
+    onClose();
+  };
+
   return (
     <div
       ref={menuRef}
@@ -111,6 +127,25 @@ export default function UserContextMenu({
         <span className="mr-3">👤</span>
         View Profile
       </button>
+
+      {/* Bookmark options */}
+      {isBookmarked ? (
+        <button
+          onClick={handleRemoveBookmarkClick}
+          className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors flex items-center"
+        >
+          <span className="mr-3">📖</span>
+          Remove Bookmark
+        </button>
+      ) : (
+        <button
+          onClick={handleAddBookmarkClick}
+          className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors flex items-center"
+        >
+          <span className="mr-3">🔖</span>
+          Add Bookmark
+        </button>
+      )}
     </div>
   );
 }

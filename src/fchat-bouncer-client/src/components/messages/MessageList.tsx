@@ -9,6 +9,9 @@ import MessageComponent from './MessageComponent';
 import UserContextMenu from '../UserContextMenu';
 import { useLazyMessages } from '@/hooks/useLazyMessages';
 import { useCharacterStore } from '@/stores/characterStore';
+import { useFriendsStore } from '@/stores/friendsStore';
+import { useAuthStore } from '@/stores/authStore';
+import { api } from '@/lib/api';
 
 interface MessageListRef {
   scrollToBottom: () => void;
@@ -38,6 +41,8 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   } | null>(null);
 
   const { activeCharacter } = useCharacterStore();
+  const { bookmarks, addBookmark, removeBookmark } = useFriendsStore();
+  const { token } = useAuthStore();
   
   // Create fallback ref for when lazy loading is not used
   const fallbackRef = useRef<HTMLDivElement | null>(null);
@@ -135,6 +140,37 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   const handleCloseContextMenu = useCallback(() => {
     setUserContextMenu(null);
   }, []);
+
+  // Handle bookmark actions
+  const handleAddBookmark = useCallback(async (username: string) => {
+    if (!token) {
+      console.error('No authentication token available');
+      return;
+    }
+
+    try {
+      await api.addBookmark(token, username);
+      addBookmark(username);
+      console.log('Bookmark added for:', username);
+    } catch (error) {
+      console.error('Error adding bookmark:', error);
+    }
+  }, [token, addBookmark]);
+
+  const handleRemoveBookmark = useCallback(async (username: string) => {
+    if (!token) {
+      console.error('No authentication token available');
+      return;
+    }
+
+    try {
+      await api.removeBookmark(token, username);
+      removeBookmark(username);
+      console.log('Bookmark removed for:', username);
+    } catch (error) {
+      console.error('Error removing bookmark:', error);
+    }
+  }, [token, removeBookmark]);
 
   // Scroll functions
   React.useImperativeHandle(ref, () => ({
@@ -431,6 +467,9 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
             position={userContextMenu.position}
             onOpenPM={handleOpenPM}
             onOpenProfile={handleOpenProfile}
+            onAddBookmark={handleAddBookmark}
+            onRemoveBookmark={handleRemoveBookmark}
+            isBookmarked={bookmarks.includes(userContextMenu.username)}
             onClose={handleCloseContextMenu}
           />
         )}

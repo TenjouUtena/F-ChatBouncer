@@ -107,6 +107,13 @@ export interface ProfileReceivedEvent {
   characterName: string;
   profileData: ProfileData | string;
   message: string;
+  requestingCharacter?: string;
+  onlineStatus?: {
+    isOnline: boolean;
+    status: string;
+    gender?: string;
+    lastSeen: string;
+  };
 }
 
 export interface ProfileResponse {
@@ -145,6 +152,8 @@ export interface FriendsStore extends FriendsState {
   setLoading: (loading: boolean) => void;
   deduplicateFriends: (friends: Friend[]) => Friend[];
   isFriendOrBookmark: (name: string) => boolean;
+  addBookmark: (name: string) => void;
+  removeBookmark: (name: string) => void;
 }
 
 export interface SearchResult {

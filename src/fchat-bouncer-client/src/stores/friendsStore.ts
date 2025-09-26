@@ -108,6 +108,44 @@ export const useFriendsStore = create<FriendsStore>()(
         return state.friends.some(f => f.name === name) || 
                state.bookmarksWithStatus.some(b => b.name === name);
       },
+
+      // Bookmark management
+      addBookmark: (name: string) => {
+        set((state) => {
+          if (!state.bookmarks.includes(name)) {
+            // Add to bookmarks
+            const newBookmarks = [...state.bookmarks, name];
+            
+            // Add to friends list as well (bookmarks are automatically friends)
+            const isAlreadyFriend = state.friends.some(f => f.name === name);
+            const newFriends = isAlreadyFriend ? state.friends : [
+              ...state.friends,
+              {
+                name,
+                status: 'offline' as const,
+                isOnline: false,
+                lastSeen: new Date().toISOString(),
+                gender: undefined
+              }
+            ];
+            
+            return { 
+              bookmarks: newBookmarks,
+              friends: newFriends
+            };
+          }
+          return state;
+        });
+      },
+
+      removeBookmark: (name: string) => {
+        set((state) => ({
+          bookmarks: state.bookmarks.filter(bookmark => bookmark !== name),
+          bookmarksWithStatus: state.bookmarksWithStatus.filter(bookmark => bookmark.name !== name),
+          // Remove from friends list as well (bookmarks are automatically friends)
+          friends: state.friends.filter(friend => friend.name !== name)
+        }));
+      },
     }),
     {
       name: 'friends-storage',
