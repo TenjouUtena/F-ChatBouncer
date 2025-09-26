@@ -12,6 +12,8 @@ public class ProfileService : IProfileService
     private readonly BouncerDbContext _context;
     private readonly IFChatService _fChatService;
     private readonly ICharacterService _characterService;
+    private readonly IMemoService _memoService;
+    private readonly IFListCharacterDataService _characterDataService;
     private readonly ILogger<ProfileService> _logger;
     private readonly IProfileRateLimiter _rateLimiter;
     private readonly ConcurrentDictionary<string, Task> _pendingRequests = new();
@@ -20,12 +22,16 @@ public class ProfileService : IProfileService
         BouncerDbContext context,
         IFChatService fChatService,
         ICharacterService characterService,
+        IMemoService memoService,
+        IFListCharacterDataService characterDataService,
         ILogger<ProfileService> logger,
         IProfileRateLimiter rateLimiter)
     {
         _context = context;
         _fChatService = fChatService;
         _characterService = characterService;
+        _memoService = memoService;
+        _characterDataService = characterDataService;
         _logger = logger;
         _rateLimiter = rateLimiter;
     }
@@ -120,6 +126,20 @@ public class ProfileService : IProfileService
 
             _logger.LogInformation("Saved structured profile for character {CharacterName} (User: {UserId}): {Summary}",
                 profileData.CharacterName, userId, profileData.GetSummary());
+
+            // Refresh memo data when profile is updated
+            //_ = Task.Run(async () =>
+            //{
+            //    try
+            //    {
+            //        await _memoService.RefreshMemoAsync(userId, profileData.CharacterName);
+            //    }
+            //    catch (Exception ex)
+            //    {
+            //        _logger.LogWarning(ex, "Failed to refresh memo for character {CharacterName} (User: {UserId})",
+            //            profileData.CharacterName, userId);
+            //    }
+            //});
         }
         catch (Exception ex)
         {
@@ -269,7 +289,7 @@ public class ProfileService : IProfileService
             _rateLimiter.RecordRequest(userId, characterName);
 
             // Create a new task for this request
-            var requestTask = _fChatService.RequestProfileAsync(userId, characterName);
+            var requestTask = RequestProfileWithFallbackAsync(userId, characterName);
             
             // Store the task to prevent duplicate requests
             _pendingRequests.TryAdd(requestKey, requestTask);
@@ -291,6 +311,196 @@ public class ProfileService : IProfileService
             _pendingRequests.TryRemove(requestKey, out _);
             _logger.LogError(ex, "Failed to request profile for character {CharacterName} (User: {UserId})", characterName, userId);
             throw;
+        }
+    }
+
+    private async Task RequestProfileWithFallbackAsync(string userId, string characterName)
+    {
+        try
+        {
+            // Try F-List API first using the active character's ticket
+            try
+            {
+                _logger.LogInformation("Attempting to fetch profile for {CharacterName} (User: {UserId}) using F-List API", 
+                    characterName, userId);
+                
+                // Get the active character for this user to access their ticket
+                var activeCharacter = await _characterService.GetActiveCharacterAsync(userId);
+                if (activeCharacter == null)
+                {
+                    _logger.LogInformation("No active character for user {UserId}, falling back to PRO/PRD commands", userId);
+                    await _fChatService.RequestProfileAsync(userId, characterName);
+                    return;
+                }
+
+                // Get the ticket and username from the WebSocket client
+                var ticket = await _fChatService.GetTicketAsync(userId, activeCharacter.Name);
+                var account = await _fChatService.GetUsernameAsync(userId, activeCharacter.Name);
+                
+                if (string.IsNullOrEmpty(ticket) || string.IsNullOrEmpty(account))
+                {
+                    _logger.LogInformation("No F-Chat ticket or account available for active character {ActiveCharacter} (User: {UserId}), falling back to PRO/PRD commands", 
+                        activeCharacter, userId);
+                    await _fChatService.RequestProfileAsync(userId, characterName);
+                    return;
+                }
+                
+                var characterData = await _characterDataService.GetCharacterDataWithMappingAsync(characterName, ticket, account);
+                
+                // Convert CharacterDataResponse to ProfileData
+                var profileData = ConvertCharacterDataToProfileData(characterData);
+                
+                // Save the structured profile data
+                await SaveStructuredProfileAsync(userId, profileData);
+                
+                _logger.LogInformation("Successfully fetched and saved profile for {CharacterName} (User: {UserId}) using F-List API: {Summary}", 
+                    characterName, userId, profileData.GetSummary());
+                
+                return;
+            }
+            catch (Exception apiEx)
+            {
+                _logger.LogWarning(apiEx, "F-List API failed for {CharacterName} (User: {UserId}), falling back to PRO/PRD commands", 
+                    characterName, userId);
+                
+                // Fall back to PRO/PRD commands
+                await _fChatService.RequestProfileAsync(userId, characterName);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Both F-List API and PRO/PRD commands failed for {CharacterName} (User: {UserId})", 
+                characterName, userId);
+            throw;
+        }
+    }
+
+    private ProfileData ConvertCharacterDataToProfileData(CharacterDataResponse characterData)
+    {
+        var profileData = new ProfileData
+        {
+            CharacterName = characterData.Name,
+            Timestamp = DateTime.UtcNow
+        };
+
+        // Convert infotags to info dictionary
+        foreach (var infotag in characterData.Infotags)
+        {
+            if (!string.IsNullOrEmpty(infotag.Value))
+            {
+                profileData.Info[infotag.Key] = infotag.Value;
+            }
+        }
+
+        // Convert kinks to info dictionary with kink_ prefix
+        foreach (var kink in characterData.Kinks)
+        {
+            if (!string.IsNullOrEmpty(kink.Value))
+            {
+                profileData.Info[$"kink_{kink.Key}"] = kink.Value;
+            }
+        }
+
+        // Extract gender from the profile data
+        profileData.ExtractGender();
+
+        return profileData;
+    }
+
+    public async Task<ProfileData?> GetCharacterDataAsync(string userId, string characterName)
+    {
+        try
+        {
+            _logger.LogInformation("Getting character data for {CharacterName} (User: {UserId})", characterName, userId);
+
+            // Get the active character name
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            if (string.IsNullOrEmpty(activeCharacter))
+            {
+                _logger.LogWarning("No active character found for user {UserId}", userId);
+                return null;
+            }
+
+            // Get the WebSocket client for the active character
+            var characterConnection = await _fChatService.GetCharacterConnectionAsync(userId, activeCharacter);
+            if (characterConnection == null)
+            {
+                _logger.LogWarning("No character connection found for user {UserId}, character {ActiveCharacter}", userId, activeCharacter);
+                return null;
+            }
+
+            // Get the WebSocket client from FChatService
+            var client = await GetWebSocketClientAsync(userId, activeCharacter);
+            if (client == null)
+            {
+                _logger.LogWarning("No WebSocket client found for user {UserId}, character {ActiveCharacter}", userId, activeCharacter);
+                return null;
+            }
+
+            // Get the ticket and username from the active WebSocket connection
+            var ticket = client.GetTicket();
+            var account = client.GetUsername();
+            if (string.IsNullOrEmpty(ticket) || string.IsNullOrEmpty(account))
+            {
+                _logger.LogWarning("No valid ticket or account found for user {UserId}", userId);
+                return null;
+            }
+
+            // Check rate limiting
+            if (!await _rateLimiter.IsRequestAllowedAsync(userId, characterName))
+            {
+                var timeUntilNext = _rateLimiter.GetTimeUntilNextRequest(userId, characterName);
+                _logger.LogWarning("Character data request blocked by rate limiter for {CharacterName} (User: {UserId}). Next request allowed in {TimeUntilNext}", 
+                    characterName, userId, timeUntilNext);
+                throw new InvalidOperationException($"Rate limited. Next request allowed in {timeUntilNext.TotalSeconds:F0} seconds.");
+            }
+
+            // Record the request for rate limiting
+            _rateLimiter.RecordRequest(userId, characterName);
+
+            // Get character data from F-List API
+            var characterData = await _characterDataService.GetCharacterDataWithMappingAsync(characterName, ticket, account);
+
+            // Convert to ProfileData format
+            var profileData = _characterDataService.ConvertToProfileData(characterData);
+
+            // Save the profile data
+            await SaveStructuredProfileAsync(userId, profileData);
+
+            _logger.LogInformation("Successfully retrieved and saved character data for {CharacterName} (User: {UserId})", characterName, userId);
+
+            return profileData;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get character data for {CharacterName} (User: {UserId})", characterName, userId);
+            throw;
+        }
+    }
+
+    private Task<FChatWebSocketClient?> GetWebSocketClientAsync(string userId, string characterName)
+    {
+        try
+        {
+            // Use reflection to access the private _connections field from FChatService
+            var fChatServiceType = _fChatService.GetType();
+            var connectionsField = fChatServiceType.GetField("_connections", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            if (connectionsField?.GetValue(_fChatService) is Dictionary<string, Dictionary<string, FChatWebSocketClient>> connections)
+            {
+                if (connections.TryGetValue(userId, out var userConnections) &&
+                    userConnections.TryGetValue(characterName, out var client))
+                {
+                    return Task.FromResult<FChatWebSocketClient?>(client);
+                }
+            }
+
+            return Task.FromResult<FChatWebSocketClient?>(null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get WebSocket client for user {UserId}, character {CharacterName}", userId, characterName);
+            return Task.FromResult<FChatWebSocketClient?>(null);
         }
     }
 }

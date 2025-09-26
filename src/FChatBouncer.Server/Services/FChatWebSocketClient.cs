@@ -124,6 +124,11 @@ public class FChatWebSocketClient : IDisposable
         return _ticket;
     }
 
+    public string? GetUsername()
+    {
+        return _username;
+    }
+
     private async Task<bool> AuthenticateWithCharacterAsync(string characterName, string ticket)
     {
         try

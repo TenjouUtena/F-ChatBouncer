@@ -46,7 +46,7 @@ interface AuthStore extends AuthState {
   setRefreshToken: (refreshToken: string) => void;
   setAvailableCharacters: (characters: Character[]) => void;
   setChannelsSelected: (selected: boolean) => void;
-  setFriendsAndBookmarks: (friends: Friend[], bookmarks: string[], bookmarksWithStatus: Friend[]) => void;
+  setFriendsAndBookmarks: (friends: Friend[], bookmarks: string[], bookmarksWithStatus: Friend[]) => Promise<void>;
   refreshAccessToken: () => Promise<string | null>;
 }
 
@@ -108,11 +108,46 @@ export const useAuthStore = create<AuthStore>()(
         set({ areChannelsSelected: selected });
       },
 
-      setFriendsAndBookmarks: (friends: Friend[], bookmarks: string[], bookmarksWithStatus: Friend[]) => {
+      setFriendsAndBookmarks: async (friends: Friend[], bookmarks: string[], bookmarksWithStatus: Friend[]) => {
         // Update the friends store with the new data
         useFriendsStore.getState().setFriends(friends);
         useFriendsStore.getState().setBookmarks(bookmarks);
         useFriendsStore.getState().setBookmarksWithStatus(bookmarksWithStatus);
+
+        // Fetch memos for all friends in the background
+        const state = get();
+        if (state.token) {
+          const { updateFriendMemo } = useFriendsStore.getState();
+          
+          // Fetch memos for all friends
+          const memoPromises = friends.map(async (friend) => {
+            try {
+              const memoResponse = await api.getMemo(state.token!, friend.name);
+              if (memoResponse.hasMemo && memoResponse.memo) {
+                updateFriendMemo(friend.name, memoResponse.memo);
+              }
+            } catch (error) {
+              console.warn(`Failed to fetch memo for ${friend.name}:`, error);
+            }
+          });
+
+          // Also fetch memos for bookmarks with status
+          const bookmarkMemoPromises = bookmarksWithStatus.map(async (bookmark) => {
+            try {
+              const memoResponse = await api.getMemo(state.token!, bookmark.name);
+              if (memoResponse.hasMemo && memoResponse.memo) {
+                updateFriendMemo(bookmark.name, memoResponse.memo);
+              }
+            } catch (error) {
+              console.warn(`Failed to fetch memo for bookmark ${bookmark.name}:`, error);
+            }
+          });
+
+          // Execute all memo fetches in parallel
+          Promise.all([...memoPromises, ...bookmarkMemoPromises]).catch(error => {
+            console.warn('Some memo fetches failed:', error);
+          });
+        }
       },
 
       refreshAccessToken: async () => {

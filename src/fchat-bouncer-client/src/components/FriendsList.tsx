@@ -3,12 +3,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useChatStore } from '@/stores/chatStore';
 import { Friend } from '@/types';
 import { ChevronDownIcon, ChevronRightIcon, UserIcon, BookmarkIcon } from '@heroicons/react/24/outline';
 import Character, { CharacterData, getCharacterStatusColor, getCharacterStatusIcon } from './Character';
 import { getCharacterColor } from '@/lib/genderColors';
 import { bbcodeToHtml } from '@/lib/bbcode';
 import UserContextMenu from './UserContextMenu';
+import ProfileModal from './ProfileModal';
 import { api } from '@/lib/api';
 
 interface FriendsListProps {
@@ -19,12 +21,15 @@ interface FriendsListProps {
 const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) => {
   const { friends, bookmarks, bookmarksWithStatus, isCollapsed, toggleCollapsed, isLoading, deduplicateFriends, addBookmark, removeBookmark } = useFriendsStore();
   const { token } = useAuthStore();
+  const { getProfile } = useChatStore();
   const [hoveredFriend, setHoveredFriend] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [userContextMenu, setUserContextMenu] = useState<{
     username: string;
     position: { x: number; y: number };
   } | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfileCharacter, setSelectedProfileCharacter] = useState<string>('');
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Deduplicate friends by name to prevent React key conflicts
@@ -91,6 +96,16 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
   const handleOpenProfile = (username: string) => {
     const profileUrl = `https://www.f-list.net/c/${encodeURIComponent(username.toLowerCase())}/`;
     window.open(profileUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleOpenInternalProfile = (username: string) => {
+    setSelectedProfileCharacter(username);
+    setShowProfileModal(true);
+  };
+
+  const handleCloseProfileModal = () => {
+    setShowProfileModal(false);
+    setSelectedProfileCharacter('');
   };
 
   const handleAddBookmark = async (username: string) => {
@@ -284,6 +299,12 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
                     Last seen: {formatLastSeen(friend.lastSeen)}
                   </div>
                 )}
+                {friend.memo && (
+                  <div className="text-gray-300 mt-2 pt-2 border-t border-gray-700">
+                    <div className="text-xs text-gray-400 mb-1">Memo:</div>
+                    <div className="text-xs italic text-blue-300">{friend.memo}</div>
+                  </div>
+                )}
               </div>
             );
           })()}
@@ -297,12 +318,21 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
           position={userContextMenu.position}
           onOpenPM={handleOpenPM}
           onOpenProfile={handleOpenProfile}
+          onOpenInternalProfile={handleOpenInternalProfile}
           onAddBookmark={handleAddBookmark}
           onRemoveBookmark={handleRemoveBookmark}
           isBookmarked={bookmarks.includes(userContextMenu.username)}
           onClose={handleCloseContextMenu}
         />
       )}
+
+      {/* Profile Modal */}
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={handleCloseProfileModal}
+        profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
+        characterName={selectedProfileCharacter}
+      />
     </div>
   );
 };

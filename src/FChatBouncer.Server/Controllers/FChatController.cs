@@ -13,15 +13,18 @@ public class FChatController : ControllerBase
 {
     private readonly IFChatService _fChatService;
     private readonly IProfileService _profileService;
+    private readonly IMemoService _memoService;
     private readonly ILogger<FChatController> _logger;
 
     public FChatController(
         IFChatService fChatService,
         IProfileService profileService,
+        IMemoService memoService,
         ILogger<FChatController> logger)
     {
         _fChatService = fChatService;
         _profileService = profileService;
+        _memoService = memoService;
         _logger = logger;
     }
 
@@ -512,6 +515,61 @@ public class FChatController : ControllerBase
         }
     }
 
+    [HttpGet("memo/{characterName}")]
+    public async Task<ActionResult<MemoResponse>> GetMemo(string characterName)
+    {
+        try
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId == null)
+            {
+                return Unauthorized();
+            }
+
+            _logger.LogDebug("Memo request for character {CharacterName} (User: {UserId})", characterName, userId);
+
+            var memoData = await _memoService.GetMemoAsync(userId, characterName);
+            
+            return Ok(new MemoResponse
+            {
+                CharacterName = characterName,
+                Memo = memoData?.Note,
+                HasMemo = !string.IsNullOrEmpty(memoData?.Note)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get memo for character {CharacterName} (User: {UserId})",
+                characterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            return StatusCode(500, new { message = "Failed to get memo" });
+        }
+    }
+
+    [HttpPost("memo/{characterName}/refresh")]
+    public async Task<ActionResult> RefreshMemo(string characterName)
+    {
+        try
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId == null)
+            {
+                return Unauthorized();
+            }
+
+            _logger.LogInformation("Refreshing memo for character {CharacterName} (User: {UserId})", characterName, userId);
+
+            await _memoService.RefreshMemoAsync(userId, characterName);
+            
+            return Ok(new { message = "Memo refreshed successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to refresh memo for character {CharacterName} (User: {UserId})",
+                characterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            return StatusCode(500, new { message = "Failed to refresh memo" });
+        }
+    }
+
 }
 
 // DTOs
@@ -604,4 +662,11 @@ public class SearchRequest
 public class BookmarkRequest
 {
     public string CharacterName { get; set; } = string.Empty;
+}
+
+public class MemoResponse
+{
+    public string CharacterName { get; set; } = string.Empty;
+    public string? Memo { get; set; }
+    public bool HasMemo { get; set; }
 }

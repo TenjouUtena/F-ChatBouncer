@@ -771,6 +771,7 @@ export const useChatStore = create<ChatStore>()(
         const state = get();
         
         if (state.profileRequestStatus[characterName] === 'requesting') {
+          console.log(`Profile request already in-flight for ${characterName}`);
           return null;
         }
 

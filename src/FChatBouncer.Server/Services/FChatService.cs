@@ -460,6 +460,28 @@ public class FChatService : IFChatService
         await RequestProfileAsync(userId, characterName, activeCharacter);
     }
 
+    public Task<string?> GetTicketAsync(string userId, string characterName)
+    {
+        if (_connections.TryGetValue(userId, out var userConnections) &&
+            userConnections.TryGetValue(characterName, out var client))
+        {
+            return Task.FromResult(client.GetTicket());
+        }
+        
+        return Task.FromResult<string?>(null);
+    }
+
+    public Task<string?> GetUsernameAsync(string userId, string characterName)
+    {
+        if (_connections.TryGetValue(userId, out var userConnections) &&
+            userConnections.TryGetValue(characterName, out var client))
+        {
+            return Task.FromResult(client.GetUsername());
+        }
+        
+        return Task.FromResult<string?>(null);
+    }
+
     public async Task<List<ChannelCharacter>> GetChannelCharactersAsync(string userId, string characterName, string channelId)
     {
         _logger.LogInformation("Getting character list for channel {ChannelId} from character {CharacterName} of user {UserId}", channelId, characterName, userId);

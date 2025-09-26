@@ -7,6 +7,7 @@ interface UserContextMenuProps {
   position: { x: number; y: number };
   onOpenPM: (username: string) => void;
   onOpenProfile: (username: string) => void;
+  onOpenInternalProfile: (username: string) => void;
   onAddBookmark?: (username: string) => void;
   onRemoveBookmark?: (username: string) => void;
   isBookmarked?: boolean;
@@ -18,6 +19,7 @@ export default function UserContextMenu({
   position,
   onOpenPM,
   onOpenProfile,
+  onOpenInternalProfile,
   onAddBookmark,
   onRemoveBookmark,
   isBookmarked = false,
@@ -79,6 +81,12 @@ export default function UserContextMenu({
     };
   }, [onClose, position]);
 
+  const handleProfileClickInternal = () => {
+    //onOpenProfile(username);
+    onOpenInternalProfile(username);
+    onClose();
+  };
+
   const handlePMClick = () => {
     onOpenPM(username);
     onClose();
@@ -119,14 +127,22 @@ export default function UserContextMenu({
         <span className="mr-3">💬</span>
         Send Private Message
       </button>
+      <button
+        onClick={handleProfileClickInternal}
+        className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors flex items-center"
+      >
+        <span className="mr-3">👤</span>
+        View Profile
+      </button>
 
       <button
         onClick={handleProfileClick}
         className="w-full text-left px-3 py-2 text-sm text-white hover:bg-gray-700 transition-colors flex items-center"
       >
         <span className="mr-3">👤</span>
-        View Profile
+        View Profile (External)
       </button>
+
 
       {/* Bookmark options */}
       {isBookmarked ? (

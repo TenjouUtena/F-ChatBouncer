@@ -857,9 +857,16 @@ export default function ChatInterface() {
             )}
           </div>
 
-          {/* Character List Sidebar */}
+          {/* Character List Sidebar - Hidden on mobile, shown on desktop */}
           {selectedChannel && !selectedChannel.startsWith('PRI-') && (
-            <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col h-full p-4">
+            <div className="hidden xl:flex w-80 bg-gray-800 border-l border-gray-700 flex-col h-full p-4">
+              <ChannelCharacterList channelId={selectedChannel} onOpenPM={handleOpenPM} />
+            </div>
+          )}
+
+          {/* Mobile Character List - Shown as dropdown on mobile */}
+          {selectedChannel && !selectedChannel.startsWith('PRI-') && (
+            <div className="xl:hidden">
               <ChannelCharacterList channelId={selectedChannel} onOpenPM={handleOpenPM} />
             </div>
           )}

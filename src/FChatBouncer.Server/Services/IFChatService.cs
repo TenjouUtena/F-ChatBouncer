@@ -23,6 +23,8 @@ public interface IFChatService
     Task SendPRIMessageAsync(string userId, string v, string content);
     Task ProcessQueuedMessagesAsync(string userId);
     Task RequestProfileAsync(string userId, string characterName);
+    Task<string?> GetTicketAsync(string userId, string characterName);
+    Task<string?> GetUsernameAsync(string userId, string characterName);
     Task SendTypingNotificationAsync(string userId, string characterName, string recipient, string status);
 
     // New multi-character methods

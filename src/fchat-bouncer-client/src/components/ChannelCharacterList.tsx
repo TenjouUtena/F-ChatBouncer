@@ -1,11 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { signalRService } from '@/lib/signalr';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useChatStore } from '@/stores/chatStore';
 import Character, { CharacterData } from './Character';
 import UserContextMenu from './UserContextMenu';
+import ProfileModal from './ProfileModal';
 import { api } from '@/lib/api';
 
 interface ChannelCharacter {
@@ -26,6 +28,7 @@ interface ChannelCharacterListProps {
 export default function ChannelCharacterList({ channelId, className = '', onOpenPM }: ChannelCharacterListProps) {
   const { bookmarks, addBookmark, removeBookmark } = useFriendsStore();
   const { token } = useAuthStore();
+  const { getProfile } = useChatStore();
   const [characters, setCharacters] = useState<ChannelCharacter[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -36,6 +39,15 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
     username: string;
     position: { x: number; y: number };
   } | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfileCharacter, setSelectedProfileCharacter] = useState<string>('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Determine if we should show the expanded list based on screen width and hover state
+  // On mobile (xl breakpoint = 1280px), show as dropdown on hover/click
+  // On desktop, show as sidebar
+  const isMobile = screenWidth < 1280;
+  const shouldShowExpanded = !isMobile || (isMobile && (isExpanded || isHovered));
 
   useEffect(() => {
     if (channelId && isExpanded) {
@@ -52,6 +64,20 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Handle click outside to close dropdown on mobile
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (isMobile && isExpanded && dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsExpanded(false);
+      }
+    };
+
+    if (isMobile && isExpanded) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isMobile, isExpanded]);
 
   useEffect(() => {
     // Listen for character join/leave events
@@ -166,9 +192,6 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
     isOnline: character.status !== 'offline'
   });
 
-  // Determine if we should show the expanded list based on screen width and hover state
-  const shouldShowExpanded = screenWidth >= 1200 || (screenWidth < 1200 && (isExpanded || isHovered));
-
   // Context menu handlers
   const handleCharacterRightClick = (characterName: string, event: React.MouseEvent) => {
     setUserContextMenu({
@@ -186,6 +209,16 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
   const handleOpenProfile = (username: string) => {
     const profileUrl = `https://www.f-list.net/c/${encodeURIComponent(username.toLowerCase())}/`;
     window.open(profileUrl, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleOpenInternalProfile = (username: string) => {
+    setSelectedProfileCharacter(username);
+    setShowProfileModal(true);
+  };
+
+  const handleCloseProfileModal = () => {
+    setShowProfileModal(false);
+    setSelectedProfileCharacter('');
   };
 
   const handleAddBookmark = async (username: string) => {
@@ -224,45 +257,57 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
 
   return (
     <div 
-      className={`bg-gray-800 border border-gray-700 rounded-lg flex flex-col h-full ${className} ${
-        screenWidth < 1200 ? 'relative' : ''
+      ref={dropdownRef}
+      className={`${isMobile ? 'fixed bottom-4 right-4 z-40' : 'bg-gray-800 border border-gray-700 rounded-lg flex flex-col h-full'} ${className} ${
+        isMobile ? 'relative' : ''
       }`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div 
-        className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-700 transition-colors flex-shrink-0"
+        className={`${isMobile ? 'bg-indigo-600 hover:bg-indigo-700 text-white rounded-full p-3 shadow-lg cursor-pointer transition-colors' : 'flex items-center justify-between p-3 cursor-pointer hover:bg-gray-700 transition-colors flex-shrink-0'}`}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div className="flex items-center">
-          <span className="text-sm font-medium text-gray-300">
-            👥 Channel Members ({characters.length})
-          </span>
-        </div>
-        <div className="flex items-center space-x-2">
-          {isExpanded && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                refreshCharacters();
-              }}
-              disabled={isLoading}
-              className="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
-              title="Refresh character list"
-            >
-              {isLoading ? '⟳' : '↻'}
-            </button>
-          )}
-          <span className="text-gray-400 text-sm">
-            {isExpanded ? '▼' : '▶'}
-          </span>
-        </div>
+        {isMobile ? (
+          <div className="flex items-center">
+            <span className="text-lg">👥</span>
+            {characters.length > 0 && (
+              <span className="ml-2 bg-white text-indigo-600 text-xs rounded-full px-2 py-0.5 font-medium">
+                {characters.length}
+              </span>
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center">
+              <span className="text-sm font-medium text-gray-300">
+                👥 Channel Members ({characters.length})
+              </span>
+            </div>
+            <div className="flex items-center space-x-2">
+              {isExpanded && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    refreshCharacters();
+                  }}
+                  disabled={isLoading}
+                  className="text-xs text-gray-400 hover:text-gray-200 disabled:opacity-50"
+                  title="Refresh character list"
+                >
+                  {isLoading ? '⟳' : '↻'}
+                </button>
+              )}
+              <span className="text-gray-400 text-sm">
+                {isExpanded ? '▼' : '▶'}
+              </span>
+            </div>
+          </>
+        )}
       </div>
 
       {shouldShowExpanded && (
-        <div className={`border-t border-gray-700 flex-1 overflow-y-auto ${
-          screenWidth < 1200 ? 'absolute top-full left-0 right-0 z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-lg max-h-96' : ''
-        }`}>
+        <div className={`${isMobile ? 'absolute bottom-full right-0 mb-2 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl max-h-96 overflow-y-auto' : 'border-t border-gray-700 flex-1 overflow-y-auto'}`}>
           {error && (
             <div className="p-3 text-red-400 text-sm">
               {error}
@@ -301,12 +346,21 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
           position={userContextMenu.position}
           onOpenPM={handleOpenPM}
           onOpenProfile={handleOpenProfile}
+          onOpenInternalProfile={handleOpenInternalProfile}
           onAddBookmark={handleAddBookmark}
           onRemoveBookmark={handleRemoveBookmark}
           isBookmarked={bookmarks.includes(userContextMenu.username)}
           onClose={handleCloseContextMenu}
         />
       )}
+
+      {/* Profile Modal */}
+      <ProfileModal
+        isOpen={showProfileModal}
+        onClose={handleCloseProfileModal}
+        profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
+        characterName={selectedProfileCharacter}
+      />
     </div>
   );
 }

@@ -261,9 +261,19 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
 builder.Services.AddScoped<IProfileService, ProfileService>();
 builder.Services.AddScoped<ICharacterService, CharacterService>();
+builder.Services.AddScoped<IMemoService, MemoService>();
 builder.Services.AddSingleton<IFChatService, FChatService>();
 builder.Services.AddSingleton<IProfileRateLimiter, ProfileRateLimiter>();
 builder.Services.AddSingleton<TicketManager>();
+
+// HTTP Client for external API calls
+builder.Services.AddHttpClient<MemoService>();
+builder.Services.AddHttpClient<FListMappingService>();
+builder.Services.AddHttpClient<FListCharacterDataService>();
+
+// F-List API Services
+builder.Services.AddScoped<IFListMappingService, FListMappingService>();
+builder.Services.AddScoped<IFListCharacterDataService, FListCharacterDataService>();
 
 // CORS
 builder.Services.AddCors(options =>

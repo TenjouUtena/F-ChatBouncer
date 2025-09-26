@@ -109,6 +109,22 @@ export const useFriendsStore = create<FriendsStore>()(
                state.bookmarksWithStatus.some(b => b.name === name);
       },
 
+      // Update friend memo
+      updateFriendMemo: (name: string, memo?: string) => {
+        set((state) => ({
+          friends: state.friends.map((friend) =>
+            friend.name === name
+              ? { ...friend, memo }
+              : friend
+          ),
+          bookmarksWithStatus: state.bookmarksWithStatus.map((bookmark) =>
+            bookmark.name === name
+              ? { ...bookmark, memo }
+              : bookmark
+          ),
+        }));
+      },
+
       // Bookmark management
       addBookmark: (name: string) => {
         set((state) => {

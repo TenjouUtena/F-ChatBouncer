@@ -1,4 +1,4 @@
-import { LoginCredentials, User, Character, ProfileResponse, Friend, FChatCredentialsRequest } from '@/types';
+import { LoginCredentials, User, Character, ProfileResponse, Friend, FChatCredentialsRequest, MemoResponse } from '@/types';
 import { sanitizeCredentialsForLogging } from '@/lib/security';
 import { config } from '@/lib/config';
 
@@ -392,5 +392,24 @@ export const api = {
       },
     });
     return response.json();
+  },
+
+  // Memo API methods
+  async getMemo(token: string, characterName: string): Promise<MemoResponse> {
+    const response = await fetchWithError(`${API_BASE}/fchat/memo/${encodeURIComponent(characterName)}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+    return response.json();
+  },
+
+  async refreshMemo(token: string, characterName: string): Promise<void> {
+    await fetchWithError(`${API_BASE}/fchat/memo/${encodeURIComponent(characterName)}/refresh`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
   },
 };

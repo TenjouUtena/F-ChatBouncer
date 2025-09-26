@@ -7,10 +7,12 @@ import { filterMessagesByChannel, getDefaultMessageActions } from '@/lib/message
 import { getMessageTheme, messageStates } from '@/lib/messages/messageThemes';
 import MessageComponent from './MessageComponent';
 import UserContextMenu from '../UserContextMenu';
+import ProfileModal from '../ProfileModal';
 import { useLazyMessages } from '@/hooks/useLazyMessages';
 import { useCharacterStore } from '@/stores/characterStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
+import { useChatStore } from '@/stores/chatStore';
 import { api } from '@/lib/api';
 
 interface MessageListRef {
@@ -39,10 +41,13 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
     username: string;
     position: { x: number; y: number };
   } | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfileCharacter, setSelectedProfileCharacter] = useState<string>('');
 
   const { activeCharacter } = useCharacterStore();
   const { bookmarks, addBookmark, removeBookmark } = useFriendsStore();
   const { token } = useAuthStore();
+  const { getProfile } = useChatStore();
   
   // Create fallback ref for when lazy loading is not used
   const fallbackRef = useRef<HTMLDivElement | null>(null);
@@ -134,6 +139,16 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
     const profileUrl = `https://www.f-list.net/c/${encodeURIComponent(username.toLowerCase())}/`;
     console.log('Opening profile for:', username, 'URL:', profileUrl);
     window.open(profileUrl, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const handleOpenInternalProfile = useCallback((username: string) => {
+    setSelectedProfileCharacter(username);
+    setShowProfileModal(true);
+  }, []);
+
+  const handleCloseProfileModal = useCallback(() => {
+    setShowProfileModal(false);
+    setSelectedProfileCharacter('');
   }, []);
 
   // Close context menu
@@ -467,12 +482,21 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
             position={userContextMenu.position}
             onOpenPM={handleOpenPM}
             onOpenProfile={handleOpenProfile}
+            onOpenInternalProfile={handleOpenInternalProfile}
             onAddBookmark={handleAddBookmark}
             onRemoveBookmark={handleRemoveBookmark}
             isBookmarked={bookmarks.includes(userContextMenu.username)}
             onClose={handleCloseContextMenu}
           />
         )}
+
+        {/* Profile Modal */}
+        <ProfileModal
+          isOpen={showProfileModal}
+          onClose={handleCloseProfileModal}
+          profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
+          characterName={selectedProfileCharacter}
+        />
       </div>
     );
   }

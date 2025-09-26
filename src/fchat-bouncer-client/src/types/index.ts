@@ -131,6 +131,7 @@ export interface Friend {
   lastSeen?: string;
   isOnline: boolean;
   gender?: string;
+  memo?: string;
 }
 
 export interface FriendsState {
@@ -152,6 +153,7 @@ export interface FriendsStore extends FriendsState {
   setLoading: (loading: boolean) => void;
   deduplicateFriends: (friends: Friend[]) => Friend[];
   isFriendOrBookmark: (name: string) => boolean;
+  updateFriendMemo: (name: string, memo?: string) => void;
   addBookmark: (name: string) => void;
   removeBookmark: (name: string) => void;
 }
@@ -179,4 +181,10 @@ export interface SearchState {
   isLoading: boolean;
   isOpen: boolean;
   searchCriteria: SearchRequest;
+}
+
+export interface MemoResponse {
+  characterName: string;
+  memo?: string;
+  hasMemo: boolean;
 }

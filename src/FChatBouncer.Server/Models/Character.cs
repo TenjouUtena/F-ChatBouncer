@@ -77,6 +77,17 @@ public class Character
     public bool IsOnline { get; set; } = false;
 
     /// <summary>
+    /// User's memo/note for this character (from F-List)
+    /// </summary>
+    [MaxLength(1000)]
+    public string? Memo { get; set; }
+
+    /// <summary>
+    /// When the memo was last updated
+    /// </summary>
+    public DateTime? MemoLastUpdated { get; set; }
+
+    /// <summary>
     /// List of connections where this character has been seen
     /// </summary>
     public virtual ICollection<CharacterConnection> Connections { get; set; } = new List<CharacterConnection>();

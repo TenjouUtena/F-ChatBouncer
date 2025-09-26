@@ -123,7 +123,7 @@ export default function Home() {
               gender: friend.Gender || friend.gender
             }));
         
-        setFriendsAndBookmarks(friends, friendsResponse.bookmarks, friendsResponse.bookmarksWithStatus);
+        await setFriendsAndBookmarks(friends, friendsResponse.bookmarks, friendsResponse.bookmarksWithStatus);
         console.log('Loaded friends and bookmarks for restored character:', friends.length, 'friends,', friendsResponse.bookmarks.length, 'bookmarks');
       } catch (error) {
         console.error('Failed to load friends and bookmarks for restored character:', error);
@@ -376,7 +376,7 @@ export default function Home() {
               gender: friend.Gender || friend.gender
             }));
 
-              setFriendsAndBookmarks(friends, friendsResponse.bookmarks, friendsResponse.bookmarksWithStatus);
+              await setFriendsAndBookmarks(friends, friendsResponse.bookmarks, friendsResponse.bookmarksWithStatus);
               console.log('Loaded friends and bookmarks for restored character:', friends.length, 'friends,', friendsResponse.bookmarks.length, 'bookmarks');
             } catch (error) {
               console.error('Failed to load friends and bookmarks for restored character:', error);
