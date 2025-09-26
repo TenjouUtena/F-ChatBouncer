@@ -10,6 +10,7 @@ import { Channel } from '@/types';
 interface ChannelSelectionProps {
   onChannelsSelected: (channels: string[]) => Promise<void>;
   onSelectionChange?: (channels: string[]) => void; // For modal mode - called when selection changes
+  onBackToCharacterSelection?: () => void; // Callback to go back to character selection
   mode?: 'initial' | 'modal';
   title?: string;
   description?: string;
@@ -23,6 +24,7 @@ interface ChannelSelectionProps {
 export default function ChannelSelection({
   onChannelsSelected,
   onSelectionChange,
+  onBackToCharacterSelection,
   mode = 'initial',
   title,
   description,
@@ -255,6 +257,21 @@ export default function ChannelSelection({
             >
               Refresh
             </button>
+            
+            {mode === 'initial' && onBackToCharacterSelection && (
+              <div className="mt-4">
+                <button
+                  onClick={onBackToCharacterSelection}
+                  disabled={isLoading}
+                  className="px-6 py-3 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed focus:ring-offset-gray-900 flex items-center gap-2 mx-auto"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  Back to Character Selection
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -349,6 +366,18 @@ export default function ChannelSelection({
                 >
                   Clear Selection
                 </button>
+                {onBackToCharacterSelection && (
+                  <button
+                    onClick={onBackToCharacterSelection}
+                    disabled={isLoading}
+                    className="px-6 py-3 bg-gray-700 text-gray-300 rounded-md hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed focus:ring-offset-gray-900 flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                    Back to Character Selection
+                  </button>
+                )}
               </div>
             )}
           </div>

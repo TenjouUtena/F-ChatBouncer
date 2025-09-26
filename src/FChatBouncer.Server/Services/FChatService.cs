@@ -253,11 +253,45 @@ public class FChatService : IFChatService
             }).ToList();
 
             _logger.LogInformation("Returning {Count} characters from database for user {UserId}", characters.Count, userId);
+            
+            // Also try to get fresh characters from F-List API to ensure we have the complete list
+            try
+            {
+                var freshCharacters = await GetCharactersFromFListApiAsync(userId);
+                if (freshCharacters.Count > characters.Count)
+                {
+                    _logger.LogInformation("F-List API returned {FreshCount} characters vs {DbCount} from database. Using fresh list.", 
+                        freshCharacters.Count, characters.Count);
+                    return freshCharacters;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get fresh characters from F-List API, using database characters");
+            }
+            
             return characters;
         }
 
-        // If no database connections either, try to refresh connection
-        _logger.LogWarning("No character connections found in database for user {UserId}. Attempting to refresh connection...", userId);
+        // If no database connections either, try to get characters from F-List API using stored credentials
+        _logger.LogWarning("No character connections found in database for user {UserId}. Attempting to get characters from F-List API...", userId);
+        
+        try
+        {
+            var characters = await GetCharactersFromFListApiAsync(userId);
+            if (characters.Count > 0)
+            {
+                _logger.LogInformation("Successfully retrieved {Count} characters from F-List API for user {UserId}", characters.Count, userId);
+                return characters;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get characters from F-List API for user {UserId}", userId);
+        }
+
+        // Fallback: try to refresh connection
+        _logger.LogWarning("F-List API failed, attempting to refresh connection for user {UserId}...", userId);
         await RefreshUserConnectionAsync(userId);
         
         // Try one more time after refresh
@@ -290,6 +324,66 @@ public class FChatService : IFChatService
         // If still no characters, return empty list
         _logger.LogError("No characters found for user {UserId} even after refresh attempt", userId);
         return new List<FChatCharacter>();
+    }
+
+    private async Task<List<FChatCharacter>> GetCharactersFromFListApiAsync(string userId)
+    {
+        try
+        {
+            // Get user settings to retrieve F-Chat credentials
+            var settings = await ExecuteWithDbContext(async dbContext =>
+            {
+                return await dbContext.UserSettings
+                    .FirstOrDefaultAsync(us => us.UserId == userId);
+            });
+
+            if (settings?.FChatCredentialsEncrypted == null)
+            {
+                _logger.LogWarning("No F-Chat credentials found for user {UserId}", userId);
+                return new List<FChatCharacter>();
+            }
+
+            // Decode F-Chat credentials
+            var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
+            var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
+            var parts = credentials.Split(':');
+
+            if (parts.Length != 2)
+            {
+                _logger.LogError("Invalid credentials format for user {UserId}", userId);
+                return new List<FChatCharacter>();
+            }
+
+            var username = parts[0];
+            var password = parts[1];
+
+            _logger.LogInformation("Fetching characters from F-List API for user {UserId} with username {Username}", userId, username);
+
+            // Create a temporary client to get the ticket and extract characters
+            using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
+            var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
+            using var tempClient = new FChatWebSocketClient(tempLogger);
+            var success = await tempClient.ConnectAsync(username, password);
+            
+            if (!success)
+            {
+                _logger.LogError("Failed to connect to F-List API for user {UserId}", userId);
+                return new List<FChatCharacter>();
+            }
+
+            // Get characters from the temporary client
+            var characters = await tempClient.GetCharactersAsync();
+            
+            _logger.LogInformation("Retrieved {Count} characters from F-List API for user {UserId}: {CharacterNames}", 
+                characters.Count, userId, string.Join(", ", characters.Select(c => c.Name)));
+
+            return characters;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting characters from F-List API for user {UserId}", userId);
+            return new List<FChatCharacter>();
+        }
     }
 
     public async Task SelectCharacterAsync(string userId, string characterName)

@@ -30,7 +30,7 @@ export default function Home() {
     setToken
   } = useAuthStore();
   const { setConnected, setSelectedChannels, setJoinedChannels, mergeHistoryMessages, getLastMessageTime } = useChatStore();
-  const { activeCharacter, setActiveCharacter, addConnection } = useCharacterStore();
+  const { activeCharacter, setActiveCharacter, addConnection, clearActiveCharacter } = useCharacterStore();
   const { initialize, hasStoredCredentials, retrieveCredentials } = useCredentialsStore();
   const { updateFriendStatus, setFriendOnline, isFriendOrBookmark } = useFriendsStore();
   const [isLoading, setIsLoading] = useState(false);
@@ -492,6 +492,14 @@ export default function Home() {
     }
   };
 
+  const handleBackToCharacterSelection = () => {
+    console.log('Going back to character selection');
+    // Clear the active character to go back to character selection
+    clearActiveCharacter();
+    // Reset channels selected state
+    setChannelsSelected(false);
+  };
+
   if (isLoading || isAutoLogging) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -530,6 +538,7 @@ export default function Home() {
     return (
       <ChannelSelection
         onChannelsSelected={handleChannelsSelected}
+        onBackToCharacterSelection={handleBackToCharacterSelection}
       />
     );
   }
