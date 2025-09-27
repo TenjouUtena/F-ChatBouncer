@@ -26,6 +26,24 @@ public interface IFListCharacterDataService
     Task<CharacterDataResponse> GetCharacterDataWithMappingAsync(string characterName, string ticket, string account);
 
     /// <summary>
+    /// Get character data with automatic ticket renewal on expiration
+    /// </summary>
+    /// <param name="characterName">Name of the character to get data for</param>
+    /// <param name="account">F-Chat account username</param>
+    /// <param name="password">F-Chat account password</param>
+    /// <returns>Character data response</returns>
+    Task<CharacterDataResponse> GetCharacterDataWithTicketRenewalAsync(string characterName, string account, string password);
+
+    /// <summary>
+    /// Get character data with mapping and automatic ticket renewal on expiration
+    /// </summary>
+    /// <param name="characterName">Name of the character to get data for</param>
+    /// <param name="account">F-Chat account username</param>
+    /// <param name="password">F-Chat account password</param>
+    /// <returns>Character data response with human-readable names</returns>
+    Task<CharacterDataResponse> GetCharacterDataWithMappingAndTicketRenewalAsync(string characterName, string account, string password);
+
+    /// <summary>
     /// Convert character data response to ProfileData format
     /// </summary>
     /// <param name="characterData">Character data response</param>

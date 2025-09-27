@@ -8,6 +8,9 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'F-Chat Bouncer',
   description: 'A modern bouncer for F-Chat with persistent connections and logging',
+  icons: {
+    icon: '/favicon.ico',
+  },
 }
 
 export default function RootLayout({

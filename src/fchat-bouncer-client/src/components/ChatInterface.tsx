@@ -554,18 +554,7 @@ export default function ChatInterface() {
             >
               Manage Characters
             </button>
-            <button
-              onClick={() => setShowSearchModal(true)}
-              className="w-full px-3 py-2 text-xs bg-blue-700 text-white rounded hover:bg-blue-600 transition-colors"
-            >
-              Search Characters
-            </button>
-            <button
-              onClick={() => window.open('/logs', '_blank')}
-              className="w-full px-3 py-2 text-xs bg-purple-700 text-white rounded hover:bg-purple-600 transition-colors"
-            >
-              View Logs
-            </button>
+
           </div>
           
           <div className="flex items-center mt-2">
@@ -786,18 +775,29 @@ export default function ChatInterface() {
               {/* Join Channel Button */}
               <button
                 onClick={() => setShowJoinModal(true)}
-                className="flex items-center px-3 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
+                className="flex items-center px-3 py-2 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
                 title="Join channels"
               >
                 <span className="mr-1">➕</span>
                 <span>Join Channel</span>
               </button>
-
+              <button
+              onClick={() => setShowSearchModal(true)}
+              className="flex items-center px-3 py-2 text-xs bg-blue-700 text-white rounded hover:bg-blue-600 transition-colors"
+            >
+              Search Characters
+            </button>
+            <button
+              onClick={() => window.open('/logs', '_blank')}
+              className="flex items-center px-3 py-2 text-xs bg-purple-700 text-white rounded hover:bg-purple-600 transition-colors"
+            >
+              View Logs
+            </button>
               {/* Force Join Current Button */}
               <button
                 onClick={handleForceJoinSelected}
                 disabled={!selectedChannel || isForceJoining}
-                className={`flex items-center px-3 py-2 rounded-md transition-colors text-white ${(!selectedChannel || isForceJoining) ? 'bg-gray-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+                className={`flex items-center px-3 py-2 text-xs rounded-md transition-colors text-white ${(!selectedChannel || isForceJoining) ? 'bg-gray-600 opacity-60 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
                 title="Force the backend to join the currently selected channel"
               >
                 <span className="mr-1">🚀</span>

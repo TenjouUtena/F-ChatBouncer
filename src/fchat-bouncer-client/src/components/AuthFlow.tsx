@@ -147,6 +147,9 @@ export default function AuthFlow({ onLogin, onGoogleLogin, onFChatCredentialsUpd
       <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full space-y-8">
           <div>
+            <div className="flex justify-center mb-4">
+              <img src="/logo.svg" alt="F-Chat Bouncer" className="h-16 w-16" />
+            </div>
             <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
               F-Chat Credentials Required
             </h2>
@@ -221,6 +224,9 @@ export default function AuthFlow({ onLogin, onGoogleLogin, onFChatCredentialsUpd
             >
               ← Back to options
             </button>
+            <div className="flex justify-center mb-4">
+              <img src="/logo.svg" alt="F-Chat Bouncer" className="h-16 w-16" />
+            </div>
             <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
               {isRegistering ? 'Create Account' : 'Sign In'}
             </h2>
@@ -326,6 +332,9 @@ export default function AuthFlow({ onLogin, onGoogleLogin, onFChatCredentialsUpd
     <div className="min-h-screen flex items-center justify-center bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
+          <div className="flex justify-center mb-4">
+            <img src="/logo.svg" alt="F-Chat Bouncer" className="h-16 w-16" />
+          </div>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-white">
             F-Chat Bouncer
           </h2>

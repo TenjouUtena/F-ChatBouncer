@@ -270,10 +270,12 @@ builder.Services.AddSingleton<TicketManager>();
 builder.Services.AddHttpClient<MemoService>();
 builder.Services.AddHttpClient<FListMappingService>();
 builder.Services.AddHttpClient<FListCharacterDataService>();
+builder.Services.AddHttpClient<FListTicketManager>();
 
 // F-List API Services
 builder.Services.AddScoped<IFListMappingService, FListMappingService>();
 builder.Services.AddScoped<IFListCharacterDataService, FListCharacterDataService>();
+builder.Services.AddSingleton<IFListTicketManager, FListTicketManager>();
 
 // CORS
 builder.Services.AddCors(options =>
@@ -398,7 +400,7 @@ using (var scope = app.Services.CreateScope())
     try
     {
         logger.LogInformation("Ensuring database is created and migrated...");
-        await context.Database.EnsureCreatedAsync();
+        await context.Database.MigrateAsync();
         logger.LogInformation("Database migration completed successfully");
     }
     catch (Exception ex)

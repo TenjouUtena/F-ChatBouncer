@@ -30,6 +30,7 @@ public class MemoService : IMemoService
     public async Task<MemoData?> GetMemoAsync(string userId, string characterName)
     {
         return null;
+#pragma warning disable CS0162 // Unreachable code detected
         try
         {
             // Get user settings to retrieve F-Chat credentials
@@ -99,6 +100,7 @@ public class MemoService : IMemoService
                 characterName, userId);
             return null;
         }
+#pragma warning restore CS0162 // Unreachable code detected
     }
 
     public async Task UpdateMemoAsync(string userId, string characterName, string? memo)

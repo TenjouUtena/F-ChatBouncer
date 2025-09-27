@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using FChatBouncer.Server.Models.JsonConverters;
 
 namespace FChatBouncer.Server.Models;
 
@@ -87,8 +88,10 @@ public class CharacterDataResponse
 
     /// <summary>
     /// Character's custom kinks (dictionary keyed by custom kink ID)
+    /// Uses flexible converter to handle malformed JSON structures
     /// </summary>
     [JsonPropertyName("custom_kinks")]
+    [JsonConverter(typeof(FlexibleCustomKinksConverter))]
     public Dictionary<string, CustomKink> CustomKinks { get; set; } = new();
 
     /// <summary>
@@ -199,9 +202,10 @@ public class CharacterImage
     public string Description { get; set; } = string.Empty;
 
     /// <summary>
-    /// Sort order
+    /// Sort order - can be either string or int from F-List API
     /// </summary>
     [JsonPropertyName("sort_order")]
+    [JsonConverter(typeof(FlexibleIntConverter))]
     public int? SortOrder { get; set; }
 }
 

@@ -10,15 +10,18 @@ public class FListCharacterDataService : IFListCharacterDataService
 {
     private readonly HttpClient _httpClient;
     private readonly IFListMappingService _mappingService;
+    private readonly IFListTicketManager _ticketManager;
     private readonly ILogger<FListCharacterDataService> _logger;
 
     public FListCharacterDataService(
         HttpClient httpClient, 
         IFListMappingService mappingService,
+        IFListTicketManager ticketManager,
         ILogger<FListCharacterDataService> logger)
     {
         _httpClient = httpClient;
         _mappingService = mappingService;
+        _ticketManager = ticketManager;
         _logger = logger;
     }
 
@@ -48,10 +51,45 @@ public class FListCharacterDataService : IFListCharacterDataService
             var content = await response.Content.ReadAsStringAsync();
             _logger.LogDebug("Received character data for {CharacterName}: {Content}", characterName, content);
 
-            var characterData = JsonSerializer.Deserialize<CharacterDataResponse>(content, new JsonSerializerOptions
+            CharacterDataResponse? characterData;
+            try
             {
-                PropertyNameCaseInsensitive = true
-            });
+                characterData = JsonSerializer.Deserialize<CharacterDataResponse>(content, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Failed to deserialize character data for {CharacterName}. Content: {Content}", characterName, content);
+                
+                // Try to extract basic information from the JSON even if deserialization fails
+                try
+                {
+                    using var doc = JsonDocument.Parse(content);
+                    var name = doc.RootElement.GetProperty("name").GetString() ?? characterName;
+                    _logger.LogWarning("JSON deserialization failed for {CharacterName}, but basic data extraction succeeded", name);
+                    
+                    // Return a minimal response with basic info
+                    return new CharacterDataResponse
+                    {
+                        Name = name,
+                        Id = doc.RootElement.TryGetProperty("id", out var idElement) ? idElement.GetInt32() : 0,
+                        Description = doc.RootElement.TryGetProperty("description", out var descElement) ? descElement.GetString() ?? "" : "",
+                        ViewCount = doc.RootElement.TryGetProperty("views", out var viewsElement) ? viewsElement.GetInt32() : 0,
+                        Infotags = new Dictionary<string, string>(),
+                        Kinks = new Dictionary<string, string>(),
+                        CustomKinks = new Dictionary<string, CustomKink>(),
+                        Images = new List<CharacterImage>(),
+                        Inlines = new Dictionary<string, CharacterInline>()
+                    };
+                }
+                catch (JsonException fallbackEx)
+                {
+                    _logger.LogError(fallbackEx, "Complete JSON parsing failure for {CharacterName}. Raw content: {Content}", characterName, content);
+                    throw new InvalidOperationException($"Failed to parse character data JSON for {characterName}: {ex.Message}", ex);
+                }
+            }
 
             if (characterData == null)
             {
@@ -78,10 +116,80 @@ public class FListCharacterDataService : IFListCharacterDataService
         }
     }
 
+    /// <summary>
+    /// Gets character data with automatic ticket renewal on expiration
+    /// </summary>
+    public async Task<CharacterDataResponse> GetCharacterDataWithTicketRenewalAsync(string characterName, string account, string password)
+    {
+        try
+        {
+            // Get a valid ticket (will be renewed if expired)
+            var ticket = await _ticketManager.GetValidTicketAsync(account, password);
+            if (string.IsNullOrEmpty(ticket))
+            {
+                throw new InvalidOperationException("Failed to obtain valid F-List API ticket");
+            }
+
+            // Try to get character data with the ticket
+            try
+            {
+                return await GetCharacterDataAsync(characterName, ticket, account);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("ticket has expired") || ex.Message.Contains("no ticket requested"))
+            {
+                _logger.LogWarning("Ticket expired for {CharacterName}, clearing and retrying with new ticket", characterName);
+                
+                // Clear the expired ticket and get a new one
+                _ticketManager.ClearTicket(account);
+                ticket = await _ticketManager.GetValidTicketAsync(account, password);
+                
+                if (string.IsNullOrEmpty(ticket))
+                {
+                    throw new InvalidOperationException("Failed to obtain new F-List API ticket after expiration");
+                }
+
+                // Retry with the new ticket
+                return await GetCharacterDataAsync(characterName, ticket, account);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get character data with ticket renewal for {CharacterName}", characterName);
+            throw;
+        }
+    }
+
     public async Task<CharacterDataResponse> GetCharacterDataWithMappingAsync(string characterName, string ticket, string account)
     {
         // Get character data
         var characterData = await GetCharacterDataAsync(characterName, ticket, account);
+
+        // Get mapping data for human-readable names
+        try
+        {
+            var mapping = await _mappingService.GetMappingAsync();
+            
+            // Apply human-readable names to the character data
+            ApplyMappingToCharacterData(characterData, mapping);
+            
+            _logger.LogDebug("Applied mapping to character data for {CharacterName}", characterName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to apply mapping to character data for {CharacterName}, using raw data", characterName);
+            // Continue with raw data if mapping fails
+        }
+
+        return characterData;
+    }
+
+    /// <summary>
+    /// Gets character data with mapping and automatic ticket renewal on expiration
+    /// </summary>
+    public async Task<CharacterDataResponse> GetCharacterDataWithMappingAndTicketRenewalAsync(string characterName, string account, string password)
+    {
+        // Get character data with ticket renewal
+        var characterData = await GetCharacterDataWithTicketRenewalAsync(characterName, account, password);
 
         // Get mapping data for human-readable names
         try
@@ -113,14 +221,16 @@ public class FListCharacterDataService : IFListCharacterDataService
         // Convert infotags to profile fields
         foreach (var (key, value) in characterData.Infotags)
         {
-            var fieldName = mapping?.Infotags.GetValueOrDefault(key) ?? key;
+            var infotag = mapping?.GetInfotagById(key);
+            var fieldName = infotag?.Name ?? key;
             profileData.Info[fieldName] = value;
         }
 
         // Convert kinks to profile fields
         foreach (var (key, value) in characterData.Kinks)
         {
-            var kinkName = mapping?.Kinks.GetValueOrDefault(key) ?? key;
+            var kink = mapping?.GetKinkById(key);
+            var kinkName = kink?.Name ?? key;
             profileData.Info[$"Kink: {kinkName}"] = value;
         }
 
@@ -173,14 +283,16 @@ public class FListCharacterDataService : IFListCharacterDataService
         // Map infotags
         foreach (var (key, value) in characterData.Infotags)
         {
-            var humanReadableName = mapping.Infotags.GetValueOrDefault(key) ?? key;
+            var infotag = mapping.GetInfotagById(key);
+            var humanReadableName = infotag?.Name ?? key;
             mappedInfotags[humanReadableName] = value;
         }
 
         // Map kinks
         foreach (var (key, value) in characterData.Kinks)
         {
-            var humanReadableName = mapping.Kinks.GetValueOrDefault(key) ?? key;
+            var kink = mapping.GetKinkById(key);
+            var humanReadableName = kink?.Name ?? key;
             mappedKinks[humanReadableName] = value;
         }
 

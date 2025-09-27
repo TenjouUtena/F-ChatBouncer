@@ -73,6 +73,8 @@ function MessageComponent({
   // Check if message mentions current user
   const hasMention = currentUser ? messageContainsMention(message, currentUser) : false;
 
+  const isMe = currentUser === message.sender;
+
   // Get CSS classes
   const containerClasses = [
     mergedTheme.container,
@@ -80,6 +82,7 @@ function MessageComponent({
     isSelected ? messageStates.selected : '',
     shouldGroup ? messageStates.grouped : messageStates.standalone,
     hasMention ? 'ring-1 ring-yellow-500 bg-yellow-500/5' : '',
+    isMe ? 'bg-green-500/5' : '',
     className
   ].filter(Boolean).join(' ');
 

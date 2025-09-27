@@ -14,6 +14,7 @@ public class ProfileService : IProfileService
     private readonly ICharacterService _characterService;
     private readonly IMemoService _memoService;
     private readonly IFListCharacterDataService _characterDataService;
+    private readonly IUserService _userService;
     private readonly ILogger<ProfileService> _logger;
     private readonly IProfileRateLimiter _rateLimiter;
     private readonly ConcurrentDictionary<string, Task> _pendingRequests = new();
@@ -24,6 +25,7 @@ public class ProfileService : IProfileService
         ICharacterService characterService,
         IMemoService memoService,
         IFListCharacterDataService characterDataService,
+        IUserService userService,
         ILogger<ProfileService> logger,
         IProfileRateLimiter rateLimiter)
     {
@@ -32,6 +34,7 @@ public class ProfileService : IProfileService
         _characterService = characterService;
         _memoService = memoService;
         _characterDataService = characterDataService;
+        _userService = userService;
         _logger = logger;
         _rateLimiter = rateLimiter;
     }
@@ -318,34 +321,38 @@ public class ProfileService : IProfileService
     {
         try
         {
-            // Try F-List API first using the active character's ticket
+            // Try F-List API first with automatic ticket renewal
             try
             {
-                _logger.LogInformation("Attempting to fetch profile for {CharacterName} (User: {UserId}) using F-List API", 
+                _logger.LogInformation("Attempting to fetch profile for {CharacterName} (User: {UserId}) using F-List API with ticket renewal", 
                     characterName, userId);
                 
-                // Get the active character for this user to access their ticket
-                var activeCharacter = await _characterService.GetActiveCharacterAsync(userId);
-                if (activeCharacter == null)
+                // Get F-Chat credentials from user settings
+                var settings = await _userService.GetUserSettingsAsync(userId);
+                if (settings?.FChatCredentialsEncrypted == null)
                 {
-                    _logger.LogInformation("No active character for user {UserId}, falling back to PRO/PRD commands", userId);
+                    _logger.LogInformation("No F-Chat credentials found for user {UserId}, falling back to PRO/PRD commands", userId);
                     await _fChatService.RequestProfileAsync(userId, characterName);
                     return;
                 }
 
-                // Get the ticket and username from the WebSocket client
-                var ticket = await _fChatService.GetTicketAsync(userId, activeCharacter.Name);
-                var account = await _fChatService.GetUsernameAsync(userId, activeCharacter.Name);
-                
-                if (string.IsNullOrEmpty(ticket) || string.IsNullOrEmpty(account))
+                // Decode credentials
+                var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
+                var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
+                var parts = credentials.Split(':');
+
+                if (parts.Length != 2)
                 {
-                    _logger.LogInformation("No F-Chat ticket or account available for active character {ActiveCharacter} (User: {UserId}), falling back to PRO/PRD commands", 
-                        activeCharacter, userId);
+                    _logger.LogError("Invalid credentials format for user {UserId}", userId);
                     await _fChatService.RequestProfileAsync(userId, characterName);
                     return;
                 }
+
+                var account = parts[0];
+                var password = parts[1];
                 
-                var characterData = await _characterDataService.GetCharacterDataWithMappingAsync(characterName, ticket, account);
+                // Use the new method with automatic ticket renewal
+                var characterData = await _characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
                 
                 // Convert CharacterDataResponse to ProfileData
                 var profileData = ConvertCharacterDataToProfileData(characterData);
@@ -353,14 +360,14 @@ public class ProfileService : IProfileService
                 // Save the structured profile data
                 await SaveStructuredProfileAsync(userId, profileData);
                 
-                _logger.LogInformation("Successfully fetched and saved profile for {CharacterName} (User: {UserId}) using F-List API: {Summary}", 
+                _logger.LogInformation("Successfully fetched and saved profile for {CharacterName} (User: {UserId}) using F-List API with ticket renewal: {Summary}", 
                     characterName, userId, profileData.GetSummary());
                 
                 return;
             }
             catch (Exception apiEx)
             {
-                _logger.LogWarning(apiEx, "F-List API failed for {CharacterName} (User: {UserId}), falling back to PRO/PRD commands", 
+                _logger.LogWarning(apiEx, "F-List API with ticket renewal failed for {CharacterName} (User: {UserId}), falling back to PRO/PRD commands", 
                     characterName, userId);
                 
                 // Fall back to PRO/PRD commands
@@ -411,40 +418,29 @@ public class ProfileService : IProfileService
     {
         try
         {
-            _logger.LogInformation("Getting character data for {CharacterName} (User: {UserId})", characterName, userId);
+            _logger.LogInformation("Getting character data for {CharacterName} (User: {UserId}) with automatic ticket renewal", characterName, userId);
 
-            // Get the active character name
-            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
-            if (string.IsNullOrEmpty(activeCharacter))
+            // Get F-Chat credentials from user settings
+            var settings = await _userService.GetUserSettingsAsync(userId);
+            if (settings?.FChatCredentialsEncrypted == null)
             {
-                _logger.LogWarning("No active character found for user {UserId}", userId);
+                _logger.LogWarning("No F-Chat credentials found for user {UserId}", userId);
                 return null;
             }
 
-            // Get the WebSocket client for the active character
-            var characterConnection = await _fChatService.GetCharacterConnectionAsync(userId, activeCharacter);
-            if (characterConnection == null)
+            // Decode credentials
+            var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
+            var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
+            var parts = credentials.Split(':');
+
+            if (parts.Length != 2)
             {
-                _logger.LogWarning("No character connection found for user {UserId}, character {ActiveCharacter}", userId, activeCharacter);
+                _logger.LogError("Invalid credentials format for user {UserId}", userId);
                 return null;
             }
 
-            // Get the WebSocket client from FChatService
-            var client = await GetWebSocketClientAsync(userId, activeCharacter);
-            if (client == null)
-            {
-                _logger.LogWarning("No WebSocket client found for user {UserId}, character {ActiveCharacter}", userId, activeCharacter);
-                return null;
-            }
-
-            // Get the ticket and username from the active WebSocket connection
-            var ticket = client.GetTicket();
-            var account = client.GetUsername();
-            if (string.IsNullOrEmpty(ticket) || string.IsNullOrEmpty(account))
-            {
-                _logger.LogWarning("No valid ticket or account found for user {UserId}", userId);
-                return null;
-            }
+            var account = parts[0];
+            var password = parts[1];
 
             // Check rate limiting
             if (!await _rateLimiter.IsRequestAllowedAsync(userId, characterName))
@@ -458,8 +454,8 @@ public class ProfileService : IProfileService
             // Record the request for rate limiting
             _rateLimiter.RecordRequest(userId, characterName);
 
-            // Get character data from F-List API
-            var characterData = await _characterDataService.GetCharacterDataWithMappingAsync(characterName, ticket, account);
+            // Get character data from F-List API with automatic ticket renewal
+            var characterData = await _characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
 
             // Convert to ProfileData format
             var profileData = _characterDataService.ConvertToProfileData(characterData);
@@ -467,7 +463,7 @@ public class ProfileService : IProfileService
             // Save the profile data
             await SaveStructuredProfileAsync(userId, profileData);
 
-            _logger.LogInformation("Successfully retrieved and saved character data for {CharacterName} (User: {UserId})", characterName, userId);
+            _logger.LogInformation("Successfully retrieved and saved character data for {CharacterName} (User: {UserId}) with automatic ticket renewal", characterName, userId);
 
             return profileData;
         }
