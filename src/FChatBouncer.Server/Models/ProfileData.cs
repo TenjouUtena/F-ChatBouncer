@@ -3,6 +3,24 @@ using System.Text.Json.Serialization;
 namespace FChatBouncer.Server.Models;
 
 /// <summary>
+/// Represents a kink with its details
+/// </summary>
+public class KinkInfo
+{
+    [JsonPropertyName("kink_id")]
+    public string KinkId { get; set; } = string.Empty;
+
+    [JsonPropertyName("kink_name")]
+    public string KinkName { get; set; } = string.Empty;
+
+    [JsonPropertyName("kink_pref")]
+    public string KinkPreference { get; set; } = string.Empty;
+
+    [JsonPropertyName("custom")]
+    public bool IsCustom { get; set; } = false;
+}
+
+/// <summary>
 /// Structured profile data class for F-Chat character profiles.
 /// This represents the parsed and structured data from F-Chat's PRD command sequence.
 /// </summary>
@@ -15,22 +33,28 @@ public class ProfileData
     public string CharacterName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Basic character information fields
+    /// Character description/profile text
+    /// </summary>
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Character's gender
+    /// </summary>
+    [JsonPropertyName("gender")]
+    public string Gender { get; set; } = "None";
+
+    /// <summary>
+    /// Basic character information fields (non-kink data)
     /// </summary>
     [JsonPropertyName("info")]
     public Dictionary<string, string> Info { get; set; } = new();
 
     /// <summary>
-    /// Selected/custom profile fields
+    /// Character's kinks with preferences
     /// </summary>
-    [JsonPropertyName("select")]
-    public Dictionary<string, string> Select { get; set; } = new();
-
-    /// <summary>
-    /// Additional profile sections (for any other data)
-    /// </summary>
-    [JsonPropertyName("additional")]
-    public Dictionary<string, object> Additional { get; set; } = new();
+    [JsonPropertyName("kinks")]
+    public List<KinkInfo> Kinks { get; set; } = new();
 
     /// <summary>
     /// When this profile data was built/received
@@ -39,57 +63,11 @@ public class ProfileData
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Character's gender (extracted from profile data)
-    /// </summary>
-    [JsonPropertyName("gender")]
-    public string Gender { get; set; } = "None";
-
-    /// <summary>
-    /// Get a profile field value by key, searching across all sections
+    /// Get a profile field value by key from info section
     /// </summary>
     public string? GetField(string key)
     {
-        // Search in Info first
-        if (Info.TryGetValue(key, out var infoValue))
-            return infoValue;
-
-        // Then in Select
-        if (Select.TryGetValue(key, out var selectValue))
-            return selectValue;
-
-        // Finally in Additional (convert to string if found)
-        if (Additional.TryGetValue(key, out var additionalValue))
-            return additionalValue?.ToString();
-
-        return null;
-    }
-
-    /// <summary>
-    /// Get all profile fields as a flat dictionary
-    /// </summary>
-    public Dictionary<string, string> GetAllFields()
-    {
-        var allFields = new Dictionary<string, string>();
-
-        // Add Info fields
-        foreach (var (key, value) in Info)
-        {
-            allFields[key] = value;
-        }
-
-        // Add Select fields (may override Info fields)
-        foreach (var (key, value) in Select)
-        {
-            allFields[key] = value;
-        }
-
-        // Add Additional fields as strings (may override previous fields)
-        foreach (var (key, value) in Additional)
-        {
-            allFields[key] = value?.ToString() ?? "";
-        }
-
-        return allFields;
+        return Info.TryGetValue(key, out var value) ? value : null;
     }
 
     /// <summary>
@@ -97,8 +75,7 @@ public class ProfileData
     /// </summary>
     public string GetSummary()
     {
-        var totalFields = Info.Count + Select.Count + Additional.Count;
-        return $"Character: {CharacterName}, Gender: {Gender}, Fields: {totalFields} (Info: {Info.Count}, Select: {Select.Count}, Additional: {Additional.Count})";
+        return $"Character: {CharacterName}, Gender: {Gender}, Info Fields: {Info.Count}, Kinks: {Kinks.Count}";
     }
 
     /// <summary>

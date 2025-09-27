@@ -156,9 +156,7 @@ function MessageComponent({
       return '';
     };
     return (
-      findKeyCI(senderProfile.info, 'Species') ||
-      findKeyCI(senderProfile.select, 'Species') ||
-      findKeyCI(senderProfile.additional as any, 'Species')
+      findKeyCI(senderProfile.info, 'Species')
     );
   }, [senderProfile]);
 
@@ -188,8 +186,7 @@ function MessageComponent({
       }
     };
     pushSection(senderProfile.info, 'Info');
-    pushSection(senderProfile.select, 'Select');
-    pushSection(senderProfile.additional, 'Additional');
+
     return lines.join('\n');
   }, [message.sender, senderGender, senderProfile, profileStatus, isStale]);
 

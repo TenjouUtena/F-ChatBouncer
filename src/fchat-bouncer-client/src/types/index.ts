@@ -94,13 +94,20 @@ export interface Channel {
   mode: 'Public' | 'Private' | 'Both';
 }
 
+export interface KinkInfo {
+  kink_id: string;
+  kink_name: string;
+  kink_pref: string;
+  custom: boolean;
+}
+
 export interface ProfileData {
   character: string;
-  info: Record<string, string>;
-  select: Record<string, string>;
-  additional: Record<string, any>;
-  timestamp: string;
+  description: string;
   gender: string;
+  info: Record<string, string>;
+  kinks: KinkInfo[];
+  timestamp: string;
 }
 
 export interface ProfileReceivedEvent {

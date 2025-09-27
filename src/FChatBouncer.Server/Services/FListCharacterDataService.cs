@@ -172,7 +172,7 @@ public class FListCharacterDataService : IFListCharacterDataService
             // Apply human-readable names to the character data
             ApplyMappingToCharacterData(characterData, mapping);
             
-            _logger.LogDebug("Applied mapping to character data for {CharacterName}", characterName);
+            _logger.LogInformation("Applied mapping to character data for {CharacterName}", characterName);
         }
         catch (Exception ex)
         {
@@ -199,7 +199,7 @@ public class FListCharacterDataService : IFListCharacterDataService
             // Apply human-readable names to the character data
             ApplyMappingToCharacterData(characterData, mapping);
             
-            _logger.LogDebug("Applied mapping to character data for {CharacterName}", characterName);
+            _logger.LogInformation("Applied mapping to character data for {CharacterName}", characterName);
         }
         catch (Exception ex)
         {
@@ -215,10 +215,11 @@ public class FListCharacterDataService : IFListCharacterDataService
         var profileData = new ProfileData
         {
             CharacterName = characterData.Name,
+            Description = characterData.Description ?? string.Empty,
             Timestamp = DateTime.UtcNow
         };
 
-        // Convert infotags to profile fields
+        // Convert infotags to profile fields (non-kink data)
         foreach (var (key, value) in characterData.Infotags)
         {
             var infotag = mapping?.GetInfotagById(key);
@@ -226,26 +227,34 @@ public class FListCharacterDataService : IFListCharacterDataService
             profileData.Info[fieldName] = value;
         }
 
-        // Convert kinks to profile fields
+        // Convert kinks to structured kink list
         foreach (var (key, value) in characterData.Kinks)
         {
             var kink = mapping?.GetKinkById(key);
-            var kinkName = kink?.Name ?? key;
-            profileData.Info[$"Kink: {kinkName}"] = value;
+            var kinkInfo = new KinkInfo
+            {
+                KinkId = key,
+                KinkName = kink?.Name ?? key,
+                KinkPreference = value,
+                IsCustom = false
+            };
+            profileData.Kinks.Add(kinkInfo);
         }
 
         // Add custom kinks
         foreach (var customKinkEntry in characterData.CustomKinks)
         {
             var customKink = customKinkEntry.Value;
-            profileData.Info[$"Custom Kink: {customKink.Name}"] = $"{customKink.Choice} - {customKink.Description}";
+            var kinkInfo = new KinkInfo
+            {
+                KinkId = customKinkEntry.Key,
+                KinkName = customKink.Name,
+                KinkPreference = customKink.Choice,
+                IsCustom = true
+            };
+            profileData.Kinks.Add(kinkInfo);
         }
 
-        // Add description
-        if (!string.IsNullOrEmpty(characterData.Description))
-        {
-            profileData.Info["Description"] = characterData.Description;
-        }
 
         // Add view count
         profileData.Info["View Count"] = characterData.ViewCount.ToString();
@@ -267,14 +276,17 @@ public class FListCharacterDataService : IFListCharacterDataService
         // Extract gender from profile data
         profileData.ExtractGender();
 
-        _logger.LogDebug("Converted character data to ProfileData for {CharacterName}. Fields: {FieldCount}", 
-            characterData.Name, profileData.GetAllFields().Count);
+        _logger.LogDebug("Converted character data to ProfileData for {CharacterName}. Info Fields: {InfoCount}, Kinks: {KinkCount}", 
+            characterData.Name, profileData.Info.Count, profileData.Kinks.Count);
 
         return profileData;
     }
 
     private void ApplyMappingToCharacterData(CharacterDataResponse characterData, MappingResponse mapping)
     {
+        _logger.LogInformation("Applying mapping to character data for {CharacterName}. Original infotags: {InfotagCount}, kinks: {KinkCount}", 
+            characterData.Name, characterData.Infotags.Count, characterData.Kinks.Count);
+
         // Create new dictionaries with human-readable names
         var mappedInfotags = new Dictionary<string, string>();
         var mappedKinks = new Dictionary<string, string>();
@@ -285,7 +297,33 @@ public class FListCharacterDataService : IFListCharacterDataService
         {
             var infotag = mapping.GetInfotagById(key);
             var humanReadableName = infotag?.Name ?? key;
-            mappedInfotags[humanReadableName] = value;
+            
+            // Map the value if it's numeric
+            var mappedValue = value;
+            if (!string.IsNullOrEmpty(value) && System.Text.RegularExpressions.Regex.IsMatch(value, @"^\d+$"))
+            {
+                var mappedValueById = mapping.GetInfotagValueById(value);
+                if (!string.IsNullOrEmpty(mappedValueById))
+                {
+                    mappedValue = mappedValueById;
+                    _logger.LogInformation("Mapped infotag value {InfotagId} -> {InfotagName}: {OriginalValue} -> {MappedValue}", key, humanReadableName, value, mappedValue);
+                }
+                else
+                {
+                    _logger.LogInformation("No value mapping found for infotag {InfotagId} -> {InfotagName}, value: {Value}", key, humanReadableName, value);
+                }
+            }
+            
+            mappedInfotags[humanReadableName] = mappedValue;
+            
+            if (infotag == null)
+            {
+                _logger.LogInformation("No mapping found for infotag ID: {InfotagId}, using raw key", key);
+            }
+            else
+            {
+                _logger.LogInformation("Mapped infotag {InfotagId} -> {InfotagName}", key, humanReadableName);
+            }
         }
 
         // Map kinks
@@ -294,10 +332,22 @@ public class FListCharacterDataService : IFListCharacterDataService
             var kink = mapping.GetKinkById(key);
             var humanReadableName = kink?.Name ?? key;
             mappedKinks[humanReadableName] = value;
+            
+            if (kink == null)
+            {
+                _logger.LogInformation("No mapping found for kink ID: {KinkId}, using raw key", key);
+            }
+            else
+            {
+                _logger.LogInformation("Mapped kink {KinkId} -> {KinkName}", key, humanReadableName);
+            }
         }
 
         // Replace the original dictionaries
         characterData.Infotags = mappedInfotags;
         characterData.Kinks = mappedKinks;
+        
+        _logger.LogInformation("Applied mapping to character data for {CharacterName}. Mapped infotags: {InfotagCount}, kinks: {KinkCount}", 
+            characterData.Name, characterData.Infotags.Count, characterData.Kinks.Count);
     }
 }

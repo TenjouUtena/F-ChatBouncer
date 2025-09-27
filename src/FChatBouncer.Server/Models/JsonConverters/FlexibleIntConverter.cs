@@ -21,10 +21,22 @@ public class FlexibleIntConverter : JsonConverter<int?>
                 if (string.IsNullOrEmpty(stringValue))
                     return null;
                 
+                // Try direct integer parsing first
                 if (int.TryParse(stringValue, out var intValue))
                     return intValue;
                 
-                // If string cannot be parsed as int, return null instead of throwing
+                // Handle timezone strings like "UTC-5", "UTC+8", "Zulu"
+                if (stringValue.Equals("Zulu", StringComparison.OrdinalIgnoreCase))
+                    return 0; // UTC is 0 offset
+                
+                if (stringValue.StartsWith("UTC", StringComparison.OrdinalIgnoreCase))
+                {
+                    var offsetPart = stringValue.Substring(3); // Remove "UTC" prefix
+                    if (int.TryParse(offsetPart, out var offsetValue))
+                        return offsetValue;
+                }
+                
+                // If string cannot be parsed as int or timezone, return null instead of throwing
                 return null;
             
             case JsonTokenType.Null:

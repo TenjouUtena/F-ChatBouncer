@@ -82,8 +82,10 @@ public class CharacterDataResponse
 
     /// <summary>
     /// Character's kinks (key-value pairs where key is kink ID, value is preference level)
+    /// Uses flexible converter to handle both simple strings and complex objects
     /// </summary>
     [JsonPropertyName("kinks")]
+    [JsonConverter(typeof(FlexibleKinksConverter))]
     public Dictionary<string, string> Kinks { get; set; } = new();
 
     /// <summary>
@@ -113,10 +115,11 @@ public class CharacterDataResponse
     public List<CharacterListItem> CharacterList { get; set; } = new();
 
     /// <summary>
-    /// Timezone offset
+    /// Timezone offset (can be null from F-List API)
     /// </summary>
     [JsonPropertyName("timezone")]
-    public int Timezone { get; set; }
+    [JsonConverter(typeof(FlexibleIntConverter))]
+    public int? Timezone { get; set; }
 
     /// <summary>
     /// Current user information

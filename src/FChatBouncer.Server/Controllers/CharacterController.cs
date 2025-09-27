@@ -407,7 +407,7 @@ public class CharacterController : ControllerBase
                     LastUpdated = character.LastUpdated,
                     HasProfileData = !string.IsNullOrEmpty(character.ProfileData),
                     HasStructuredProfile = profile != null,
-                    ProfileFieldCount = profile?.GetAllFields().Count ?? 0,
+                    ProfileFieldCount = profile != null ? profile.Info.Count + profile.Kinks.Count : 0,
                     ConnectionCount = connections.Count,
                     ChannelCount = channels.Count,
                     ProfileAge = character.LastUpdated

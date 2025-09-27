@@ -78,6 +78,11 @@ public class MappingResponse
     /// Get list item by name
     /// </summary>
     public ListItem? GetListItemByName(string name) => ListItems.FirstOrDefault(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Get list item value by ID for infotag value mapping
+    /// </summary>
+    public string? GetInfotagValueById(string id) => ListItems.FirstOrDefault(l => l.Id == id)?.Value;
 }
 
 /// <summary>
@@ -174,9 +179,9 @@ public class CachedMappingData
     public DateTime CachedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// How long this mapping is valid (default: 24 hours)
+    /// How long this mapping is valid (default: 7 days)
     /// </summary>
-    public TimeSpan CacheDuration { get; set; } = TimeSpan.FromHours(24);
+    public TimeSpan CacheDuration { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>
     /// Check if the cached mapping is still valid

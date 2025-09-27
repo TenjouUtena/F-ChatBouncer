@@ -1860,7 +1860,7 @@ public class FChatWebSocketClient : IDisposable
                             }
                             else if (type.ToLower() == "select")
                             {
-                                buildingProfile.Select[key] = value;
+                                buildingProfile.Info[key] = value;
                             }
 
                             _logger.LogDebug("Added profile {Type} field for {CharacterName}: {Key} = {Value}",
@@ -1869,8 +1869,8 @@ public class FChatWebSocketClient : IDisposable
                     }
                     else
                     {
-                        // If no key/value structure, store the entire data object in Additional
-                        buildingProfile.Additional[type] = data;
+                        // If no key/value structure, store the entire data object in Info
+                        buildingProfile.Info[type] = data.ToString();
                         _logger.LogDebug("Added profile section for {CharacterName}: {Type}", characterName, type);
                     }
                     break;

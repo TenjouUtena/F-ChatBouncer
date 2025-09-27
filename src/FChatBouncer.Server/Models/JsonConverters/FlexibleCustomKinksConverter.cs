@@ -18,6 +18,19 @@ public class FlexibleCustomKinksConverter : JsonConverter<Dictionary<string, Cus
             return result;
         }
 
+        if (reader.TokenType == JsonTokenType.StartArray)
+        {
+            // If it's an array (like "custom_kinks":[]), read through the array and return empty dictionary
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.EndArray)
+                {
+                    break;
+                }
+            }
+            return result;
+        }
+
         if (reader.TokenType != JsonTokenType.StartObject)
         {
             // If it's not an object, return empty dictionary instead of throwing

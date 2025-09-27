@@ -1,10 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { ProfileData } from '@/types';
+import { ProfileData, KinkInfo } from '@/types';
 import { getCharacterNameStyle, getGenderDisplayName } from '@/lib/genderColors';
 import { useChatStore } from '@/stores/chatStore';
 import kinksData from '@/kinks';
+import { bbcodeToHtml } from '@/lib/bbcode';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -84,25 +85,14 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
 
   const getKinkPreference = (kinkId: string): string => {
     // Look for kink preference in profile data
-    const kinkKey = `kink_${kinkId}`;
-    const preference = profileData?.info[kinkKey] || profileData?.select[kinkKey] || profileData?.additional[kinkKey];
-    return preference || 'Not specified';
+    const kink = profileData?.kinks?.find(k => k.kink_id === kinkId);
+    return kink?.kink_pref || 'Not specified';
   };
 
   const renderDescriptionTab = () => {
     if (!profileData) return null;
 
-    // Look for description fields
-    const descriptionFields = ['description', 'Description', 'profile', 'Profile', 'about', 'About'];
-    let description = '';
-    
-    for (const field of descriptionFields) {
-      const value = profileData.info[field] || profileData.select[field] || profileData.additional[field];
-      if (value && typeof value === 'string' && value.trim()) {
-        description = value;
-        break;
-      }
-    }
+    const description = profileData.description;
 
     if (!description) {
       return (
@@ -112,25 +102,29 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
       );
     }
 
-    return (
-      <div className="text-gray-300 text-sm whitespace-pre-wrap break-words leading-relaxed">
-        {description}
-      </div>
-    );
+    try {
+      const htmlDescription = bbcodeToHtml(description);
+      return (
+        <div 
+          className="text-gray-300 text-sm break-words leading-relaxed"
+          dangerouslySetInnerHTML={{ __html: htmlDescription }}
+        />
+      );
+    } catch (error) {
+      console.warn('Failed to render description BBCode:', error);
+      return (
+        <div className="text-gray-300 text-sm whitespace-pre-wrap break-words leading-relaxed">
+          {description}
+        </div>
+      );
+    }
   };
 
   const renderInfoTab = () => {
     if (!profileData) return null;
 
-    // Filter out kink fields and description fields
-    const descriptionFields = ['description', 'Description', 'profile', 'Profile', 'about', 'About'];
-    const kinkFields = Object.keys(profileData.info).filter(key => key.startsWith('kink_'));
-    
-    const infoFields = Object.entries(profileData.info).filter(([key, value]) => 
-      !descriptionFields.includes(key) && 
-      !kinkFields.includes(key) && 
-      typeof value === 'string' && 
-      value.trim()
+    const infoFields = Object.entries(profileData.info || {}).filter(([key, value]) => 
+      typeof value === 'string' && value.trim()
     );
 
     if (infoFields.length === 0) {
@@ -160,12 +154,7 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
   const renderKinksTab = () => {
     if (!profileData) return null;
 
-    // Find all kink fields
-    const kinkFields = Object.entries(profileData.info).filter(([key, value]) => 
-      key.startsWith('kink_') && typeof value === 'string' && value.trim()
-    );
-
-    if (kinkFields.length === 0) {
+    if (!profileData.kinks || profileData.kinks.length === 0) {
       return (
         <div className="text-gray-500 italic text-sm">
           No kink preferences available
@@ -174,38 +163,57 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
     }
 
     // Group kinks by preference
-    const kinksByPreference: Record<string, string[]> = {};
+    const kinksByPreference: Record<string, KinkInfo[]> = {
+      'fave': [],
+      'yes': [],
+      'maybe': [],
+      'no': []
+    };
     
-    kinkFields.forEach(([key, value]) => {
-      const kinkId = key.replace('kink_', '');
-      const kinkName = getKinkName(kinkId);
-      
-      if (!kinksByPreference[value]) {
-        kinksByPreference[value] = [];
+    profileData.kinks.forEach((kink) => {
+      const preference = kink.kink_pref.toLowerCase();
+      if (kinksByPreference[preference]) {
+        kinksByPreference[preference].push(kink);
       }
-      kinksByPreference[value].push(kinkName);
     });
 
-    const preferenceOrder = ['Yes', 'Maybe', 'No', 'Fave'];
-    const sortedPreferences = preferenceOrder.filter(pref => kinksByPreference[pref]);
-
     return (
-      <div className="space-y-4">
-        {sortedPreferences.map(preference => (
-          <div key={preference} className="border-b border-gray-700 pb-3">
+      <div className="grid grid-cols-4 gap-4">
+        {Object.entries(kinksByPreference).map(([preference, kinks]) => (
+          <div key={preference} className="space-y-2">
             <div className="font-medium text-white text-sm mb-2 flex items-center gap-2">
               <span className={`px-2 py-1 rounded text-xs ${
-                preference === 'Yes' || preference === 'Fave' ? 'bg-green-600 text-white' :
-                preference === 'Maybe' ? 'bg-yellow-600 text-white' :
-                preference === 'No' ? 'bg-red-600 text-white' :
+                preference === 'yes' || preference === 'fave' ? 'bg-green-600 text-white' :
+                preference === 'maybe' ? 'bg-yellow-600 text-white' :
+                preference === 'no' ? 'bg-red-600 text-white' :
                 'bg-gray-600 text-white'
               }`}>
-                {preference}
+                {preference.charAt(0).toUpperCase() + preference.slice(1)}
               </span>
-              <span>({kinksByPreference[preference].length})</span>
+              <span>({kinks.length})</span>
             </div>
-            <div className="text-gray-300 text-sm">
-              {kinksByPreference[preference].join(', ')}
+            <div className="space-y-1 max-h-full overflow-y-auto">
+              {kinks.length === 0 ? (
+                <div className="text-gray-500 italic text-xs">None</div>
+              ) : (
+                kinks.sort((a, b) => 
+                {
+                  if(a.custom && !b.custom) {
+                    return -1;
+                  } else if(!a.custom && b.custom) {
+                    return 1;
+                  } else {
+                    return a.kink_name.localeCompare(b.kink_name);
+                  }
+                }).map((kink, index) => (
+                  <div key={index} className="text-gray-300 text-xs p-1 bg-gray-700 rounded">
+                    <div className="font-medium">{kink.kink_name}</div>
+                    {kink.custom && (
+                      <div className="text-yellow-400 text-xs">(Custom)</div>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         ))}
@@ -221,7 +229,7 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
     const images: string[] = [];
 
     for (const field of imageFields) {
-      const value = profileData.info[field] || profileData.select[field] || profileData.additional[field];
+      const value = profileData.info?.[field];
       if (value && typeof value === 'string' && value.trim()) {
         // Check if it looks like a URL
         if (value.match(/^https?:\/\/.+/)) {
@@ -305,34 +313,20 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
   const getTabCount = (tab: 'description' | 'info' | 'kinks' | 'images'): number => {
     if (!profileData) return 0;
     
-    const descriptionFields = ['description', 'Description', 'profile', 'Profile', 'about', 'About'];
-    const imageFields = ['image', 'Image', 'avatar', 'Avatar', 'picture', 'Picture', 'photo', 'Photo'];
-    
     switch (tab) {
       case 'description':
-        return descriptionFields.some(field => 
-          profileData.info[field] || profileData.select[field] || profileData.additional[field]
-        ) ? 1 : 0;
+        return profileData.description ? 1 : 0;
       
       case 'info':
-        const kinkFields = Object.keys(profileData.info).filter(key => key.startsWith('kink_'));
-        return Object.entries(profileData.info).filter(([key, value]) => 
-          !descriptionFields.includes(key) && 
-          !kinkFields.includes(key) && 
-          typeof value === 'string' && 
-          value.trim()
-        ).length;
+        return Object.keys(profileData.info || {}).length;
       
       case 'kinks':
-        return Object.entries(profileData.info).filter(([key, value]) => 
-          key.startsWith('kink_') && typeof value === 'string' && value.trim()
-        ).length;
+        return profileData.kinks?.length || 0;
       
       case 'images':
-        return imageFields.filter(field => {
-          const value = profileData.info[field] || profileData.select[field] || profileData.additional[field];
-          return value && typeof value === 'string' && value.trim() && value.match(/^https?:\/\/.+/);
-        }).length;
+        return Object.entries(profileData.info || {}).filter(([key, value]) => 
+          value && typeof value === 'string' && value.trim() && value.match(/^https?:\/\/.+/)
+        ).length;
       
       default:
         return 0;
@@ -341,7 +335,7 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
+      <div className="bg-gray-800 rounded-lg shadow-xl w-[90vw] h-[90vh] mx-4 overflow-hidden flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
           <div className="flex-1">
@@ -425,7 +419,7 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
         </div>
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto max-h-[50vh]">
+        <div className="p-6 overflow-y-auto flex-1">
           {getTabContent()}
         </div>
 
@@ -433,7 +427,7 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
         <div className="flex items-center justify-between p-4 bg-gray-750 border-t border-gray-700">
           <div className="text-gray-400 text-xs">
             {profileData ? (
-              `Total fields: ${getTabCount('description') + getTabCount('info') + getTabCount('kinks') + getTabCount('images')}`
+              `Info: ${getTabCount('info')}, Kinks: ${getTabCount('kinks')}`
             ) : (
               'No profile data'
             )}

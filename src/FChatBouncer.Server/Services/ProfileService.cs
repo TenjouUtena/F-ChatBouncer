@@ -387,10 +387,11 @@ public class ProfileService : IProfileService
         var profileData = new ProfileData
         {
             CharacterName = characterData.Name,
+            Description = characterData.Description ?? string.Empty,
             Timestamp = DateTime.UtcNow
         };
 
-        // Convert infotags to info dictionary
+        // Convert infotags to info dictionary (keys should already be human-readable after mapping)
         foreach (var infotag in characterData.Infotags)
         {
             if (!string.IsNullOrEmpty(infotag.Value))
@@ -399,13 +400,51 @@ public class ProfileService : IProfileService
             }
         }
 
-        // Convert kinks to info dictionary with kink_ prefix
+        // Convert kinks to structured kink list (keys should already be human-readable after mapping)
         foreach (var kink in characterData.Kinks)
         {
             if (!string.IsNullOrEmpty(kink.Value))
             {
-                profileData.Info[$"kink_{kink.Key}"] = kink.Value;
+                var kinkInfo = new KinkInfo
+                {
+                    KinkId = kink.Key, // This will be the human-readable name after mapping
+                    KinkName = kink.Key,
+                    KinkPreference = kink.Value,
+                    IsCustom = false
+                };
+                profileData.Kinks.Add(kinkInfo);
             }
+        }
+
+        // Add custom kinks
+        foreach (var customKinkEntry in characterData.CustomKinks)
+        {
+            var customKink = customKinkEntry.Value;
+            var kinkInfo = new KinkInfo
+            {
+                KinkId = customKinkEntry.Key,
+                KinkName = customKink.Name,
+                KinkPreference = customKink.Choice,
+                IsCustom = true
+            };
+            profileData.Kinks.Add(kinkInfo);
+        }
+
+        // Add view count
+        profileData.Info["View Count"] = characterData.ViewCount.ToString();
+
+        // Add images
+        if (characterData.Images.Any())
+        {
+            var imageIds = string.Join(", ", characterData.Images.Select(img => img.ImageId));
+            profileData.Info["Images"] = imageIds;
+        }
+
+        // Add inlines
+        if (characterData.Inlines.Any())
+        {
+            var inlineHashes = string.Join(", ", characterData.Inlines.Select(inline => inline.Value.Hash));
+            profileData.Info["Inlines"] = inlineHashes;
         }
 
         // Extract gender from the profile data
