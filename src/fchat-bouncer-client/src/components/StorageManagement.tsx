@@ -2,18 +2,27 @@
 
 import React, { useState, useEffect } from 'react';
 import { useChatStore } from '@/stores/chatStore';
+import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
+import { getStorageStatistics } from '@/lib/storageMigration';
 
 export default function StorageManagement() {
   const { cleanupStorage, getStorageSize, profiles, characterMessages } = useChatStore();
-  const [storageSize, setStorageSize] = useState<number>(0);
+  const { cleanupOldCharacters, getStorageSize: getLightweightSize } = useLightweightCharacterStore();
+  const [storageStats, setStorageStats] = useState({
+    lightweightCharacters: 0,
+    fullProfiles: 0,
+    lightweightSize: 0,
+    fullProfileSize: 0,
+    totalSize: 0
+  });
   const [isCleaning, setIsCleaning] = useState(false);
   const [cleanupResult, setCleanupResult] = useState<string | null>(null);
 
   useEffect(() => {
-    // Calculate initial storage size
-    const size = getStorageSize();
-    setStorageSize(size);
-  }, [getStorageSize]);
+    // Calculate initial storage statistics
+    const stats = getStorageStatistics();
+    setStorageStats(stats);
+  }, []);
 
   const formatBytes = (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
@@ -28,22 +37,24 @@ export default function StorageManagement() {
     setCleanupResult(null);
     
     try {
-      const beforeSize = getStorageSize();
-      const beforeProfiles = Object.keys(profiles).length;
-      const beforeMessages = Object.values(characterMessages).reduce((total, messages) => total + messages.length, 0);
+      const beforeStats = getStorageStatistics();
       
+      // Clean up both full profiles and lightweight characters
       cleanupStorage();
+      cleanupOldCharacters();
       
       // Wait a bit for the cleanup to complete
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      const afterSize = getStorageSize();
-      const afterProfiles = Object.keys(profiles).length;
-      const afterMessages = Object.values(characterMessages).reduce((total, messages) => total + messages.length, 0);
+      const afterStats = getStorageStatistics();
+      setStorageStats(afterStats);
       
-      setStorageSize(afterSize);
+      const removedProfiles = beforeStats.fullProfiles - afterStats.fullProfiles;
+      const removedCharacters = beforeStats.lightweightCharacters - afterStats.lightweightCharacters;
+      const sizeReduction = beforeStats.totalSize - afterStats.totalSize;
+      
       setCleanupResult(
-        `Cleanup completed! Removed ${beforeProfiles - afterProfiles} profiles and ${beforeMessages - afterMessages} messages. Storage reduced by ${formatBytes(beforeSize - afterSize)}.`
+        `Cleanup completed! Removed ${removedProfiles} full profiles and ${removedCharacters} lightweight characters. Storage reduced by ${formatBytes(sizeReduction)}.`
       );
     } catch (error) {
       setCleanupResult(`Error during cleanup: ${error}`);
@@ -60,19 +71,27 @@ export default function StorageManagement() {
       <h3 className="text-lg font-semibold mb-4 text-white">Storage Management</h3>
       
       <div className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-gray-700 rounded-lg p-4">
-            <h4 className="text-sm font-medium text-gray-300 mb-2">Storage Size</h4>
-            <p className="text-2xl font-bold text-white">{formatBytes(storageSize)}</p>
+            <h4 className="text-sm font-medium text-gray-300 mb-2">Total Storage</h4>
+            <p className="text-2xl font-bold text-white">{formatBytes(storageStats.totalSize)}</p>
             <p className="text-xs text-gray-400 mt-1">
-              {storageSize > 5 * 1024 * 1024 ? '⚠️ Over 5MB limit' : '✅ Within limits'}
+              {storageStats.totalSize > 5 * 1024 * 1024 ? '⚠️ Over 5MB limit' : '✅ Within limits'}
             </p>
           </div>
           
           <div className="bg-gray-700 rounded-lg p-4">
-            <h4 className="text-sm font-medium text-gray-300 mb-2">Stored Profiles</h4>
-            <p className="text-2xl font-bold text-white">{totalProfiles}</p>
+            <h4 className="text-sm font-medium text-gray-300 mb-2">Lightweight Characters</h4>
+            <p className="text-2xl font-bold text-white">{storageStats.lightweightCharacters.toLocaleString()}</p>
+            <p className="text-xs text-gray-400 mt-1">Max: 5000 characters</p>
+            <p className="text-xs text-blue-400 mt-1">{formatBytes(storageStats.lightweightSize)}</p>
+          </div>
+          
+          <div className="bg-gray-700 rounded-lg p-4">
+            <h4 className="text-sm font-medium text-gray-300 mb-2">Full Profiles</h4>
+            <p className="text-2xl font-bold text-white">{storageStats.fullProfiles}</p>
             <p className="text-xs text-gray-400 mt-1">Max: 100 profiles</p>
+            <p className="text-xs text-green-400 mt-1">{formatBytes(storageStats.fullProfileSize)}</p>
           </div>
           
           <div className="bg-gray-700 rounded-lg p-4">
@@ -112,12 +131,13 @@ export default function StorageManagement() {
         )}
 
         <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-4">
-          <h4 className="text-blue-400 font-medium mb-2">💡 Tips to Reduce Storage Usage</h4>
+          <h4 className="text-blue-400 font-medium mb-2">💡 Dual Storage System</h4>
           <ul className="text-blue-200 text-sm space-y-1">
-            <li>• The app automatically limits profiles to 100 and messages to 1000 per character</li>
-            <li>• Old profiles and messages are automatically cleaned up when storage is full</li>
-            <li>• Consider clearing chat history for inactive characters</li>
-            <li>• Browser localStorage typically has a 5-10MB limit</li>
+            <li>• <strong>Lightweight Characters</strong>: Gender + species for up to 5000 characters (~250KB)</li>
+            <li>• <strong>Full Profiles</strong>: Complete profile data for up to 100 characters (~50MB)</li>
+            <li>• Gender coloring works for all characters, even without full profiles</li>
+            <li>• Full profiles are only stored when explicitly viewed/requested</li>
+            <li>• Old data is automatically cleaned up when limits are reached</li>
           </ul>
         </div>
       </div>

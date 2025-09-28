@@ -107,6 +107,13 @@ export interface ProfileImage {
   image_description: string;
 }
 
+export interface LightweightCharacterData {
+  character: string;
+  gender: string;
+  species: string;
+  lastSeen: number;
+}
+
 export interface ProfileData {
   character: string;
   description: string;

@@ -9,6 +9,7 @@ import { signalRService } from '@/lib/signalr';
 import { Message, ProfileData } from '@/types';
 import BBCodeEditor from './BBCodeEditor';
 import { useTypingStatus } from '@/hooks/useTypingStatus';
+import { useNotifications } from '@/hooks/useNotifications';
 import MessageList from './messages/MessageList';
 import JoinChannelModal from './JoinChannelModal';
 import UnknownChannelNotification from './UnknownChannelNotification';
@@ -21,11 +22,22 @@ import FriendsList from './FriendsList';
 import SearchModal from './SearchModal';
 import DebugPanel from './DebugPanel';
 import Console from './Console';
+import MobileDrawer from './MobileDrawer';
+import MobileTabs from './MobileTabs';
 
 export default function ChatInterface() {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterStore();
-  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText } = useChatStore();
+  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText } = useChatStore();
+  
+  // Initialize notifications
+  const { 
+    showPMNotification, 
+    showChannelNotification, 
+    showTypingNotification,
+    requestPermission,
+    isReady: isNotificationReady 
+  } = useNotifications();
   const [bbcodeInput, setBbcodeInput] = useState('');
   const [selectedChannel, setSelectedChannel] = useState('');
   const [showJoinModal, setShowJoinModal] = useState(false);
@@ -38,6 +50,7 @@ export default function ChatInterface() {
   const [channelMenu, setChannelMenu] = useState<{ x: number; y: number; channel: string } | null>(null);
   const [showCharacterManagement, setShowCharacterManagement] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [activeMobileTab, setActiveMobileTab] = useState<string | null>(null);
   const [typingToast, setTypingToast] = useState<{ fromCharacter: string; status: 'typing' | 'paused' | 'clear' } | null>(null);
   const messageListRef = useRef<{ scrollToBottom: () => void; scrollToBottomFast: () => void; isNearBottom: (thresholdPx?: number) => boolean; scrollToMessage: (messageId: string) => void }>(null);
 
@@ -71,21 +84,44 @@ export default function ChatInterface() {
       clearUnreadCountForChannel(activeCharacter, message.channel);
     }
 
-    // Check if this is a PM message to an inactive character
+    // Check if this is a PM message
     const isPM = message.channel && message.channel.startsWith('PRI-');
     const isToInactiveCharacter = !message.isActiveCharacter;
-    
-    if (isPM && isToInactiveCharacter && message.characterName) {
-      // Auto-open PM window for inactive character
+
+    if (isPM && message.characterName) {
       const pmChannelId = message.channel;
       const characterName = message.characterName;
       
-      // Add PM channel to selected channels for the character
-      if (!getSelectedChannelsForCharacter(characterName).includes(pmChannelId)) {
-        addToSelectedChannels([pmChannelId], characterName);
+      // Auto-open PM window for inactive character
+      if (isToInactiveCharacter) {
+        // Add PM channel to selected channels for the character
+        if (!getSelectedChannelsForCharacter(characterName).includes(pmChannelId)) {
+          addToSelectedChannels([pmChannelId], characterName);
+        }
+        console.log(`Auto-opened PM window for inactive character ${characterName}: ${pmChannelId}`);
       }
       
-      console.log(`Auto-opened PM window for inactive character ${characterName}: ${pmChannelId}`);
+      // Show notification for PM (both active and inactive characters)
+      if (isNotificationReady) {
+        const senderName = message.sender;
+        const messageContent = message.content || 'New PM message';
+        
+        // Only show notification if the PM channel is not currently selected
+        const shouldShowNotification = selectedChannel !== pmChannelId;
+        
+        if (shouldShowNotification) {
+          showPMNotification(
+            senderName,
+            messageContent,
+            characterName,
+            () => {
+              // Open PM when notification is clicked
+              openPMChannel(senderName, characterName);
+              setSelectedChannel(pmChannelId);
+            }
+          );
+        }
+      }
     }
 
     // Show notification for new unknown channel activity (only for active character)
@@ -111,25 +147,23 @@ export default function ChatInterface() {
     try {
       const sender = message.sender;
       if (sender) {
-        const existingProfile = getProfile(sender);
         const requestStatus = getProfileRequestStatus(sender);
+        const hasData = hasCharacterData(sender);
+        const knownGender = getCharacterGender(sender);
         
-        if (!existingProfile && requestStatus !== 'requesting') {
-          // We don't have a profile, so request one to get gender info
+        if (!hasData && requestStatus !== 'requesting') {
+          // We don't have any data for this character, so request profile to get gender info
           markCharacterKnown(sender);
           requestProfileForCharacter(sender);
-        } else if (existingProfile && requestStatus !== 'requesting') {
-          // We have a profile, but only refresh if gender is unknown/None
-          const knownGender = existingProfile.gender;
-          if (!knownGender || knownGender === 'None') {
-            refreshProfile(sender);
-          }
+        } else if (hasData && (!knownGender || knownGender === 'None') && requestStatus !== 'requesting') {
+          // We have data but gender is unknown/None, refresh profile
+          refreshProfile(sender);
         }
       }
     } catch (e) {
       console.warn('Profile fetch attempt failed:', e);
     }
-   }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, selectedChannels, notificationChannel, getProfile, getProfileRequestStatus, markCharacterKnown, requestProfileForCharacter, isProfileStale, refreshProfile]);
+   }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, selectedChannels, notificationChannel, hasCharacterData, getCharacterGender, getProfileRequestStatus, markCharacterKnown, requestProfileForCharacter, refreshProfile, isNotificationReady, showPMNotification, openPMChannel, setSelectedChannel]);
 
   const handleReceiveRecentMessages = useCallback((recentMessages: Message[]) => {
     addMessages(recentMessages, activeCharacter || undefined);
@@ -165,6 +199,13 @@ export default function ChatInterface() {
   // Check if there are unread messages on other characters
   const hasOtherCharacterActivity = activeCharacter ? hasUnreadActivityOnOtherCharacters(activeCharacter) : false;
   const totalOtherCharacterCount = activeCharacter ? getTotalUnreadCountOnOtherCharacters(activeCharacter) : 0;
+
+  // Request notification permission on component mount
+  useEffect(() => {
+    if (!isNotificationReady) {
+      requestPermission();
+    }
+  }, [isNotificationReady, requestPermission]);
 
   // Optimized useEffect for SignalR listeners - only runs when necessary
   useEffect(() => {
@@ -241,6 +282,11 @@ export default function ChatInterface() {
             fromCharacter: data.FromCharacter,
             status: data.Status as 'typing' | 'paused' | 'clear'
           });
+          
+          // Show browser notification for typing status
+          if (isNotificationReady) {
+            showTypingNotification(data.FromCharacter, data.Status as 'typing' | 'paused');
+          }
         }
       }
     });
@@ -301,7 +347,7 @@ export default function ChatInterface() {
       signalRService.removeListener('ProfileReceived');
       signalRService.removeListener('ChannelsSubscribed');
     };
-  }, [handleReceiveMessage, handleReceiveRecentMessages, handleReceiveHistory, handleChannelsSubscribed, addProfile, setConnected]); // Only re-run when these stable callbacks change
+  }, [handleReceiveMessage, handleReceiveRecentMessages, handleReceiveHistory, handleChannelsSubscribed, addProfile, setConnected, isNotificationReady, showTypingNotification]); // Only re-run when these stable callbacks change
 
   // Separate effect for setting initial channel to avoid re-running listeners
   useEffect(() => {
@@ -537,10 +583,18 @@ export default function ChatInterface() {
     }
   };
 
+  const handleMobileTabClick = (tab: string) => {
+    if (activeMobileTab === tab) {
+      setActiveMobileTab(null);
+    } else {
+      setActiveMobileTab(tab);
+    }
+  };
+
   return (
     <div className="flex h-screen bg-gray-900" onClick={handleGlobalClick}>
-      {/* Sidebar */}
-      <div className="w-64 bg-gray-800 shadow-md">
+      {/* Sidebar - Hidden on mobile */}
+      <div className="hidden lg:flex w-64 bg-gray-800 shadow-md flex-col">
         <div className="p-4 border-b border-gray-700">
           <h2 className="font-bold text-lg text-white">F-Chat Bouncer</h2>
           <p className="text-sm text-gray-300">Welcome, {user?.username}</p>
@@ -734,8 +788,8 @@ export default function ChatInterface() {
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="bg-gray-800 shadow-sm p-4 border-b border-gray-700">
+        {/* Header - Hidden on mobile */}
+        <div className="hidden lg:block bg-gray-800 shadow-sm p-4 border-b border-gray-700">
           <div className="flex items-center justify-between">
             <h1 className="font-semibold text-lg text-white">
               {selectedChannel ?
@@ -823,7 +877,7 @@ export default function ChatInterface() {
         {/* Chat Content Area */}
         <div className="flex-1 flex min-h-0">
           {/* Messages */}
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col min-h-0 w-full lg:w-auto">
             <div className="flex-1 min-h-0">
               <MessageList
                 ref={messageListRef}
@@ -860,13 +914,6 @@ export default function ChatInterface() {
           {/* Character List Sidebar - Hidden on mobile, shown on desktop */}
           {selectedChannel && !selectedChannel.startsWith('PRI-') && (
             <div className="hidden xl:flex w-80 bg-gray-800 border-l border-gray-700 flex-col h-full p-4">
-              <ChannelCharacterList channelId={selectedChannel} onOpenPM={handleOpenPM} />
-            </div>
-          )}
-
-          {/* Mobile Character List - Shown as dropdown on mobile */}
-          {selectedChannel && !selectedChannel.startsWith('PRI-') && (
-            <div className="xl:hidden">
               <ChannelCharacterList channelId={selectedChannel} onOpenPM={handleOpenPM} />
             </div>
           )}
@@ -928,6 +975,225 @@ export default function ChatInterface() {
         isOpen={showCharacterManagement}
         onClose={() => setShowCharacterManagement(false)}
       />
+
+      {/* Mobile Tabs */}
+      <MobileTabs
+        activeTab={activeMobileTab}
+        onTabClick={handleMobileTabClick}
+        unreadCounts={{
+          channels: Object.values(currentUnreadCounts).reduce((sum, count) => sum + count, 0),
+          friends: 0, // TODO: Add friends unread count
+          characters: hasOtherCharacterActivity ? totalOtherCharacterCount : 0
+        }}
+      />
+
+      {/* Mobile Drawers */}
+      <MobileDrawer
+        isOpen={activeMobileTab === 'friends'}
+        onClose={() => setActiveMobileTab(null)}
+        title="Friends"
+        position="left"
+      >
+        <div className="p-4">
+          <FriendsList onOpenPM={handleOpenPM} />
+        </div>
+      </MobileDrawer>
+
+      <MobileDrawer
+        isOpen={activeMobileTab === 'channels'}
+        onClose={() => setActiveMobileTab(null)}
+        title="Channels & Messages"
+        position="left"
+      >
+        <div className="p-4">
+          <div className="space-y-1 mb-4">
+            {currentSelectedChannels.map((channel) => {
+              const isPM = channel.startsWith('PRI-');
+              return (
+                <button
+                  key={channel}
+                  onClick={() => {
+                    setSelectedChannel(channel);
+                    setActiveMobileTab(null);
+                  }}
+                  className={`w-full text-left px-3 py-2 rounded text-sm ${
+                    selectedChannel === channel
+                      ? 'bg-indigo-600 text-white'
+                      : currentUnreadCounts[channel]
+                        ? 'bg-gray-700 text-white'
+                        : 'text-gray-300 hover:bg-gray-700'
+                  }`}
+                  onContextMenu={(e) => handleChannelContextMenu(e, channel)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center flex-1">
+                      <span className="mr-2">
+                        {isPM ? '💬' : '#'}
+                      </span>
+                      <div className="flex flex-col">
+                        <span>{getChannelDisplayName(channel)}</span>
+                        {/* Show typing indicator for PM channels */}
+                        {isPM && activeCharacter && (
+                          <span className="text-xs text-gray-400 opacity-75">
+                            {getTypingDisplayText(activeCharacter, channel)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {currentUnreadCounts[channel] && selectedChannel !== channel && (
+                      <span className="ml-2 bg-indigo-600 text-indigo-100 text-xs rounded-full px-2 py-0.5">
+                        {currentUnreadCounts[channel]}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Character Activity Overview */}
+          {activeCharacter && (
+            <div>
+              <h3 className="font-semibold text-sm text-gray-400 mb-2 flex items-center">
+                <span className="mr-1">👥</span>
+                Character Activity
+              </h3>
+              <div className="space-y-1">
+                {connections.map((connection) => {
+                  const characterUnknownChannels = getUnknownChannelsForCharacter(connection.characterName);
+                  const characterUnknownCounts = getUnknownChannelCountsForCharacter(connection.characterName);
+                  const characterUnreadCounts = getUnreadCountsForCharacter(connection.characterName);
+                  const isActive = connection.characterName === activeCharacter;
+                  
+                  // Get high-urgency and regular counts
+                  const highUrgencyCount = getHighUrgencyUnreadCountForCharacter(connection.characterName);
+                  const regularCount = getRegularUnreadCountForCharacter(connection.characterName);
+                  const totalUnreadCount = highUrgencyCount + regularCount;
+                  
+                  return (
+                    <button
+                      key={connection.characterName}
+                      onClick={() => {
+                        // Switch character logic would go here
+                        setActiveMobileTab(null);
+                      }}
+                      className={`w-full text-left px-3 py-2 rounded text-sm ${
+                        isActive
+                          ? 'bg-green-600 text-white'
+                          : totalUnreadCount > 0
+                            ? 'bg-blue-600 text-white'
+                            : 'text-gray-300 hover:bg-gray-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center flex-1">
+                          <div className={`w-2 h-2 rounded-full mr-2 ${
+                            isActive ? 'bg-green-500' : connection.isConnected ? 'bg-blue-500' : 'bg-red-500'
+                          }`}></div>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{connection.characterName}</span>
+                            <span className="text-xs text-gray-400">
+                              {isActive ? 'Active' : connection.isConnected ? 'Connected' : 'Disconnected'}
+                            </span>
+                          </div>
+                        </div>
+                        {totalUnreadCount > 0 && !isActive && (
+                          <span className="ml-2 bg-indigo-600 text-indigo-100 text-xs rounded-full px-2 py-0.5">
+                            {totalUnreadCount}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </MobileDrawer>
+
+      <MobileDrawer
+        isOpen={activeMobileTab === 'characters'}
+        onClose={() => setActiveMobileTab(null)}
+        title="Manage Characters"
+        position="left"
+      >
+        <div className="p-4">
+          <div className="space-y-4">
+            {/* Character Switcher */}
+            <div>
+              <h3 className="font-semibold text-sm text-gray-400 mb-2">Switch Character</h3>
+              <CharacterSwitcher className="w-full" />
+            </div>
+
+            {/* Character Management Button */}
+            <button
+              onClick={() => {
+                setActiveMobileTab(null);
+                setShowCharacterManagement(true);
+              }}
+              className="w-full px-3 py-2 text-sm bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors"
+            >
+              Manage Characters
+            </button>
+
+            {/* Character Activity with Notifications */}
+            {activeCharacter && (
+              <div>
+                <h3 className="font-semibold text-sm text-gray-400 mb-2 flex items-center">
+                  <span className="mr-1">👥</span>
+                  Character Activity
+                </h3>
+                <div className="space-y-1">
+                  {connections.map((connection) => {
+                    const characterUnknownChannels = getUnknownChannelsForCharacter(connection.characterName);
+                    const characterUnknownCounts = getUnknownChannelCountsForCharacter(connection.characterName);
+                    const characterUnreadCounts = getUnreadCountsForCharacter(connection.characterName);
+                    const isActive = connection.characterName === activeCharacter;
+                    
+                    // Get high-urgency and regular counts
+                    const highUrgencyCount = getHighUrgencyUnreadCountForCharacter(connection.characterName);
+                    const regularCount = getRegularUnreadCountForCharacter(connection.characterName);
+                    const totalUnreadCount = highUrgencyCount + regularCount;
+                    
+                    return (
+                      <div
+                        key={connection.characterName}
+                        className={`w-full text-left px-3 py-2 rounded text-sm ${
+                          isActive
+                            ? 'bg-green-600 text-white'
+                            : totalUnreadCount > 0
+                              ? 'bg-blue-600 text-white'
+                              : 'text-gray-300'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center flex-1">
+                            <div className={`w-2 h-2 rounded-full mr-2 ${
+                              isActive ? 'bg-green-500' : connection.isConnected ? 'bg-blue-500' : 'bg-red-500'
+                            }`}></div>
+                            <div className="flex flex-col">
+                              <span className="font-medium">{connection.characterName}</span>
+                              <span className="text-xs text-gray-400">
+                                {isActive ? 'Active' : connection.isConnected ? 'Connected' : 'Disconnected'}
+                              </span>
+                            </div>
+                          </div>
+                          {totalUnreadCount > 0 && !isActive && (
+                            <span className="ml-2 bg-indigo-600 text-indigo-100 text-xs rounded-full px-2 py-0.5">
+                              {totalUnreadCount}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </MobileDrawer>
 
       {/* Search Modal */}
       <SearchModal

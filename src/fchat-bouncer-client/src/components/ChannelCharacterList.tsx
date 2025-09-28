@@ -193,6 +193,14 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
   });
 
   // Context menu handlers
+  const handleCharacterClick = (characterName: string, event: React.MouseEvent) => {
+    // Show context menu instead of opening PM directly
+    setUserContextMenu({
+      username: characterName,
+      position: { x: event.clientX, y: event.clientY }
+    });
+  };
+
   const handleCharacterRightClick = (characterName: string, event: React.MouseEvent) => {
     setUserContextMenu({
       username: characterName,
@@ -331,6 +339,7 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
                   variant="detailed"
                   showLastSeen={true}
                   className="mb-1"
+                  onClick={handleCharacterClick}
                   onRightClick={handleCharacterRightClick}
                 />
               ))}

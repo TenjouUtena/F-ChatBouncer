@@ -23,7 +23,7 @@ interface CharacterProps {
   variant?: 'default' | 'compact' | 'detailed';
   showStatusMessage?: boolean;
   showLastSeen?: boolean;
-  onClick?: (characterName: string) => void;
+  onClick?: (characterName: string, event: React.MouseEvent) => void;
   onRightClick?: (characterName: string, event: React.MouseEvent) => void;
   className?: string;
   onMouseEnter?: (characterName: string) => void;
@@ -134,9 +134,9 @@ export default function Character({
     }
   };
 
-  const handleClick = () => {
+  const handleClick = (event: React.MouseEvent) => {
     if (onClick) {
-      onClick(characterName);
+      onClick(characterName, event);
     }
   };
 

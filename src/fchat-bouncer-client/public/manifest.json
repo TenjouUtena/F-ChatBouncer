@@ -1,0 +1,49 @@
+{
+  "name": "F-Chat Bouncer",
+  "short_name": "FChatBouncer",
+  "description": "F-Chat Bouncer - Cross-platform F-Chat client",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.ico",
+      "sizes": "16x16 32x32 48x48",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": ["social", "communication"],
+  "lang": "en",
+  "dir": "ltr",
+  "scope": "/",
+  "prefer_related_applications": false,
+  "screenshots": [
+    {
+      "src": "/logo.svg",
+      "sizes": "1280x720",
+      "type": "image/svg+xml",
+      "form_factor": "wide"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Open Chat",
+      "short_name": "Chat",
+      "description": "Open the main chat interface",
+      "url": "/",
+      "icons": [
+        {
+          "src": "/logo.ico",
+          "sizes": "16x16 32x32 48x48"
+        }
+      ]
+    }
+  ]
+}

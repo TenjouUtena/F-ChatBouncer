@@ -353,9 +353,10 @@ public class FListCharacterDataService : IFListCharacterDataService
             var infotag = mapping.GetInfotagById(key);
             var humanReadableName = infotag?.Name ?? key;
             
-            // Map the value if it's numeric
+            // Map the value if it's numeric, but exclude 'age' field from value mapping
             var mappedValue = value;
-            if (!string.IsNullOrEmpty(value) && System.Text.RegularExpressions.Regex.IsMatch(value, @"^\d+$"))
+            if (!string.IsNullOrEmpty(value) && System.Text.RegularExpressions.Regex.IsMatch(value, @"^\d+$") && 
+                !humanReadableName.Equals("age", StringComparison.OrdinalIgnoreCase))
             {
                 var mappedValueById = mapping.GetInfotagValueById(value);
                 if (!string.IsNullOrEmpty(mappedValueById))

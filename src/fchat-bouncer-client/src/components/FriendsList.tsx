@@ -74,10 +74,12 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
     }
   };
 
-  const handleFriendClick = (friendName: string) => {
-    if (onOpenPM) {
-      onOpenPM(friendName);
-    }
+  const handleFriendClick = (friendName: string, event: React.MouseEvent) => {
+    // Show context menu instead of opening PM directly
+    setUserContextMenu({
+      username: friendName,
+      position: { x: event.clientX, y: event.clientY }
+    });
   };
 
   const handleFriendRightClick = (friendName: string, event: React.MouseEvent) => {

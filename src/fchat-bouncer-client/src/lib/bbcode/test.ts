@@ -161,6 +161,28 @@ const testCases = [
     name: 'Complex nested',
     input: '[quote][b]Bold quote[/b] with [color=blue]colored text[/color][/quote]',
     expected: 'Contains quote with nested formatting'
+  },
+  
+  // Line break tests
+  {
+    name: 'Single line break',
+    input: 'hello\nhi',
+    expected: 'hello<br>hi'
+  },
+  {
+    name: 'Double line break', 
+    input: 'hello\n\nhi',
+    expected: 'hello<br><br>hi'
+  },
+  {
+    name: 'Multiple line breaks',
+    input: 'hello\nhi\n\nworld',
+    expected: 'hello<br>hi<br><br>world'
+  },
+  {
+    name: 'Line breaks with BBCode',
+    input: '[b]hello[/b]\nhi',
+    expected: '<strong>hello</strong><br>hi'
   }
 ];
 

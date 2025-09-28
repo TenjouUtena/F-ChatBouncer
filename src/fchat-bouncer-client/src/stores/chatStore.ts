@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { ChatState, Message, ConnectionStatus, Channel, ProfileData, TypingState } from '@/types';
+import { ChatState, Message, ConnectionStatus, Channel, ProfileData, TypingState, LightweightCharacterData } from '@/types';
 import { generateMessageId } from '@/lib/messages/messageUtils';
 import { api, setTokenRefreshCallback } from '@/lib/api';
 import { useAuthStore } from './authStore';
+import { useLightweightCharacterStore } from './lightweightCharacterStore';
 
 interface ChatStore extends ChatState {
   // Character-scoped data
@@ -92,6 +93,9 @@ interface ChatStore extends ChatState {
   // Profile management (global)
   addProfile: (characterName: string, profileData: ProfileData) => void;
   getProfile: (characterName: string) => ProfileData | null;
+  getCharacterGender: (characterName: string) => string | null;
+  getCharacterSpecies: (characterName: string) => string | null;
+  hasCharacterData: (characterName: string) => boolean;
   markCharacterKnown: (characterName: string) => void;
   isCharacterKnown: (characterName: string) => boolean;
   requestProfileForCharacter: (characterName: string) => void;
@@ -187,6 +191,8 @@ function cleanupOldMessages(characterMessages: Record<string, Message[]>): Recor
 }
 
 function safeSetItem(key: string, value: string): boolean {
+  if (typeof window === 'undefined') return false;
+  
   try {
     localStorage.setItem(key, value);
     return true;
@@ -770,6 +776,11 @@ export const useChatStore = create<ChatStore>()(
 
       // Profile management (global - shared across characters)
       addProfile: (characterName: string, profileData: ProfileData) => {
+        // Always store lightweight data (gender + species)
+        const lightweightStore = useLightweightCharacterStore.getState();
+        const species = profileData.info?.species || profileData.info?.Species || 'Unknown';
+        lightweightStore.addCharacter(characterName, profileData.gender, species);
+        
         set((state) => {
           // Clean up old profiles before adding new one
           const cleanedProfiles = cleanupOldProfiles(state.profiles, state.profileLastRequested);
@@ -796,6 +807,39 @@ export const useChatStore = create<ChatStore>()(
 
       getProfile: (characterName: string) => {
         return get().profiles[characterName] || null;
+      },
+
+      getCharacterGender: (characterName: string) => {
+        // First try full profile, then lightweight storage
+        const fullProfile = get().profiles[characterName];
+        if (fullProfile) {
+          return fullProfile.gender;
+        }
+        
+        const lightweightStore = useLightweightCharacterStore.getState();
+        const lightweightData = lightweightStore.getCharacter(characterName);
+        return lightweightData?.gender || null;
+      },
+
+      getCharacterSpecies: (characterName: string) => {
+        // First try full profile, then lightweight storage
+        const fullProfile = get().profiles[characterName];
+        if (fullProfile) {
+          return fullProfile.info?.species || fullProfile.info?.Species || 'Unknown';
+        }
+        
+        const lightweightStore = useLightweightCharacterStore.getState();
+        const lightweightData = lightweightStore.getCharacter(characterName);
+        return lightweightData?.species || null;
+      },
+
+      hasCharacterData: (characterName: string) => {
+        // Check both full profile and lightweight storage
+        const hasFullProfile = characterName in get().profiles;
+        if (hasFullProfile) return true;
+        
+        const lightweightStore = useLightweightCharacterStore.getState();
+        return lightweightStore.hasCharacter(characterName);
       },
 
       markCharacterKnown: (characterName: string) => {
@@ -1666,6 +1710,7 @@ export const useChatStore = create<ChatStore>()(
       storage: createJSONStorage(() => ({
         getItem: (name: string) => {
           try {
+            if (typeof window === 'undefined') return null;
             return localStorage.getItem(name);
           } catch (error) {
             console.error('Error reading from localStorage:', error);
@@ -1673,11 +1718,15 @@ export const useChatStore = create<ChatStore>()(
           }
         },
         setItem: (name: string, value: string) => {
-          safeSetItem(name, value);
+          if (typeof window !== 'undefined') {
+            safeSetItem(name, value);
+          }
         },
         removeItem: (name: string) => {
           try {
-            localStorage.removeItem(name);
+            if (typeof window !== 'undefined') {
+              localStorage.removeItem(name);
+            }
           } catch (error) {
             console.error('Error removing from localStorage:', error);
           }

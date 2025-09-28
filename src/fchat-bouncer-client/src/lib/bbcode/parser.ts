@@ -254,7 +254,7 @@ export function parseBBCodeToHtml(content: string): BBCodeParseResult {
       } else if (char === '\n' && !inHtmlTag) {
         // Only convert newlines to <br> if they're not immediately after HTML tags
         // This prevents breaking HTML structure while still converting plain text newlines
-        if (lastChar !== '>' && lastChar !== '\n') {
+        if (lastChar !== '>') {
           htmlResult += '<br>';
         }
       } else {

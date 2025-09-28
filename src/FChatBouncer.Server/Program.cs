@@ -331,7 +331,9 @@ builder.Services.AddHealthChecks()
     {
         try
         {
+#pragma warning disable ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' in 'ConfigureServices'
             using var scope = builder.Services.BuildServiceProvider().CreateScope();
+#pragma warning restore ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' in 'ConfigureServices'
             var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
             context.Database.CanConnect();
             return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Database connection is working");

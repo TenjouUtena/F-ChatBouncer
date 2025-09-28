@@ -28,7 +28,7 @@ interface MessageComponentProps {
   isGrouped?: boolean;
   actions?: MessageAction[];
   onMessageClick?: (message: Message) => void;
-  onSenderClick?: (sender: string) => void;
+  onSenderClick?: (sender: string, event: React.MouseEvent) => void;
   onSenderRightClick?: (sender: string, event: React.MouseEvent) => void;
   onMessageAction?: (action: string, message: Message) => void;
   className?: string;
@@ -114,7 +114,7 @@ function MessageComponent({
       await refreshProfile(message.sender);
     }
 
-    onSenderClick?.(message.sender);
+    onSenderClick?.(message.sender, e);
   }, [message.sender, onSenderClick, senderProfile, profileStatus, isStale, requestProfileForCharacter, refreshProfile]);
 
   // Handle sender right-click

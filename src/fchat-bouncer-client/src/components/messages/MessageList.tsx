@@ -111,13 +111,13 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   }, [onMessageSelect]);
 
   // Handle sender click (left-click = open PM)
-  const handleSenderClick = useCallback((sender: string) => {
-    // Open PM channel
-    const pmChannelId = `PRI-${sender}`;
-    console.log('Opening PM with:', sender, 'Channel:', pmChannelId);
-    // This will be passed up to ChatInterface to handle PM opening
-    onMessageAction?.('openPM', { sender, pmChannelId } as any);
-  }, [onMessageAction]);
+  const handleSenderClick = useCallback((sender: string, event: React.MouseEvent) => {
+    // Show context menu instead of opening PM directly
+    setUserContextMenu({
+      username: sender,
+      position: { x: event.clientX, y: event.clientY }
+    });
+  }, []);
 
   // Handle sender right-click (show context menu)
   const handleSenderRightClick = useCallback((sender: string, event: React.MouseEvent) => {

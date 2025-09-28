@@ -14,6 +14,11 @@ interface CharacterSettingsProps {
 interface CharacterSettings {
   autoJoinChannels: boolean;
   showNotifications: boolean;
+  showPMNotifications?: boolean;
+  showChannelNotifications?: boolean;
+  showTypingNotifications?: boolean;
+  requireInteraction?: boolean;
+  silent?: boolean;
   messageHistoryLimit: number;
   autoScroll: boolean;
   showTimestamps: boolean;
@@ -23,6 +28,11 @@ interface CharacterSettings {
 const defaultSettings: CharacterSettings = {
   autoJoinChannels: false,
   showNotifications: true,
+  showPMNotifications: true,
+  showChannelNotifications: false,
+  showTypingNotifications: false,
+  requireInteraction: false,
+  silent: false,
   messageHistoryLimit: 1000,
   autoScroll: true,
   showTimestamps: true,
@@ -151,7 +161,7 @@ export default function CharacterSettings({ characterName, isOpen, onClose }: Ch
               <div className="space-y-3">
                 <label className="flex items-center justify-between">
                   <div>
-                    <span className="text-sm font-medium text-gray-200">Show Notifications</span>
+                    <span className="text-sm font-medium text-gray-200">Enable Notifications</span>
                     <p className="text-xs text-gray-400">Receive browser notifications for new messages</p>
                   </div>
                   <input
@@ -161,6 +171,62 @@ export default function CharacterSettings({ characterName, isOpen, onClose }: Ch
                     className="w-4 h-4 text-blue-600 border-gray-600 rounded focus:ring-blue-500 bg-gray-700"
                   />
                 </label>
+                
+                {settings.showNotifications && (
+                  <div className="ml-4 space-y-2 border-l-2 border-gray-600 pl-4">
+                    <label className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-200">PM Notifications</span>
+                        <p className="text-xs text-gray-400">Notify for private messages</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.showPMNotifications ?? true}
+                        onChange={(e) => handleSettingChange('showPMNotifications', e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-600 rounded focus:ring-blue-500 bg-gray-700"
+                      />
+                    </label>
+                    
+                    <label className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-200">Channel Notifications</span>
+                        <p className="text-xs text-gray-400">Notify for channel messages</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.showChannelNotifications ?? false}
+                        onChange={(e) => handleSettingChange('showChannelNotifications', e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-600 rounded focus:ring-blue-500 bg-gray-700"
+                      />
+                    </label>
+                    
+                    <label className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-200">Typing Notifications</span>
+                        <p className="text-xs text-gray-400">Notify when someone is typing</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.showTypingNotifications ?? false}
+                        onChange={(e) => handleSettingChange('showTypingNotifications', e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-600 rounded focus:ring-blue-500 bg-gray-700"
+                      />
+                    </label>
+                    
+                    <label className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-200">Require Interaction</span>
+                        <p className="text-xs text-gray-400">Keep notifications until dismissed</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.requireInteraction ?? false}
+                        onChange={(e) => handleSettingChange('requireInteraction', e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-600 rounded focus:ring-blue-500 bg-gray-700"
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
             </div>
 
