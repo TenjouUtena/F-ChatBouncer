@@ -11,17 +11,20 @@ public class FListCharacterDataService : IFListCharacterDataService
     private readonly HttpClient _httpClient;
     private readonly IFListMappingService _mappingService;
     private readonly IFListTicketManager _ticketManager;
+    private readonly FListImageService _imageService;
     private readonly ILogger<FListCharacterDataService> _logger;
 
     public FListCharacterDataService(
         HttpClient httpClient, 
         IFListMappingService mappingService,
         IFListTicketManager ticketManager,
+        FListImageService imageService,
         ILogger<FListCharacterDataService> logger)
     {
         _httpClient = httpClient;
         _mappingService = mappingService;
         _ticketManager = ticketManager;
+        _imageService = imageService;
         _logger = logger;
     }
 
@@ -104,8 +107,25 @@ public class FListCharacterDataService : IFListCharacterDataService
                 throw new InvalidOperationException($"Character data API error: {characterData.Error}");
             }
 
-            _logger.LogInformation("Successfully fetched character data for {CharacterName}. ID: {Id}, ViewCount: {ViewCount}, Infotags: {InfotagCount}, Kinks: {KinkCount}",
-                characterName, characterData.Id, characterData.ViewCount, characterData.Infotags.Count, characterData.Kinks.Count);
+            _logger.LogInformation("Successfully fetched character data for {CharacterName}. ID: {Id}, ViewCount: {ViewCount}, Infotags: {InfotagCount}, Kinks: {KinkCount}, Images: {ImageCount}",
+                characterName, characterData.Id, characterData.ViewCount, characterData.Infotags.Count, characterData.Kinks.Count, characterData.Images.Count);
+
+            // Fetch detailed image metadata from F-List profile-images API
+            try
+            {
+                var detailedImages = await _imageService.GetCharacterImagesAsync(characterData.Id);
+                if (detailedImages.Any())
+                {
+                    characterData.Images = detailedImages;
+                    _logger.LogInformation("Updated {ImageCount} images with detailed metadata for {CharacterName}", 
+                        detailedImages.Count, characterName);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch detailed image metadata for {CharacterName}, using basic image data", characterName);
+                // Continue with basic image data if detailed fetch fails
+            }
 
             return characterData;
         }
@@ -135,7 +155,7 @@ public class FListCharacterDataService : IFListCharacterDataService
             {
                 return await GetCharacterDataAsync(characterName, ticket, account);
             }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("ticket has expired") || ex.Message.Contains("no ticket requested"))
+            catch (InvalidOperationException ex) when (ex.Message.Contains("ticket has expired") || ex.Message.Contains("no ticket requested") || ex.Message.Contains("Invalid ticket"))
             {
                 _logger.LogWarning("Ticket expired for {CharacterName}, clearing and retrying with new ticket", characterName);
                 
@@ -212,6 +232,9 @@ public class FListCharacterDataService : IFListCharacterDataService
 
     public ProfileData ConvertToProfileData(CharacterDataResponse characterData, MappingResponse? mapping = null)
     {
+        _logger.LogInformation("=== ConvertToProfileData START for {CharacterName} ===", characterData.Name);
+        _logger.LogInformation("Input characterData has {ImageCount} images", characterData.Images.Count);
+        
         var profileData = new ProfileData
         {
             CharacterName = characterData.Name,
@@ -259,11 +282,42 @@ public class FListCharacterDataService : IFListCharacterDataService
         // Add view count
         profileData.Info["View Count"] = characterData.ViewCount.ToString();
 
-        // Add images
+        // Add images with detailed metadata
+        _logger.LogInformation("Processing {ImageCount} images for {CharacterName}", characterData.Images.Count, characterData.Name);
         if (characterData.Images.Any())
         {
             var imageIds = string.Join(", ", characterData.Images.Select(img => img.ImageId));
             profileData.Info["Images"] = imageIds;
+            
+            // Add detailed image information for frontend
+            foreach (var image in characterData.Images)
+            {
+                var imageKey = $"Image_{image.ImageId}";
+                var imageInfo = $"{image.ImageId}.{image.Extension}|{image.Width}x{image.Height}";
+                if (!string.IsNullOrEmpty(image.Description))
+                {
+                    imageInfo += $"|{image.Description}";
+                }
+                profileData.Info[imageKey] = imageInfo;
+            }
+
+            // Populate the new images array with structured data
+            foreach (var image in characterData.Images)
+            {
+                profileData.Images.Add(new ProfileImage
+                {
+                    ImageId = image.ImageId,
+                    ImageExt = image.Extension,
+                    ImageDescription = image.Description
+                });
+                _logger.LogInformation("Added image {ImageId}.{Extension} to ProfileData for {CharacterName}", 
+                    image.ImageId, image.Extension, characterData.Name);
+            }
+            _logger.LogInformation("Added {ImageCount} images to ProfileData for {CharacterName}", profileData.Images.Count, characterData.Name);
+        }
+        else
+        {
+            _logger.LogInformation("No images found for {CharacterName}", characterData.Name);
         }
 
         // Add inlines
@@ -276,8 +330,9 @@ public class FListCharacterDataService : IFListCharacterDataService
         // Extract gender from profile data
         profileData.ExtractGender();
 
-        _logger.LogDebug("Converted character data to ProfileData for {CharacterName}. Info Fields: {InfoCount}, Kinks: {KinkCount}", 
-            characterData.Name, profileData.Info.Count, profileData.Kinks.Count);
+        _logger.LogInformation("=== ConvertToProfileData END for {CharacterName} ===", characterData.Name);
+        _logger.LogInformation("Final ProfileData has {ImageCount} images, {InfoCount} info fields, {KinkCount} kinks", 
+            profileData.Images.Count, profileData.Info.Count, profileData.Kinks.Count);
 
         return profileData;
     }

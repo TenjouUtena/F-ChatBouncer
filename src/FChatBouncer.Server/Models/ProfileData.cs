@@ -21,6 +21,21 @@ public class KinkInfo
 }
 
 /// <summary>
+/// Represents a profile image with its metadata
+/// </summary>
+public class ProfileImage
+{
+    [JsonPropertyName("image_id")]
+    public string ImageId { get; set; } = string.Empty;
+
+    [JsonPropertyName("image_ext")]
+    public string ImageExt { get; set; } = string.Empty;
+
+    [JsonPropertyName("image_description")]
+    public string ImageDescription { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Structured profile data class for F-Chat character profiles.
 /// This represents the parsed and structured data from F-Chat's PRD command sequence.
 /// </summary>
@@ -55,6 +70,12 @@ public class ProfileData
     /// </summary>
     [JsonPropertyName("kinks")]
     public List<KinkInfo> Kinks { get; set; } = new();
+
+    /// <summary>
+    /// Character's images with metadata
+    /// </summary>
+    [JsonPropertyName("images")]
+    public List<ProfileImage> Images { get; set; } = new();
 
     /// <summary>
     /// When this profile data was built/received

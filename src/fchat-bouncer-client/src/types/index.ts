@@ -101,12 +101,19 @@ export interface KinkInfo {
   custom: boolean;
 }
 
+export interface ProfileImage {
+  image_id: string;
+  image_ext: string;
+  image_description: string;
+}
+
 export interface ProfileData {
   character: string;
   description: string;
   gender: string;
   info: Record<string, string>;
   kinks: KinkInfo[];
+  images: ProfileImage[];
   timestamp: string;
 }
 

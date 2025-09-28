@@ -1449,7 +1449,7 @@ public class BouncerHub : Hub
         if (expiredRequests.Count > 0)
         {
             // Note: Can't use _logger here since this is a static method
-            Console.WriteLine($"Cleaned up {expiredRequests.Count} expired credential requests");
+            // Console logging removed
         }
     }
 

@@ -1712,19 +1712,19 @@ public class FChatWebSocketClient : IDisposable
 
                 case "STA":
                     // Status update
-                    _logger.LogInformation("Received STA (status update) command with data: {Data}", jsonData);
+                    // STA command received - logging removed
                     HandleStatusUpdate(data);
                     break;
 
                 case "NLN":
                     // User came online
-                    _logger.LogInformation("Received NLN (user online) command with data: {Data}", jsonData);
+                    // NLN command received - logging removed
                     HandleUserOnline(data);
                     break;
 
                 case "FLN":
                     // User went offline
-                    _logger.LogInformation("Received FLN (user offline) command with data: {Data}", jsonData);
+                    // FLN command received - logging removed
                     HandleUserOffline(data);
                     break;
 
@@ -2195,7 +2195,7 @@ public class FChatWebSocketClient : IDisposable
             _channelCharacters[channelId].RemoveAll(c => c.CharacterName == characterName);
             _channelCharacters[channelId].Add(character);
 
-            _logger.LogInformation("Character {CharacterName} joined channel {ChannelId}", characterName, channelId);
+            // Character joined channel - logging removed
             CharacterJoinedChannel?.Invoke(channelId, character);
         }
         catch (Exception ex)
@@ -2282,7 +2282,7 @@ public class FChatWebSocketClient : IDisposable
                 var removed = _channelCharacters[channelId].RemoveAll(c => c.CharacterName == characterName);
                 if (removed > 0)
                 {
-                    _logger.LogInformation("Character {CharacterName} left channel {ChannelId}", characterName, channelId);
+                    // Character left channel - logging removed
                     CharacterLeftChannel?.Invoke(channelId, characterName);
                 }
             }
@@ -2394,8 +2394,7 @@ public class FChatWebSocketClient : IDisposable
 
             if (!string.IsNullOrEmpty(characterName) && !string.IsNullOrEmpty(status))
             {
-                _logger.LogInformation("Status update for {Character}: {Status} - {StatusMessage}", 
-                    characterName, status, statusMessage);
+                // Status update - logging removed
 
                 // Update channel characters if this character is in any channels
                 foreach (var kvp in _channelCharacters)
@@ -2480,7 +2479,7 @@ public class FChatWebSocketClient : IDisposable
                     gender = genderElement.GetString() ?? "";
                 }
                 
-                _logger.LogInformation("User came online: {Character} (Status: {Status}, Gender: {Gender})", characterName, status, gender);
+                // User came online - logging removed
                 
                 // Cache gender information for friends
                 if (!string.IsNullOrEmpty(gender) && _friendsList.Contains(characterName))
@@ -2521,7 +2520,7 @@ public class FChatWebSocketClient : IDisposable
 
             if (!string.IsNullOrEmpty(characterName))
             {
-                _logger.LogInformation("User went offline: {Character}", characterName);
+                // User went offline - logging removed
                 
                 // Fire the user offline event
                 UserOffline?.Invoke(characterName);

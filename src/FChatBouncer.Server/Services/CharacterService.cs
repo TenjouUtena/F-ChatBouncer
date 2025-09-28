@@ -204,7 +204,7 @@ public class CharacterService : ICharacterService
 
     public async Task UpdateCharacterProfileAsync(string characterName, ProfileData profileData)
     {
-        _logger.LogDebug("Updating character profile: {CharacterName}", characterName);
+        _logger.LogDebug("Updating character profile: {CharacterName} with {ImageCount} images", characterName, profileData.Images.Count);
 
         var character = await GetOrCreateCharacterAsync(characterName);
         character.SetStructuredProfile(profileData);
@@ -218,6 +218,7 @@ public class CharacterService : ICharacterService
         try
         {
             await _context.SaveChangesAsync();
+            _logger.LogInformation("Successfully updated character profile for {CharacterName} with {ImageCount} images", characterName, profileData.Images.Count);
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
         {
@@ -263,7 +264,9 @@ public class CharacterService : ICharacterService
     public async Task<ProfileData?> GetCharacterProfileAsync(string characterName)
     {
         var character = await GetCharacterAsync(characterName);
-        return character?.GetStructuredProfile();
+        var profileData = character?.GetStructuredProfile();
+        _logger.LogDebug("Retrieved profile for {CharacterName}: {ImageCount} images", characterName, profileData?.Images.Count ?? 0);
+        return profileData;
     }
 
     public async Task<List<Character>> SearchCharactersAsync(string searchTerm, int limit = 50)

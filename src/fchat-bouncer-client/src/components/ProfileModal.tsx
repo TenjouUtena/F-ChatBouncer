@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ProfileData, KinkInfo } from '@/types';
+import { ProfileData, KinkInfo, ProfileImage } from '@/types';
 import { getCharacterNameStyle, getGenderDisplayName } from '@/lib/genderColors';
 import { useChatStore } from '@/stores/chatStore';
 import kinksData from '@/kinks';
@@ -224,19 +224,8 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
   const renderImagesTab = () => {
     if (!profileData) return null;
 
-    // Look for image fields
-    const imageFields = ['image', 'Image', 'avatar', 'Avatar', 'picture', 'Picture', 'photo', 'Photo'];
-    const images: string[] = [];
-
-    for (const field of imageFields) {
-      const value = profileData.info?.[field];
-      if (value && typeof value === 'string' && value.trim()) {
-        // Check if it looks like a URL
-        if (value.match(/^https?:\/\/.+/)) {
-          images.push(value);
-        }
-      }
-    }
+    // Use the new structured images array
+    const images = profileData.images || [];
 
     if (images.length === 0) {
       return (
@@ -248,11 +237,11 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
 
     return (
       <div className="space-y-4">
-        {images.map((imageUrl, index) => (
+        {images.map((image, index) => (
           <div key={index} className="border border-gray-700 rounded-lg overflow-hidden">
             <img
-              src={imageUrl}
-              alt={`Profile image ${index + 1}`}
+              src={`https://static.f-list.net/images/charimage/${image.image_id}.${image.image_ext}`}
+              alt={image.image_description || `Profile image ${index + 1}`}
               className="w-full h-auto max-h-96 object-contain bg-gray-900"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -263,6 +252,11 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
                 }
               }}
             />
+            {image.image_description && (
+              <div className="p-2 bg-gray-700 text-xs text-gray-300">
+                <div className="font-medium">{image.image_description}</div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -324,9 +318,7 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
         return profileData.kinks?.length || 0;
       
       case 'images':
-        return Object.entries(profileData.info || {}).filter(([key, value]) => 
-          value && typeof value === 'string' && value.trim() && value.match(/^https?:\/\/.+/)
-        ).length;
+        return profileData.images?.length || 0;
       
       default:
         return 0;

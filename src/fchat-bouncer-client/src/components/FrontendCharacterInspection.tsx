@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useCharacterStore } from '@/stores/characterStore';
+import StorageManagement from './StorageManagement';
 
 export default function FrontendCharacterInspection() {
   const { profiles, knownCharacters, profileRequestStatus, profileLastRequested } = useChatStore();
@@ -210,23 +211,23 @@ export default function FrontendCharacterInspection() {
                     </div>
                   )}
                   
-                  {Object.keys(selectedProfile.select || {}).length > 0 && (
+                  {Object.keys((selectedProfile as any).select || {}).length > 0 && (
                     <div>
                       <p className="text-sm text-gray-400 mb-2">Select Fields</p>
                       <div className="bg-gray-800 rounded-lg p-3 max-h-32 overflow-y-auto">
                         <pre className="text-sm text-gray-300 whitespace-pre-wrap">
-                          {JSON.stringify(selectedProfile.select, null, 2)}
+                          {JSON.stringify((selectedProfile as any).select, null, 2)}
                         </pre>
                       </div>
                     </div>
                   )}
                   
-                  {Object.keys(selectedProfile.additional || {}).length > 0 && (
+                  {Object.keys((selectedProfile as any).additional || {}).length > 0 && (
                     <div>
                       <p className="text-sm text-gray-400 mb-2">Additional Fields</p>
                       <div className="bg-gray-800 rounded-lg p-3 max-h-32 overflow-y-auto">
                         <pre className="text-sm text-gray-300 whitespace-pre-wrap">
-                          {JSON.stringify(selectedProfile.additional, null, 2)}
+                          {JSON.stringify((selectedProfile as any).additional, null, 2)}
                         </pre>
                       </div>
                     </div>
@@ -256,7 +257,7 @@ export default function FrontendCharacterInspection() {
                 <div>
                   <p className="font-medium text-white">{characterName}</p>
                   <p className="text-sm text-gray-400">
-                    {profile.gender} • {Object.keys(profile.info || {}).length + Object.keys(profile.select || {}).length} fields
+                     {profile.gender} • {Object.keys(profile.info || {}).length + Object.keys((profile as any).select || {}).length} fields
                   </p>
                 </div>
                 <div className="text-right">
@@ -268,6 +269,11 @@ export default function FrontendCharacterInspection() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Storage Management */}
+      <div className="mt-8">
+        <StorageManagement />
       </div>
     </div>
   );

@@ -131,6 +131,93 @@ interface ChatStore extends ChatState {
   clearUnknownChannel: (channel: string) => void;
   clearMessages: () => void;
   clearAllHistory: () => void;
+  
+  // Storage management
+  cleanupStorage: () => void;
+  getStorageSize: () => number;
+}
+
+// Storage quota management utilities
+const STORAGE_QUOTA_LIMIT = 5 * 1024 * 1024; // 5MB limit
+const MAX_PROFILES = 100; // Limit number of profiles
+const MAX_MESSAGES_PER_CHANNEL = 500; // Limit messages per channel
+const MAX_MESSAGES_PER_CHARACTER = 1000; // Limit total messages per character
+
+function estimateStorageSize(data: any): number {
+  return new Blob([JSON.stringify(data)]).size;
+}
+
+function cleanupOldProfiles(profiles: Record<string, ProfileData>, profileLastRequested: Record<string, number>): Record<string, ProfileData> {
+  const profileEntries = Object.entries(profiles);
+  
+  if (profileEntries.length <= MAX_PROFILES) {
+    return profiles;
+  }
+  
+  // Sort by last requested time (oldest first)
+  const sortedProfiles = profileEntries.sort(([, a], [, b]) => {
+    const aTime = profileLastRequested[a.character] || 0;
+    const bTime = profileLastRequested[b.character] || 0;
+    return aTime - bTime;
+  });
+  
+  // Keep only the most recent profiles
+  const profilesToKeep = sortedProfiles.slice(-MAX_PROFILES);
+  console.log(`Cleaned up ${profileEntries.length - MAX_PROFILES} old profiles`);
+  
+  return Object.fromEntries(profilesToKeep);
+}
+
+function cleanupOldMessages(characterMessages: Record<string, Message[]>): Record<string, Message[]> {
+  const cleaned: Record<string, Message[]> = {};
+  
+  for (const [characterName, messages] of Object.entries(characterMessages)) {
+    if (messages.length <= MAX_MESSAGES_PER_CHARACTER) {
+      cleaned[characterName] = messages;
+      continue;
+    }
+    
+    // Keep only the most recent messages
+    const sortedMessages = messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    cleaned[characterName] = sortedMessages.slice(-MAX_MESSAGES_PER_CHARACTER);
+    console.log(`Cleaned up ${messages.length - MAX_MESSAGES_PER_CHARACTER} old messages for ${characterName}`);
+  }
+  
+  return cleaned;
+}
+
+function safeSetItem(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.code === DOMException.QUOTA_EXCEEDED_ERR) {
+      console.warn('localStorage quota exceeded, attempting cleanup...');
+      
+      // Try to free up space by removing old data
+      const keysToRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const currentKey = localStorage.key(i);
+        if (currentKey && currentKey !== key && currentKey.startsWith('chat-storage')) {
+          keysToRemove.push(currentKey);
+        }
+      }
+      
+      // Remove old storage entries
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+      
+      try {
+        localStorage.setItem(key, value);
+        console.log('Successfully stored after cleanup');
+        return true;
+      } catch (retryError) {
+        console.error('Still unable to store after cleanup:', retryError);
+        return false;
+      }
+    }
+    console.error('localStorage error:', error);
+    return false;
+  }
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -206,11 +293,14 @@ export const useChatStore = create<ChatStore>()(
 
           if (isDuplicate) return state;
 
+          // Clean up old messages before adding new one
+          const cleanedMessages = cleanupOldMessages({
+            ...state.characterMessages,
+            [characterName]: [...characterMessages, messageWithId]
+          });
+
           const newState: Partial<ChatStore> = {
-            characterMessages: {
-              ...state.characterMessages,
-              [characterName]: [...characterMessages, messageWithId]
-            }
+            characterMessages: cleanedMessages
           };
 
           // Handle unread counts for all messages
@@ -680,20 +770,26 @@ export const useChatStore = create<ChatStore>()(
 
       // Profile management (global - shared across characters)
       addProfile: (characterName: string, profileData: ProfileData) => {
-        set((state) => ({
-          profiles: {
-            ...state.profiles,
-            [characterName]: profileData
-          },
-          profileRequestStatus: {
-            ...state.profileRequestStatus,
-            [characterName]: 'success'
-          },
-          profileLastRequested: {
-            ...state.profileLastRequested,
-            [characterName]: Date.now()
-          }
-        }));
+        set((state) => {
+          // Clean up old profiles before adding new one
+          const cleanedProfiles = cleanupOldProfiles(state.profiles, state.profileLastRequested);
+          
+          return {
+            ...state,
+            profiles: {
+              ...cleanedProfiles,
+              [characterName]: profileData
+            },
+            profileRequestStatus: {
+              ...state.profileRequestStatus,
+              [characterName]: 'success'
+            },
+            profileLastRequested: {
+              ...state.profileLastRequested,
+              [characterName]: Date.now()
+            }
+          };
+        });
         
         get().markCharacterKnown(characterName);
       },
@@ -1496,11 +1592,97 @@ export const useChatStore = create<ChatStore>()(
           }
           return state;
         });
+      },
+
+      // Storage management methods
+      cleanupStorage: () => {
+        set((state) => {
+          console.log('Performing storage cleanup...');
+          
+          // Clean up old profiles
+          const cleanedProfiles = cleanupOldProfiles(state.profiles, state.profileLastRequested);
+          
+          // Clean up old messages
+          const cleanedMessages = cleanupOldMessages(state.characterMessages);
+          
+          // Clean up old profile request status for characters we no longer have profiles for
+          const cleanedProfileRequestStatus = Object.fromEntries(
+            Object.entries(state.profileRequestStatus).filter(([characterName]) => 
+              cleanedProfiles[characterName] !== undefined
+            )
+          );
+          
+          // Clean up old profile last requested for characters we no longer have profiles for
+          const cleanedProfileLastRequested = Object.fromEntries(
+            Object.entries(state.profileLastRequested).filter(([characterName]) => 
+              cleanedProfiles[characterName] !== undefined
+            )
+          );
+          
+          console.log(`Storage cleanup completed. Profiles: ${Object.keys(state.profiles).length} -> ${Object.keys(cleanedProfiles).length}`);
+          
+          return {
+            ...state,
+            profiles: cleanedProfiles,
+            characterMessages: cleanedMessages,
+            profileRequestStatus: cleanedProfileRequestStatus,
+            profileLastRequested: cleanedProfileLastRequested
+          };
+        });
+      },
+
+      getStorageSize: () => {
+        try {
+          const currentState = get();
+          const partializedData = {
+            profiles: currentState.profiles,
+            profileRequestStatus: currentState.profileRequestStatus,
+            profileLastRequested: currentState.profileLastRequested,
+            knownCharacters: Array.from(currentState.knownCharacters),
+            characterMessages: currentState.characterMessages,
+            characterSelectedChannels: currentState.characterSelectedChannels,
+            characterJoinedChannels: currentState.characterJoinedChannels,
+            characterChannelMetadata: currentState.characterChannelMetadata,
+            characterUnknownChannels: Object.fromEntries(
+              Object.entries(currentState.characterUnknownChannels).map(([key, value]) => [key, Array.from(value)])
+            ),
+            characterUnknownChannelCounts: currentState.characterUnknownChannelCounts,
+            characterUnreadCounts: currentState.characterUnreadCounts,
+            characterLazyLoadingState: currentState.characterLazyLoadingState,
+            messages: currentState.messages,
+            selectedChannels: currentState.selectedChannels,
+            channelMetadata: currentState.channelMetadata
+          };
+          
+          return estimateStorageSize(partializedData);
+        } catch (error) {
+          console.error('Error calculating storage size:', error);
+          return 0;
+        }
       }
     }),
     {
       name: 'chat-storage',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => ({
+        getItem: (name: string) => {
+          try {
+            return localStorage.getItem(name);
+          } catch (error) {
+            console.error('Error reading from localStorage:', error);
+            return null;
+          }
+        },
+        setItem: (name: string, value: string) => {
+          safeSetItem(name, value);
+        },
+        removeItem: (name: string) => {
+          try {
+            localStorage.removeItem(name);
+          } catch (error) {
+            console.error('Error removing from localStorage:', error);
+          }
+        }
+      })),
       partialize: (state) => ({
         profiles: state.profiles,
         profileRequestStatus: state.profileRequestStatus,

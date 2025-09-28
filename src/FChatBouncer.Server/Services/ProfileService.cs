@@ -438,6 +438,29 @@ public class ProfileService : IProfileService
         {
             var imageIds = string.Join(", ", characterData.Images.Select(img => img.ImageId));
             profileData.Info["Images"] = imageIds;
+            
+            // Add detailed image information for frontend
+            foreach (var image in characterData.Images)
+            {
+                var imageKey = $"Image_{image.ImageId}";
+                var imageInfo = $"{image.ImageId}.{image.Extension}|{image.Width}x{image.Height}";
+                if (!string.IsNullOrEmpty(image.Description))
+                {
+                    imageInfo += $"|{image.Description}";
+                }
+                profileData.Info[imageKey] = imageInfo;
+            }
+
+            // Populate the images array with structured data
+            foreach (var image in characterData.Images)
+            {
+                profileData.Images.Add(new ProfileImage
+                {
+                    ImageId = image.ImageId,
+                    ImageExt = image.Extension,
+                    ImageDescription = image.Description
+                });
+            }
         }
 
         // Add inlines

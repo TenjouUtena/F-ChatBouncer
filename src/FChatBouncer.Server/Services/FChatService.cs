@@ -1604,8 +1604,7 @@ public class FChatService : IFChatService
     {
         try
         {
-            _logger.LogInformation("Profile received for character {ProfileCharacterName} by character {CharacterName} (User: {UserId})", 
-                profileCharacterName, characterName, userId);
+            // Profile received - logging removed
 
             // Save profile data using ProfileService
             using var scope = _serviceProvider.CreateScope();
@@ -1617,8 +1616,7 @@ public class FChatService : IFChatService
                 var structuredProfile = JsonSerializer.Deserialize<ProfileData>(profileData);
                 if (structuredProfile != null)
                 {
-                    _logger.LogInformation("Saving structured profile for {ProfileCharacterName}: {Summary}",
-                        profileCharacterName, structuredProfile.GetSummary());
+                    // Saving structured profile - logging removed
 
                     // Save the structured profile data
                     await profileService.SaveStructuredProfileAsync(userId, structuredProfile);
@@ -1707,8 +1705,7 @@ public class FChatService : IFChatService
     {
         try
         {
-            _logger.LogInformation("Character {CharacterName} joined channel {ChannelId} for user {UserId}", 
-                character.CharacterName, channelId, userId);
+            // Character joined channel - logging removed
 
             // Update character information in unified character store
             await ExecuteWithCharacterService(cs => cs.UpdateCharacterFromChannelDataAsync(character.CharacterName, character));
@@ -1735,8 +1732,7 @@ public class FChatService : IFChatService
     {
         try
         {
-            _logger.LogInformation("Character {LeftCharacterName} left channel {ChannelId} for user {UserId}", 
-                leftCharacterName, channelId, userId);
+            // Character left channel - logging removed
 
             // Broadcast to SignalR clients
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("CharacterLeftChannel", new
@@ -1757,8 +1753,7 @@ public class FChatService : IFChatService
     {
         try
         {
-            _logger.LogInformation("Status update received for {StatusCharacterName}: {Status} - {StatusMessage} (via character {CharacterName} of user {UserId})", 
-                statusCharacterName, status, statusMessage, characterName, userId);
+            // Status update received - logging removed
 
             // Update character status in unified character store (batched)
             await BatchUpdateCharacterStatus(statusCharacterName, status, statusMessage, true);
@@ -1871,8 +1866,7 @@ public class FChatService : IFChatService
     {
         try
         {
-            _logger.LogInformation("User came online: {CharacterName} (Status: {Status}, Gender: {Gender}) (via user {UserId})", 
-                characterName, status, gender, userId);
+            // User came online - logging removed
 
             // Update character status in unified character store (batched)
             await BatchUpdateCharacterStatus(characterName, status, null, true);
@@ -1904,7 +1898,7 @@ public class FChatService : IFChatService
     {
         try
         {
-            _logger.LogInformation("User went offline: {CharacterName} (via user {UserId})", characterName, userId);
+            // User went offline - logging removed
 
             // Update character status in unified character store (batched)
             await BatchUpdateCharacterStatus(characterName, "offline", null, false);

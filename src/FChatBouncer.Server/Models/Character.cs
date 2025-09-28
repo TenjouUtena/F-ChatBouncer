@@ -107,7 +107,9 @@ public class Character
 
         try
         {
-            return JsonSerializer.Deserialize<ProfileData>(StructuredProfileData);
+            var profileData = JsonSerializer.Deserialize<ProfileData>(StructuredProfileData);
+            // Console logging removed
+            return profileData;
         }
         catch (JsonException)
         {
@@ -143,6 +145,8 @@ public class Character
         {
             WriteIndented = true
         });
+
+        // Console logging removed
 
         LastUpdated = DateTime.UtcNow;
     }

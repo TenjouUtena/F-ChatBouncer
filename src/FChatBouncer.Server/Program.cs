@@ -22,11 +22,11 @@ builder.Host.UseSerilog((context, config) =>
         .WriteTo.Console(restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning)
         .WriteTo.File(
             path: "logs/fchat-bouncer-.log",
-            rollingInterval: RollingInterval.Day,
+            rollingInterval: RollingInterval.Hour,
             retainedFileCountLimit: 7,
             fileSizeLimitBytes: 100_000_000,
             rollOnFileSizeLimit: true,
-            restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information
+            restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning
         );
 });
 
@@ -270,11 +270,13 @@ builder.Services.AddSingleton<TicketManager>();
 builder.Services.AddHttpClient<MemoService>();
 builder.Services.AddHttpClient<FListMappingService>();
 builder.Services.AddHttpClient<FListCharacterDataService>();
+builder.Services.AddHttpClient<FListImageService>();
 builder.Services.AddHttpClient<FListTicketManager>();
 
 // F-List API Services
 builder.Services.AddScoped<IFListMappingService, FListMappingService>();
 builder.Services.AddScoped<IFListCharacterDataService, FListCharacterDataService>();
+builder.Services.AddScoped<FListImageService>();
 builder.Services.AddSingleton<IFListTicketManager, FListTicketManager>();
 
 // CORS
