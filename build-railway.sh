@@ -62,6 +62,14 @@ echo "✅ Git repository checks passed"
 echo "🔄 Managing version and build ID..."
 source ./scripts/version-manager.sh "$VERSION_INCREMENT"
 
+echo "Git Check-in started"
+git add build-info.json src/fchat-bouncer-client/package.json src/FChatBouncer.Server/FChatBouncer.Server.csproj
+git commit -m "Build $BUILD_ID"
+git push
+
+echo "Git Check-in completed"
+
+
 # Set image tag to Docker-compatible format (version-buildId)
 IMAGE_TAG="$DOCKER_TAG"
 
