@@ -12,4 +12,5 @@ public interface IProfileService
     Task<List<Profile>> GetUserProfilesAsync(string userId);
     Task RequestProfileAsync(string userId, string characterName);
     Task<ProfileData?> GetCharacterDataAsync(string userId, string characterName);
+    Task NotifyProfileAvailableAsync(string userId, string characterName);
 }

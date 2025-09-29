@@ -501,7 +501,7 @@ export const noparseTag: BBCodeTag = {
 };
 
 /**
- * Collapse tag implementation for collapsible content
+ * Collapse tag implementation for collapsible content using HTML details/summary
  */
 export const collapseTag: BBCodeTag = {
   name: 'collapse',
@@ -509,40 +509,32 @@ export const collapseTag: BBCodeTag = {
   hasContent: true,
   selfClosing: false,
   parse: (content: string, attributes?: Record<string, string>) => {
-    const header = attributes?.header || 'Click to expand';
-    const collapseId = `collapse-${Math.random().toString(36).substr(2, 9)}`;
+    const header = attributes?.value || attributes?.header || 'Click to expand';
     
     // Parse the content to handle nested BBCode
     const { parseBBCodeToHtml } = require('./parser');
     const parsedContent = parseBBCodeToHtml(content);
     
     return `
-      <div class="collapse-container" data-collapse-id="${collapseId}" style="margin: 8px 0;">
-        <button 
-          class="collapse-button" 
-          data-collapse-target="${collapseId}"
-          style="
-            background: #f0f0f0; 
-            color: #333; 
-            border: 1px solid #ccc; 
-            padding: 6px 12px; 
-            cursor: pointer; 
-            border-radius: 3px;
-            width: 100%;
-            text-align: left;
-            font-weight: bold;
-          "
-        >
-          ▼ ${sanitizeContent(header)}
-        </button>
-        <div 
-          class="collapse-content" 
-          data-collapse-content="${collapseId}"
-          style="display: none; margin-top: 4px; padding: 12px; background: #fafafa; border: 1px solid #ddd; border-radius: 3px;"
-        >
+      <details style="margin: 8px 0; border: 1px solid #4b5563; border-radius: 4px; background: #1f2937;">
+        <summary style="
+          padding: 8px 12px; 
+          cursor: pointer; 
+          font-weight: bold; 
+          background: #374151; 
+          border-radius: 4px 4px 0 0;
+          list-style: none;
+          display: flex;
+          align-items: center;
+          color: #f9fafb;
+        ">
+          <span style="margin-right: 8px; transition: transform 0.2s ease;">▶</span>
+          ${sanitizeContent(header)}
+        </summary>
+        <div style="padding: 12px; border-top: 1px solid #4b5563; color: #f9fafb;">
           ${parsedContent.html}
         </div>
-      </div>
+      </details>
     `;
   },
 };

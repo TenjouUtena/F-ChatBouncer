@@ -9,6 +9,7 @@ class SignalRService {
   private storedCredentials: { username: string; password: string; fchatUsername?: string; fchatPassword?: string } | null = null;
   private isConnecting: boolean = false;
   private eventListenersSetup: boolean = false;
+  private onProfileAvailable: ((data: { characterName: string; timestamp: string }) => void) | null = null;
 
   async connect(token: string, credentials?: { username: string; password: string; fchatUsername?: string; fchatPassword?: string }): Promise<void> {
     // Prevent multiple simultaneous connections
@@ -125,6 +126,7 @@ class SignalRService {
     this.connection.off('ProfileRequested');
     this.connection.off('ProfileError');
     this.connection.off('ProfileReceived');
+    this.connection.off('ProfileAvailable');
     // Multi-character event listeners
     this.connection.off('CharacterConnected');
     this.connection.off('CharacterDisconnected');
@@ -241,6 +243,10 @@ this.onSearchResultsReceived = callback;
     this.onFriendsListUpdated = callback;
   }
 
+  public onProfileAvailableNotification(callback: (data: { characterName: string; timestamp: string }) => void): void {
+    this.onProfileAvailable = callback;
+  }
+
   private setupEventHandlers(): void {
     if (!this.connection || this.eventListenersSetup) return;
 
@@ -287,6 +293,13 @@ this.onSearchResultsReceived = callback;
 
     this.connection.on('ChannelJoined', (data: { Channel: string; CharacterName: string; Message: string }) => {
       console.log('Channel joined:', data);
+    });
+
+    this.connection.on('ProfileAvailable', (data: { characterName: string; timestamp: string }) => {
+      console.log('Profile available:', data);
+      if (this.onProfileAvailable) {
+        this.onProfileAvailable(data);
+      }
     });
 
     this.connection.on('ChannelLeft', (data: { Channel: string; CharacterName: string; Message: string }) => {
@@ -627,6 +640,38 @@ this.onSearchResultsReceived = callback;
     if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
       await this.connection.invoke('RequestProfile', characterName);
     }
+  }
+
+  async getBasicInfo(characterName: string): Promise<any> {
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      throw new Error('SignalR connection not available');
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.removeListener('ReceiveBasicInfo');
+        this.removeListener('BasicInfoError');
+        reject(new Error('GetBasicInfo request timed out'));
+      }, 10000); // 10 second timeout
+
+      const handleBasicInfo = (data: any) => {
+        clearTimeout(timeout);
+        this.removeListener('ReceiveBasicInfo');
+        this.removeListener('BasicInfoError');
+        resolve(data);
+      };
+
+      const handleError = (error: string) => {
+        clearTimeout(timeout);
+        this.removeListener('ReceiveBasicInfo');
+        this.removeListener('BasicInfoError');
+        reject(new Error(error));
+      };
+
+      this.addUniqueListener('ReceiveBasicInfo', handleBasicInfo);
+      this.addUniqueListener('BasicInfoError', handleError);
+      this.connection!.invoke('GetBasicInfo', characterName).catch(reject);
+    });
   }
 
   async getCharacters(): Promise<any[]> {

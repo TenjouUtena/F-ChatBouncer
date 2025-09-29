@@ -1,6 +1,6 @@
 {
   "name": "fchat-bouncer-client",
-  "version": "0.1.1alpha",
+  "version": "0.1.3",
   "private": true,
   "scripts": {
     "dev": "next dev",

@@ -212,10 +212,11 @@ export function useLazyMessages({
     // Check if we're near the bottom (for message trimming)
     const isNearBottom = distanceFromBottom <= 50;
 
-    // Only trim when we're at the bottom AND we have more than 100 messages loaded
+    // Only trim when we're at the bottom AND we have more than 150 messages loaded
     // This prevents trimming during scrollback operations
     // Skip trimming for PM channels (they start with PRI-)
-    if (isNearBottom && allStoredMessages.length > 100 && !channelId.startsWith('PRI-')) {
+    // At 150 messages, trim to 100, this should stop trim spam so much.
+    if (isNearBottom && allStoredMessages.length > 150 && !channelId.startsWith('PRI-')) {
       console.log('Near bottom with many messages, trimming to 100');
       trimChannelMessages(characterName, channelId, 100);
     }

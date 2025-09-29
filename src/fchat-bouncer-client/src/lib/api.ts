@@ -398,6 +398,11 @@ export const api = {
 
   // Memo API methods
   async getMemo(token: string, characterName: string): Promise<MemoResponse> {
+    return {
+      characterName: characterName,
+      hasMemo: false,
+      memo: "",
+    };
     const response = await fetchWithError(`${API_BASE}/fchat/memo/${encodeURIComponent(characterName)}`, {
       headers: {
         'Authorization': `Bearer ${token}`,

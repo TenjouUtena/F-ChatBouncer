@@ -661,6 +661,60 @@ public class BouncerHub : Hub
         }
     }
 
+    public async Task GetBasicInfo(string characterName)
+    {
+        var userId = Context.UserIdentifier;
+        if (userId == null) return;
+
+        _logger.LogInformation("User {UserId} requesting basic info for character {CharacterName}", userId, characterName);
+
+        try
+        {
+            // Get cached profile data without triggering new requests
+            var profileData = await _profileService.GetCachedProfileAsync(userId, characterName, allowStale: true);
+
+            if (profileData == null)
+            {
+                _logger.LogInformation("No cached profile data found for character {CharacterName} (User: {UserId})", characterName, userId);
+                await Clients.Caller.SendAsync("ReceiveBasicInfo", new
+                {
+                    CharacterName = characterName,
+                    Gender = (string?)null,
+                    Species = (string?)null,
+                    Status = (string?)null,
+                    CustomStatus = (string?)null,
+                    LastSeen = (DateTime?)null,
+                    HasData = false,
+                    Message = "No cached data available for this character"
+                });
+                return;
+            }
+
+            // Extract basic info from cached profile data
+            var basicInfo = new
+            {
+                CharacterName = characterName,
+                Gender = profileData.Gender ?? profileData.Info.GetValueOrDefault("Gender"),
+                Species = profileData.Info.GetValueOrDefault("Species"),
+                Status = profileData.Info.GetValueOrDefault("Status"),
+                CustomStatus = profileData.Info.GetValueOrDefault("Custom Status"),
+                LastSeen = profileData.Timestamp,
+                HasData = true,
+                Message = "Basic info retrieved from cached data"
+            };
+
+            _logger.LogInformation("Retrieved basic info for character {CharacterName} (User: {UserId}): Gender={Gender}, Species={Species}, Status={Status}", 
+                characterName, userId, basicInfo.Gender, basicInfo.Species, basicInfo.Status);
+
+            await Clients.Caller.SendAsync("ReceiveBasicInfo", basicInfo);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get basic info for character {CharacterName} (User: {UserId})", characterName, userId);
+            await Clients.Caller.SendAsync("BasicInfoError", $"Failed to get basic info for {characterName}");
+        }
+    }
+
     #region Multi-Character Management Methods
 
     public async Task ConnectCharacter(string characterName, string fchatUsername, string fchatPassword)

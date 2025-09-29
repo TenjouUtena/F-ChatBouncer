@@ -22,11 +22,11 @@ builder.Host.UseSerilog((context, config) =>
         .WriteTo.Console(restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning)
         .WriteTo.File(
             path: "logs/fchat-bouncer-.log",
-            rollingInterval: RollingInterval.Hour,
+            rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 7,
             fileSizeLimitBytes: 100_000_000,
             rollOnFileSizeLimit: true,
-            restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning
+            restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information
         );
 });
 

@@ -18,7 +18,14 @@ COPY . .
 
 # Accept build-time environment variables
 ARG NEXT_PUBLIC_API_URL
+ARG BUILD_VERSION
+ARG BUILD_ID
+ARG GIT_BRANCH
+
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV BUILD_VERSION=$BUILD_VERSION
+ENV BUILD_ID=$BUILD_ID
+ENV GIT_BRANCH=$GIT_BRANCH
 
 # Build the application
 RUN npm run build
@@ -37,6 +44,9 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Create build info file
+RUN echo "{\"version\":\"$BUILD_VERSION\",\"buildId\":\"$BUILD_ID\",\"branch\":\"$GIT_BRANCH\",\"buildDate\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > /app/build-info.json
 
 USER nextjs
 

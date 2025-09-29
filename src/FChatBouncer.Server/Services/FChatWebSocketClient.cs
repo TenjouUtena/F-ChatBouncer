@@ -762,6 +762,9 @@ public class FChatWebSocketClient : IDisposable
             var chaResponse = await chaTask;
             var orsResponse = await orsTask;
 
+            _logger.LogInformation("CHA response type: {ChaResponseType}, ORS response type: {OrsResponseType}", 
+                chaResponse?.GetType().Name ?? "null", orsResponse?.GetType().Name ?? "null");
+
             // Parse and merge the results
             var mergedChannels = MergeChannelLists(
                 chaResponse as JsonElement?, 
@@ -781,25 +784,34 @@ public class FChatWebSocketClient : IDisposable
     private List<FChatChannel> MergeChannelLists(JsonElement? chaResponse, JsonElement? orsResponse)
     {
         var mergedChannels = new Dictionary<string, FChatChannel>();
+        var chaChannelCount = 0;
+        var orsChannelCount = 0;
 
         // Process CHA channels first
         if (chaResponse.HasValue && chaResponse.Value.TryGetProperty("channels", out var chaChannelsElement))
         {
+            _logger.LogInformation("CHA response received with {ChannelCount} channels", chaChannelsElement.GetArrayLength());
             foreach (var channelElement in chaChannelsElement.EnumerateArray())
             {
                 var channel = ParseChannelFromElement(channelElement);
                 if (channel != null)
                 {
                     mergedChannels[channel.Id] = channel;
+                    chaChannelCount++;
                 }
             }
-            _logger.LogDebug("Added {ChannelCount} channels from CHA response", mergedChannels.Count);
+            _logger.LogInformation("Successfully parsed {ChannelCount} channels from CHA response", chaChannelCount);
+        }
+        else
+        {
+            _logger.LogWarning("CHA response is null or missing 'channels' property. CHA response: {ChaResponse}", 
+                chaResponse?.ToString() ?? "null");
         }
 
         // Process ORS channels, preferring ORS data for conflicts (more up-to-date user counts)
         if (orsResponse.HasValue && orsResponse.Value.TryGetProperty("channels", out var orsChannelsElement))
         {
-            var orsChannelCount = 0;
+            _logger.LogInformation("ORS response received with {ChannelCount} channels", orsChannelsElement.GetArrayLength());
             foreach (var channelElement in orsChannelsElement.EnumerateArray())
             {
                 var channel = ParseChannelFromElement(channelElement);
@@ -809,14 +821,19 @@ public class FChatWebSocketClient : IDisposable
                     orsChannelCount++;
                 }
             }
-            _logger.LogDebug("Added/updated {ChannelCount} channels from ORS response", orsChannelCount);
+            _logger.LogInformation("Successfully parsed {ChannelCount} channels from ORS response", orsChannelCount);
+        }
+        else
+        {
+            _logger.LogWarning("ORS response is null or missing 'channels' property. ORS response: {OrsResponse}", 
+                orsResponse?.ToString() ?? "null");
         }
 
         var result = mergedChannels.Values.ToList();
         _availableChannels = result; // Update the main channel list
         
         _logger.LogInformation("Merged channel lists: {TotalChannels} total channels ({ChaChannels} from CHA, {OrsChannels} from ORS)", 
-            result.Count, _chaChannels.Count, _orsChannels.Count);
+            result.Count, chaChannelCount, orsChannelCount);
         
         return result;
     }
@@ -825,11 +842,20 @@ public class FChatWebSocketClient : IDisposable
     {
         try
         {
-            if (channelElement.TryGetProperty("name", out var nameElement) &&
-                channelElement.TryGetProperty("title", out var titleElement))
+            if (channelElement.TryGetProperty("name", out var nameElement))
             {
                 var id = nameElement.GetString() ?? "";
-                var title = titleElement.GetString() ?? "";
+                var title = id; // Default to name if title is not provided
+                
+                // Try to get title, but don't require it
+                if (channelElement.TryGetProperty("title", out var titleElement))
+                {
+                    var titleValue = titleElement.GetString();
+                    if (!string.IsNullOrEmpty(titleValue))
+                    {
+                        title = titleValue;
+                    }
+                }
 
                 if (string.IsNullOrEmpty(id)) return null;
 
@@ -1631,20 +1657,26 @@ public class FChatWebSocketClient : IDisposable
 
                 case "CHA":
                     // CHA channel list response
+                    _logger.LogInformation("=== CHA COMMAND RECEIVED ===");
+                    _logger.LogInformation("Raw CHA data: {Data}", jsonData);
                     ParseChannelList(data, "CHA");
                     if (_pendingRequests.TryGetValue(command, out var chaTcs))
                     {
                         chaTcs.SetResult(data);
                     }
+                    _logger.LogInformation("=== CHA PROCESSING COMPLETE ===");
                     break;
 
                 case "ORS":
                     // ORS channel list response
+                    _logger.LogInformation("=== ORS COMMAND RECEIVED ===");
+                    _logger.LogInformation("Raw ORS data: {Data}", jsonData);
                     ParseChannelList(data, "ORS");
                     if (_pendingRequests.TryGetValue(command, out var orsTcs))
                     {
                         orsTcs.SetResult(data);
                     }
+                    _logger.LogInformation("=== ORS PROCESSING COMPLETE ===");
                     break;
 
                 case "COL":
@@ -1984,20 +2016,40 @@ public class FChatWebSocketClient : IDisposable
     {
         try
         {
-            _logger.LogDebug("Parsing {CommandType} channel list from F-Chat", commandType);
+            _logger.LogInformation("Parsing {CommandType} channel list from F-Chat", commandType);
+            _logger.LogInformation("{CommandType} data structure: {Data}", commandType, data.ToString());
 
             if (data.TryGetProperty("channels", out var channelsElement))
             {
+                _logger.LogInformation("{CommandType} found 'channels' property with {ChannelCount} items", 
+                    commandType, channelsElement.GetArrayLength());
+                
                 var channels = new List<FChatChannel>();
                 foreach (var channelElement in channelsElement.EnumerateArray())
                 {
-                    if (channelElement.TryGetProperty("name", out var nameElement) &&
-                        channelElement.TryGetProperty("title", out var titleElement))
+                    _logger.LogDebug("{CommandType} processing channel element: {ChannelElement}", 
+                        commandType, channelElement.ToString());
+                        
+                    if (channelElement.TryGetProperty("name", out var nameElement))
                     {
                         var id = nameElement.GetString() ?? "";
-                        var title = titleElement.GetString() ?? "";
+                        var title = id; // Default to name if title is not provided
+                        
+                        // Try to get title, but don't require it
+                        if (channelElement.TryGetProperty("title", out var titleElement))
+                        {
+                            var titleValue = titleElement.GetString();
+                            if (!string.IsNullOrEmpty(titleValue))
+                            {
+                                title = titleValue;
+                            }
+                        }
 
-                        if (string.IsNullOrEmpty(id)) continue;
+                        if (string.IsNullOrEmpty(id)) 
+                        {
+                            _logger.LogWarning("{CommandType} skipping channel with empty name", commandType);
+                            continue;
+                        }
 
                         var userCount = 0;
                         if (channelElement.TryGetProperty("characters", out var charactersElement))
@@ -2015,14 +2067,23 @@ public class FChatWebSocketClient : IDisposable
                             }
                         }
 
-                        channels.Add(new FChatChannel
+                        var channel = new FChatChannel
                         {
                             Id = id,
                             Name = id, // F-Chat uses the same for both
                             Title = title,
                             UserCount = userCount,
                             Mode = mode
-                        });
+                        };
+                        
+                        channels.Add(channel);
+                        _logger.LogDebug("{CommandType} added channel: {ChannelId} - {ChannelTitle}", 
+                            commandType, channel.Id, channel.Title);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("{CommandType} channel element missing required 'name' property: {ChannelElement}", 
+                            commandType, channelElement.ToString());
                     }
                 }
 
@@ -2037,6 +2098,11 @@ public class FChatWebSocketClient : IDisposable
                     _orsChannels = channels;
                     _logger.LogInformation("Parsed {ChannelCount} channels from ORS command", channels.Count);
                 }
+            }
+            else
+            {
+                _logger.LogWarning("{CommandType} response does not contain 'channels' property. Available properties: {Properties}", 
+                    commandType, string.Join(", ", data.EnumerateObject().Select(p => p.Name)));
             }
         }
         catch (Exception ex)

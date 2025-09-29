@@ -371,6 +371,32 @@ export default function Home() {
         }
       });
 
+      // Set up profile available listener
+      signalRService.onProfileAvailableNotification(async (data) => {
+        console.log('Profile available notification received:', data);
+        
+        // Validate that we have a character name
+        if (!data?.characterName) {
+          console.error('Profile available notification received without CharacterName:', data);
+          return;
+        }
+        
+        try {
+          // Fetch the profile via REST API
+          const profileResponse = await api.getProfile(token!, data.characterName, true);
+          console.log('Successfully fetched profile after notification:', profileResponse);
+          
+          // Update the profile in the chat store
+          const { addProfile } = useChatStore.getState();
+          if (profileResponse.profileData) {
+            addProfile(data.characterName, profileResponse.profileData);
+            console.log(`Added profile for ${data.characterName} to chat store`);
+          }
+        } catch (error) {
+          console.error('Failed to fetch profile after notification:', error);
+        }
+      });
+
       // Sync character store with backend state (with a small delay to ensure listeners are set up)
       setTimeout(async () => {
         await signalRService.getActiveCharacters();

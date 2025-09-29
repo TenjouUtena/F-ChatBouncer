@@ -5,6 +5,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useCharacterStore } from '@/stores/characterStore';
 import { useFriendsStore } from '@/stores/friendsStore';
+import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import { signalRService } from '@/lib/signalr';
 import { Message, ProfileData } from '@/types';
 import BBCodeEditor from './BBCodeEditor';
@@ -70,8 +71,29 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   });
 
   // Stable callback functions to prevent unnecessary re-renders
-  const handleReceiveMessage = useCallback((message: Message) => {
+  const handleReceiveMessage = useCallback(async (message: Message) => {
     console.log('Received message:', message, 'for character:', message.characterName, 'isActive:', message.isActiveCharacter);
+
+    // Check if we have gender data for the sender - if not, request basic info
+    const senderGender = getCharacterGender(message.sender);
+    if (!senderGender && message.sender && message.sender !== activeCharacter) {
+      console.log(`No gender data for ${message.sender}, requesting basic info...`);
+      try {
+        const basicInfo = await signalRService.getBasicInfo(message.sender);
+        if (basicInfo.HasData) {
+          console.log(`Retrieved basic info for ${message.sender}:`, basicInfo);
+          // Store the basic info in lightweight character store
+          const { addCharacter } = useLightweightCharacterStore.getState();
+          addCharacter(
+            message.sender,
+            basicInfo.Gender || 'Unknown',
+            basicInfo.Species || 'Unknown'
+          );
+        }
+      } catch (error) {
+        console.warn(`Failed to get basic info for ${message.sender}:`, error);
+      }
+    }
 
     // Always store the message regardless of which character received it
     // The character context helps us organize messages properly

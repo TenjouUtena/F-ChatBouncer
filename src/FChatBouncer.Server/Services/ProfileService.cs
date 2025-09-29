@@ -1,9 +1,11 @@
 using FChatBouncer.Server.Data;
 using FChatBouncer.Server.Models;
+using FChatBouncer.Server.Hubs;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using Npgsql;
+using Microsoft.AspNetCore.SignalR;
 
 namespace FChatBouncer.Server.Services;
 
@@ -13,18 +15,21 @@ public class ProfileService : IProfileService
     private readonly IFChatService _fChatService;
     private readonly ILogger<ProfileService> _logger;
     private readonly IProfileRateLimiter _rateLimiter;
+    private readonly IHubContext<BouncerHub> _hubContext;
     private readonly ConcurrentDictionary<string, Task> _pendingRequests = new();
 
     public ProfileService(
         IServiceProvider serviceProvider,
         IFChatService fChatService,
         ILogger<ProfileService> logger,
-        IProfileRateLimiter rateLimiter)
+        IProfileRateLimiter rateLimiter,
+        IHubContext<BouncerHub> hubContext)
     {
         _serviceProvider = serviceProvider;
         _fChatService = fChatService;
         _logger = logger;
         _rateLimiter = rateLimiter;
+        _hubContext = hubContext;
     }
 
     public async Task SaveProfileAsync(string userId, string characterName, string profileData, string? rawProData = null)
@@ -130,6 +135,9 @@ public class ProfileService : IProfileService
 
             _logger.LogInformation("Saved structured profile for character {CharacterName} (User: {UserId}): {Summary}",
                 profileData.CharacterName, userId, profileData.GetSummary());
+
+            // Notify the frontend that a new profile is available
+            await NotifyProfileAvailableAsync(userId, profileData.CharacterName);
 
             // Refresh memo data when profile is updated
             //_ = Task.Run(async () =>
@@ -658,6 +666,33 @@ public class ProfileService : IProfileService
         {
             _logger.LogError(ex, "Failed to get WebSocket client for user {UserId}, character {CharacterName}", userId, characterName);
             return Task.FromResult<FChatWebSocketClient?>(null);
+        }
+    }
+
+    public async Task NotifyProfileAvailableAsync(string userId, string characterName)
+    {
+        try
+        {
+            _logger.LogDebug("Notifying frontend that profile is available for character {CharacterName} (User: {UserId})", characterName, userId);
+            
+            // Validate character name before sending
+            if (string.IsNullOrEmpty(characterName))
+            {
+                _logger.LogWarning("Attempted to notify frontend with null or empty character name (User: {UserId})", userId);
+                return;
+            }
+            
+            await _hubContext.Clients.Group($"user-{userId}").SendAsync("ProfileAvailable", new
+            {
+                CharacterName = characterName,
+                Timestamp = DateTime.UtcNow
+            });
+            
+            _logger.LogDebug("Successfully sent ProfileAvailable notification for character {CharacterName} (User: {UserId})", characterName, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to notify frontend about available profile for character {CharacterName} (User: {UserId})", characterName, userId);
         }
     }
 }
