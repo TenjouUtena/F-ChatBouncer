@@ -98,6 +98,7 @@ create_build_info() {
     local git_hash=$2
     local git_branch=$3
     local build_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local docker_tag="$version-$git_hash"
     
     cat > "$BUILD_INFO_FILE" << EOF
 {
@@ -105,7 +106,8 @@ create_build_info() {
   "buildId": "$git_hash",
   "branch": "$git_branch",
   "buildDate": "$build_date",
-  "fullVersion": "$version+$git_hash"
+  "fullVersion": "$version+$git_hash",
+  "dockerTag": "$docker_tag"
 }
 EOF
 }
@@ -148,6 +150,7 @@ main() {
     export BUILD_VERSION="$new_version"
     export BUILD_ID="$git_hash"
     export FULL_VERSION="$new_version+$git_hash"
+    export DOCKER_TAG="$new_version-$git_hash"
     export GIT_BRANCH="$git_branch"
 }
 

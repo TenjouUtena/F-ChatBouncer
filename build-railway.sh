@@ -62,8 +62,8 @@ echo "✅ Git repository checks passed"
 echo "🔄 Managing version and build ID..."
 source ./scripts/version-manager.sh "$VERSION_INCREMENT"
 
-# Set image tag to full version with build ID
-IMAGE_TAG="$FULL_VERSION"
+# Set image tag to Docker-compatible format (version-buildId)
+IMAGE_TAG="$DOCKER_TAG"
 
 echo "🐳 Building F-ChatBouncer Docker images for Railway (AMD64)..."
 echo "Docker Hub Username: $DOCKER_USERNAME"
