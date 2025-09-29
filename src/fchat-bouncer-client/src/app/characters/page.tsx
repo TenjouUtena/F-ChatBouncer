@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useProfileStore } from '@/stores/profileStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import BackendCharacterLookup from '@/components/BackendCharacterLookup';
 import FrontendCharacterInspection from '@/components/FrontendCharacterInspection';
@@ -10,7 +11,8 @@ import ManualProfileRequest from '@/components/ManualProfileRequest';
 
 export default function CharactersPage() {
   const { token, isAuthenticated } = useAuthStore();
-  const { profiles, knownCharacters } = useChatStore();
+  const { knownCharacters } = useChatStore();
+  const { profiles } = useProfileStore();
   const { connections } = useCharacterIndexedDBStore();
   const [activeTab, setActiveTab] = useState<'backend' | 'frontend' | 'manual'>('backend');
 

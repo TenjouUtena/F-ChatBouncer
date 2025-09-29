@@ -332,8 +332,7 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
       <ProfileModal
         isOpen={showProfileModal}
         onClose={handleCloseProfileModal}
-        profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
-        characterName={selectedProfileCharacter}
+        characterName={selectedProfileCharacter || ''}
       />
     </div>
   );

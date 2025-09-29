@@ -367,8 +367,7 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
       <ProfileModal
         isOpen={showProfileModal}
         onClose={handleCloseProfileModal}
-        profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
-        characterName={selectedProfileCharacter}
+        characterName={selectedProfileCharacter || ''}
       />
     </div>
   );
