@@ -9,7 +9,7 @@ import MessageComponent from './MessageComponent';
 import UserContextMenu from '../UserContextMenu';
 import ProfileModal from '../ProfileModal';
 import { useLazyMessages } from '@/hooks/useLazyMessages';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -44,7 +44,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [selectedProfileCharacter, setSelectedProfileCharacter] = useState<string>('');
 
-  const { activeCharacter } = useCharacterStore();
+  const { activeCharacter } = useCharacterIndexedDBStore();
   const { bookmarks, addBookmark, removeBookmark } = useFriendsStore();
   const { token } = useAuthStore();
   const { getProfile } = useChatStore();
@@ -494,7 +494,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
         <ProfileModal
           isOpen={showProfileModal}
           onClose={handleCloseProfileModal}
-          profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
+          //profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
           characterName={selectedProfileCharacter}
         />
       </div>

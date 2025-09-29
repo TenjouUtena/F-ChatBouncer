@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import { signalRService } from '@/lib/signalr';
@@ -32,7 +32,7 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
-  const { activeCharacter, connections } = useCharacterStore();
+  const { activeCharacter, connections } = useCharacterIndexedDBStore();
   const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText } = useChatStore();
   
   // Initialize notifications
@@ -57,6 +57,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [activeMobileTab, setActiveMobileTab] = useState<string | null>(null);
   const [typingToast, setTypingToast] = useState<{ fromCharacter: string; status: 'typing' | 'paused' | 'clear' } | null>(null);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const messageListRef = useRef<{ scrollToBottom: () => void; scrollToBottomFast: () => void; isNearBottom: (thresholdPx?: number) => boolean; scrollToMessage: (messageId: string) => void }>(null);
 
   // Determine if current channel is a PM and get the PM character name
@@ -75,7 +76,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     console.log('Received message:', message, 'for character:', message.characterName, 'isActive:', message.isActiveCharacter);
 
     // Check if we have gender data for the sender - if not, request basic info
-    const senderGender = getCharacterGender(message.sender);
+    const senderGender = await getCharacterGender(message.sender);
     if (!senderGender && message.sender && message.sender !== activeCharacter) {
       console.log(`No gender data for ${message.sender}, requesting basic info...`);
       try {
@@ -84,7 +85,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           console.log(`Retrieved basic info for ${message.sender}:`, basicInfo);
           // Store the basic info in lightweight character store
           const { addCharacter } = useLightweightCharacterStore.getState();
-          addCharacter(
+          await addCharacter(
             message.sender,
             basicInfo.Gender || 'Unknown',
             basicInfo.Species || 'Unknown'
@@ -153,7 +154,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     // Show notification for new unknown channel activity (only for active character)
     if (message.isActiveCharacter) {
       // Get current selected channels for the active character at the time of message
-      const activeCharacterName = useCharacterStore.getState().activeCharacter;
+      const activeCharacterName = useCharacterIndexedDBStore.getState().activeCharacter;
       const currentSelectedChannelsForMessage = activeCharacterName 
         ? getSelectedChannelsForCharacter(activeCharacterName) 
         : selectedChannels;
@@ -174,8 +175,8 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       const sender = message.sender;
       if (sender) {
         const requestStatus = getProfileRequestStatus(sender);
-        const hasData = hasCharacterData(sender);
-        const knownGender = getCharacterGender(sender);
+        const hasData = await hasCharacterData(sender);
+        const knownGender = await getCharacterGender(sender);
         
         if (!hasData && requestStatus !== 'requesting') {
           // We don't have any data for this character, so request profile to get gender info
@@ -397,7 +398,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         console.log('Previous active character:', activeCharacter);
         
         // Update the character store
-        useCharacterStore.getState().setActiveCharacter(newCharacterName);
+        useCharacterIndexedDBStore.getState().setActiveCharacter(newCharacterName);
         
         // Auto-select the first channel for the new character
         const newCharacterChannels = getSelectedChannelsForCharacter(newCharacterName);
@@ -531,6 +532,28 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     setSelectedProfileCharacter('');
   };
 
+  // Load profile data when selectedProfileCharacter changes
+  useEffect(() => {
+    const loadProfileData = async () => {
+      if (selectedProfileCharacter && showProfileModal) {
+        setIsLoadingProfile(true);
+        try {
+          // Request profile if not already available
+          const hasData = await hasCharacterData(selectedProfileCharacter);
+          if (!hasData) {
+            requestProfileForCharacter(selectedProfileCharacter);
+          }
+        } catch (error) {
+          console.error('Failed to load profile:', error);
+        } finally {
+          setIsLoadingProfile(false);
+        }
+      }
+    };
+
+    loadProfileData();
+  }, [selectedProfileCharacter, showProfileModal, hasCharacterData, requestProfileForCharacter]);
+
   const handleClearAllHistory = async () => {
     if (confirm('Are you sure you want to clear ALL message history? This will clear both frontend and backend history and cannot be undone.')) {
       try {
@@ -547,11 +570,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   };
 
   const handleForceJoinSelected = async () => {
-    if (!selectedChannel) return;
+    if (!selectedChannel || !activeCharacter) return;
     try {
       setIsForceJoining(true);
-      await signalRService.subscribeToChannels([selectedChannel]);
-      addToSelectedChannels([selectedChannel], activeCharacter || undefined);
+      await signalRService.joinChannelForCharacter(activeCharacter, selectedChannel);
+      addToSelectedChannels([selectedChannel], activeCharacter);
     } catch (error) {
       console.error('Failed to force join channel:', error);
       alert('Failed to force join channel.');
@@ -561,11 +584,26 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   };
 
   const handleChannelContextMenu = (e: React.MouseEvent, channel: string) => {
+    // Allow browser context menu if Ctrl/Cmd is held
+    if (e.ctrlKey || e.metaKey) {
+      return;
+    }
+    
     e.preventDefault();
     setChannelMenu({ x: e.clientX, y: e.clientY, channel });
   };
 
-  const handleCloseChannel = (channel: string) => {
+  const handleCloseChannel = async (channel: string) => {
+    // Leave the channel on the backend first
+    if (activeCharacter) {
+      try {
+        await signalRService.leaveChannelForCharacter(activeCharacter, channel);
+      } catch (error) {
+        console.error('Failed to leave channel on backend:', error);
+        // Continue with local cleanup even if backend call fails
+      }
+    }
+
     // Clear unread count for this channel
     if (activeCharacter) {
       clearUnreadCountForChannel(activeCharacter, channel);
@@ -976,7 +1014,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       <ProfileModal
         isOpen={showProfileModal}
         onClose={handleCloseProfileModal}
-        profileData={selectedProfileCharacter ? getProfile(selectedProfileCharacter) : null}
         characterName={selectedProfileCharacter}
       />
 

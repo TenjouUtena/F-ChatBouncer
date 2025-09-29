@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useChatStore } from '@/stores/chatStore';
 import { signalRService } from '@/lib/signalr';
 import { ChevronDownIcon, UserIcon, CheckCircleIcon, ExclamationTriangleIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
@@ -13,7 +13,7 @@ interface CharacterSwitcherProps {
 }
 
 export default function CharacterSwitcher({ className = '', isCharacterRestoring = false }: CharacterSwitcherProps) {
-  const { connections, activeCharacter, getConnection } = useCharacterStore();
+  const { connections, activeCharacter, getConnection } = useCharacterIndexedDBStore();
   const { 
     getUnreadCountsForCharacter, 
     getSelectedChannelsForCharacter, 

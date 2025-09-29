@@ -1,18 +1,22 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { LightweightCharacterData } from '@/types';
+import { useLightweightCharacterIndexedDBStore } from './lightweightCharacterIndexedDBStore';
+import { CharacterMigration } from '@/lib/characterMigration';
 
 interface LightweightCharacterStore {
-  // Lightweight character data (gender + species only)
+  // Lightweight character data (gender + species only) - now delegated to IndexedDB store
   characters: Record<string, LightweightCharacterData>;
   
-  // Methods
-  addCharacter: (character: string, gender: string, species: string) => void;
+  // Methods - now delegated to IndexedDB store
+  initialize: () => Promise<void>;
+  addCharacter: (character: string, gender: string, species: string) => Promise<void>;
   getCharacter: (character: string) => LightweightCharacterData | null;
   hasCharacter: (character: string) => boolean;
-  updateLastSeen: (character: string) => void;
-  cleanupOldCharacters: () => void;
+  updateLastSeen: (character: string) => Promise<void>;
+  cleanupOldCharacters: () => Promise<number>;
   getStorageSize: () => number;
+  getStorageInfo: () => Promise<{ connections: number; lightweight: number; estimatedSize: number }>;
 }
 
 // Storage limits
@@ -90,67 +94,72 @@ export const useLightweightCharacterStore = create<LightweightCharacterStore>()(
     (set, get) => ({
       characters: {},
       
-      addCharacter: (character: string, gender: string, species: string) => {
-        set((state) => {
-          // Clean up old characters before adding new one
-          const cleanedCharacters = cleanupOldCharacters(state.characters);
+      // Actions - now delegated to IndexedDB store
+      initialize: async () => {
+        try {
+          const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+          await indexedDBStore.initialize();
           
-          const newCharacterData: LightweightCharacterData = {
-            character,
-            gender,
-            species,
-            lastSeen: Date.now()
-          };
+          // Check for and migrate legacy lightweight characters
+          const hasLegacy = await CharacterMigration.hasLegacyLightweightCharacters();
+          if (hasLegacy) {
+            console.log('Found legacy lightweight characters, starting migration...');
+            const result = await CharacterMigration.migrateLightweightCharacters();
+            console.log(`Lightweight character migration completed: ${result.migrated} characters migrated, ${result.errors} errors`);
+          }
           
-          return {
-            characters: {
-              ...cleanedCharacters,
-              [character]: newCharacterData
-            }
-          };
+          // Sync state from IndexedDB store
+          const indexedDBState = indexedDBStore;
+          set({
+            characters: indexedDBState.characters
+          });
+        } catch (error) {
+          console.error('Failed to initialize lightweight character store:', error);
+          throw error;
+        }
+      },
+      
+      addCharacter: async (character: string, gender: string, species: string) => {
+        const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+        await indexedDBStore.addCharacter(character, gender, species);
+        
+        // Sync state
+        const indexedDBState = indexedDBStore;
+        set({
+          characters: indexedDBState.characters
         });
       },
       
       getCharacter: (character: string) => {
-        const state = get();
-        return state.characters[character] || null;
+        return get().characters[character] || null;
       },
       
       hasCharacter: (character: string) => {
-        const state = get();
-        return character in state.characters;
+        return character in get().characters;
       },
       
-      updateLastSeen: (character: string) => {
-        set((state) => {
-          const characterData = state.characters[character];
-          if (characterData) {
-            return {
-              characters: {
-                ...state.characters,
-                [character]: {
-                  ...characterData,
-                  lastSeen: Date.now()
-                }
-              }
-            };
-          }
-          return state;
+      updateLastSeen: async (character: string) => {
+        const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+        await indexedDBStore.updateLastSeen(character);
+        
+        // Sync state
+        const indexedDBState = indexedDBStore;
+        set({
+          characters: indexedDBState.characters
         });
       },
       
-      cleanupOldCharacters: () => {
-        set((state) => {
-          console.log('Performing lightweight character cleanup...');
-          const cleanedCharacters = cleanupOldCharacters(state.characters);
-          
-          console.log(`Lightweight character cleanup completed. Characters: ${Object.keys(state.characters).length} -> ${Object.keys(cleanedCharacters).length}`);
-          
-          return {
-            ...state,
-            characters: cleanedCharacters
-          };
+      cleanupOldCharacters: async () => {
+        const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+        const deletedCount = await indexedDBStore.cleanupOldCharacters();
+        
+        // Sync state
+        const indexedDBState = indexedDBStore;
+        set({
+          characters: indexedDBState.characters
         });
+        
+        return deletedCount;
       },
       
       getStorageSize: () => {
@@ -162,6 +171,11 @@ export const useLightweightCharacterStore = create<LightweightCharacterStore>()(
           console.error('Error calculating lightweight character storage size:', error);
           return 0;
         }
+      },
+
+      getStorageInfo: async () => {
+        const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+        return await indexedDBStore.getStorageInfo();
       }
     }),
     {
@@ -192,8 +206,18 @@ export const useLightweightCharacterStore = create<LightweightCharacterStore>()(
         }
       })),
       partialize: (state) => ({
-        characters: state.characters
-      })
+        // Note: lightweight characters are now stored in IndexedDB, not localStorage
+        // Only keep minimal state for backward compatibility
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // Initialize IndexedDB store after rehydration
+          const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+          indexedDBStore.initialize().catch(error => {
+            console.error('Failed to initialize lightweight character IndexedDB store after rehydration:', error);
+          });
+        }
+      }
     }
   )
 );

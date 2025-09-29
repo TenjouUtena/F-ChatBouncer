@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import AuthFlow from '@/components/AuthFlow';
@@ -30,7 +30,7 @@ export default function Home() {
     setToken
   } = useAuthStore();
   const { setConnected, setSelectedChannels, setJoinedChannels, mergeHistoryMessages, getLastMessageTime } = useChatStore();
-  const { activeCharacter, setActiveCharacter, addConnection, clearActiveCharacter } = useCharacterStore();
+  const { activeCharacter, setActiveCharacter, addConnection, clearActiveCharacter } = useCharacterIndexedDBStore();
   const { initialize, hasStoredCredentials, retrieveCredentials } = useCredentialsStore();
   const { updateFriendStatus, setFriendOnline, isFriendOrBookmark, addBookmark, removeBookmark } = useFriendsStore();
   const [isLoading, setIsLoading] = useState(false);
@@ -210,7 +210,7 @@ export default function Home() {
     signalRService.onCharacterDisconnected((data) => {
       console.log('Character disconnected:', data);
       // Update character connection status in store
-      const { updateConnection } = useCharacterStore.getState();
+      const { updateConnection } = useCharacterIndexedDBStore.getState();
       updateConnection(data.CharacterName, {
         isConnected: false,
         status: 'disconnected',
@@ -248,7 +248,7 @@ export default function Home() {
       // Set up the ReceiveActiveCharacters listener after connection is established
       signalRService.onReceiveActiveCharacters((data) => {
         // Update character store with all character connections from backend
-        const { setConnections } = useCharacterStore.getState();
+        const { setConnections } = useCharacterIndexedDBStore.getState();
         const connections = data.characters.map((char: any) => ({
           characterName: char.characterName,
           isConnected: char.isConnected,
@@ -259,7 +259,7 @@ export default function Home() {
         }));
         
         // Clear any persisted data first to avoid conflicts
-        const { clearAllConnections } = useCharacterStore.getState();
+        const { clearAllConnections } = useCharacterIndexedDBStore.getState();
         clearAllConnections();
         
         // Now set the new connections
@@ -286,18 +286,25 @@ export default function Home() {
           setActiveCharacter(characterName);
           
           console.log('Called setActiveCharacter with:', characterName);
+          
+          // Update the character connection status in the store to reflect the switch
+          const { updateConnection } = useCharacterIndexedDBStore.getState();
+          updateConnection(characterName, { isActive: true });
+          
+          // Set all other characters as inactive
+          const { connections } = useCharacterIndexedDBStore.getState();
+          connections.forEach(conn => {
+            if (conn.characterName !== characterName) {
+              updateConnection(conn.characterName, { isActive: false });
+            }
+          });
         } else {
           console.warn('ActiveCharacterSwitched event received but no character name found in data:', data);
         }
         
-        // Request updated character and channel information
-        try {
-          console.log('Requesting updated character data...');
-          await signalRService.getActiveCharacters();
-          console.log('Character data refresh completed');
-        } catch (error) {
-          console.error('Failed to refresh character data after switch:', error);
-        }
+        // Don't immediately request updated character data as it can cause race conditions
+        // The backend will send the updated state when it's ready
+        console.log('Character switch completed, not requesting immediate data refresh to avoid race condition');
       });
 
       // Set up friends status event listeners

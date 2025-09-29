@@ -1,6 +1,6 @@
 'use client';
 
-import React, { memo, useState, useCallback } from 'react';
+import React, { memo, useState, useCallback, useEffect } from 'react';
 import { Message } from '@/types';
 import { MessageAction, MessageTheme } from '@/lib/messages/messageTypes';
 import {
@@ -53,13 +53,33 @@ function MessageComponent({
   isHovered = false
 }: MessageComponentProps) {
   // Get profile to determine gender for color coding
-  const { getProfile, getProfileRequestStatus, isProfileStale, refreshProfile, requestProfileForCharacter } = useChatStore();
-  const senderProfile = getProfile(message.sender);
-  const senderGender = senderProfile?.gender || 'None';
+  const { getCharacterGender, getProfile, getProfileRequestStatus, isProfileStale, refreshProfile, requestProfileForCharacter } = useChatStore();
+  const [senderGender, setSenderGender] = useState<string>('None');
+  const [senderProfile, setSenderProfile] = useState<any>(null);
   const profileStatus = getProfileRequestStatus(message.sender);
   const isStale = isProfileStale(message.sender);
 
   const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  
+  // Load gender and profile data for color coding and tooltips
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [gender, profile] = await Promise.all([
+          getCharacterGender(message.sender),
+          getProfile(message.sender)
+        ]);
+        setSenderGender(gender || 'None');
+        setSenderProfile(profile);
+      } catch (error) {
+        console.warn(`Failed to get data for ${message.sender}:`, error);
+        setSenderGender('None');
+        setSenderProfile(null);
+      }
+    };
+    
+    loadData();
+  }, [message.sender, getCharacterGender, getProfile]);
   
   // Hook to handle spoiler interactions
   const spoilerContainerRef = useSpoilerHandler();
@@ -92,6 +112,11 @@ function MessageComponent({
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (actions.length === 0) return;
 
+    // Allow browser context menu if Ctrl/Cmd is held
+    if (e.ctrlKey || e.metaKey) {
+      return;
+    }
+
     e.preventDefault();
     setContextMenuPosition({ x: e.clientX, y: e.clientY });
   }, [actions.length]);
@@ -106,20 +131,26 @@ function MessageComponent({
     e.stopPropagation();
 
     // Handle cache miss scenarios
-    if (!senderProfile && profileStatus === 'idle') {
-      // No profile and no request in progress - request it
+    if (senderGender === 'None' && profileStatus === 'idle') {
+      // No gender data and no request in progress - request it
       requestProfileForCharacter(message.sender);
-    } else if (senderProfile && isStale && profileStatus !== 'requesting') {
+    } else if (senderGender !== 'None' && isStale && profileStatus !== 'requesting') {
       // Profile exists but is stale - refresh it
       await refreshProfile(message.sender);
     }
 
     onSenderClick?.(message.sender, e);
-  }, [message.sender, onSenderClick, senderProfile, profileStatus, isStale, requestProfileForCharacter, refreshProfile]);
+  }, [message.sender, onSenderClick, senderGender, profileStatus, isStale, requestProfileForCharacter, refreshProfile]);
 
   // Handle sender right-click
   const handleSenderRightClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
+    
+    // Allow browser context menu if Ctrl/Cmd is held
+    if (e.ctrlKey || e.metaKey) {
+      return;
+    }
+    
     e.preventDefault();
     onSenderRightClick?.(message.sender, e);
   }, [message.sender, onSenderRightClick]);

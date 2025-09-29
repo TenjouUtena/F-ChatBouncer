@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useChatStore } from '@/stores/chatStore';
 import { XMarkIcon, CogIcon, BellIcon, EyeIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 
@@ -40,7 +40,7 @@ const defaultSettings: CharacterSettings = {
 };
 
 export default function CharacterSettings({ characterName, isOpen, onClose }: CharacterSettingsProps) {
-  const { connections, getConnection } = useCharacterStore();
+  const { connections, getConnection } = useCharacterIndexedDBStore();
   const { getSelectedChannelsForCharacter } = useChatStore();
   const [settings, setSettings] = useState<CharacterSettings>(defaultSettings);
   const [isLoading, setIsLoading] = useState(false);

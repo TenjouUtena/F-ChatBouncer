@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
@@ -32,7 +32,7 @@ export default function CharacterManagement({ isOpen, onClose }: CharacterManage
     removeConnection, 
     setActiveCharacter,
     getConnection
-  } = useCharacterStore();
+  } = useCharacterIndexedDBStore();
   
   const { token } = useAuthStore();
   const { getSelectedChannelsForCharacter, getConnectionStatusForCharacter } = useChatStore();

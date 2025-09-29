@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ProfileData, KinkInfo, ProfileImage } from '@/types';
 import { getCharacterNameStyle, getGenderDisplayName } from '@/lib/genderColors';
 import { useChatStore } from '@/stores/chatStore';
@@ -11,13 +11,13 @@ import Tooltip from './Tooltip';
 interface ProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
-  profileData: ProfileData | null;
   characterName: string;
 }
 
-export default function ProfileModal({ isOpen, onClose, profileData, characterName }: ProfileModalProps) {
+export default function ProfileModal({ isOpen, onClose, characterName }: ProfileModalProps) {
   const [activeTab, setActiveTab] = useState<'description' | 'info' | 'kinks' | 'images'>('description');
-  const { getProfileRequestStatus, isProfileStale, refreshProfile, requestProfileForCharacter } = useChatStore();
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const { getProfile, getProfileRequestStatus, isProfileStale, refreshProfile, requestProfileForCharacter } = useChatStore();
 
   const profileStatus = getProfileRequestStatus(characterName);
   const isStale = isProfileStale(characterName);
@@ -25,12 +25,32 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
   const handleRefreshProfile = async () => {
     if (profileData) {
       console.log(`Refreshing profile for ${characterName}`);
-      await refreshProfile(characterName);
-    } else if (!profileData) {
+      const refreshedData = await refreshProfile(characterName);
+      if (refreshedData) {
+        setProfileData(refreshedData);
+      }
+    } else {
       console.log(`Requesting profile for ${characterName}`);
       requestProfileForCharacter(characterName);
     }
   };
+
+  // Load profile data when characterName changes
+  useEffect(() => {
+    const loadProfileData = async () => {
+      if (characterName && isOpen) {
+        try {
+          const data = await getProfile(characterName);
+          setProfileData(data);
+        } catch (error) {
+          console.error('Failed to load profile:', error);
+          setProfileData(null);
+        }
+      }
+    };
+
+    loadProfileData();
+  }, [characterName, isOpen, getProfile]);
 
   if (!isOpen) return null;
 

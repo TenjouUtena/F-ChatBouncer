@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { api } from '@/lib/api';
 import { useChatStore } from '@/stores/chatStore';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 
 interface ManualProfileRequestProps {
   token: string;
@@ -11,7 +11,7 @@ interface ManualProfileRequestProps {
 
 export default function ManualProfileRequest({ token }: ManualProfileRequestProps) {
   const { requestProfileForCharacter, profiles } = useChatStore();
-  const { connections } = useCharacterStore();
+  const { connections } = useCharacterIndexedDBStore();
   
   const [characterName, setCharacterName] = useState('');
   const [requestHistory, setRequestHistory] = useState<Array<{

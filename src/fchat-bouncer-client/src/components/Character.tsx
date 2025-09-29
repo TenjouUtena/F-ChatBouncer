@@ -141,6 +141,11 @@ export default function Character({
   };
 
   const handleRightClick = (event: React.MouseEvent) => {
+    // Allow browser context menu if Ctrl/Cmd is held
+    if (event.ctrlKey || event.metaKey) {
+      return;
+    }
+    
     event.preventDefault();
     if (onRightClick) {
       onRightClick(characterName, event);

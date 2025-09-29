@@ -240,7 +240,6 @@ export function parseBBCodeToHtml(content: string): BBCodeParseResult {
     // Only convert newlines that are in plain text content, not between HTML tags
     let inHtmlTag = false;
     let htmlResult = '';
-    let lastChar = '';
     
     for (let i = 0; i < result.length; i++) {
       const char = result[i];
@@ -252,16 +251,11 @@ export function parseBBCodeToHtml(content: string): BBCodeParseResult {
         inHtmlTag = false;
         htmlResult += char;
       } else if (char === '\n' && !inHtmlTag) {
-        // Only convert newlines to <br> if they're not immediately after HTML tags
-        // This prevents breaking HTML structure while still converting plain text newlines
-        if (lastChar !== '>') {
-          htmlResult += '<br>';
-        }
+        // Convert newlines to <br> tags in plain text content
+        htmlResult += '<br>';
       } else {
         htmlResult += char;
       }
-      
-      lastChar = char;
     }
     
     result = htmlResult;

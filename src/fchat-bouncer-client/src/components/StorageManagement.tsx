@@ -4,9 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import { getStorageStatistics } from '@/lib/storageMigration';
+import { useProfileStore } from '@/stores/profileStore';
 
 export default function StorageManagement() {
-  const { cleanupStorage, getStorageSize, profiles, characterMessages } = useChatStore();
+  const { cleanupStorage, getStorageSize, characterMessages } = useChatStore();
+  const { profiles } = useProfileStore();
   const { cleanupOldCharacters, getStorageSize: getLightweightSize } = useLightweightCharacterStore();
   const [storageStats, setStorageStats] = useState({
     lightweightCharacters: 0,

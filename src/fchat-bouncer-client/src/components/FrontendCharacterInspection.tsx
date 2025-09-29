@@ -2,12 +2,12 @@
 
 import { useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
-import { useCharacterStore } from '@/stores/characterStore';
+import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import StorageManagement from './StorageManagement';
 
 export default function FrontendCharacterInspection() {
   const { profiles, knownCharacters, profileRequestStatus, profileLastRequested } = useChatStore();
-  const { connections, activeCharacter } = useCharacterStore();
+  const { connections, activeCharacter } = useCharacterIndexedDBStore();
   
   const [selectedCharacter, setSelectedCharacter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
