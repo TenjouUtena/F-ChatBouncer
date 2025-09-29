@@ -99,6 +99,7 @@ export interface KinkInfo {
   kink_name: string;
   kink_pref: string;
   custom: boolean;
+  description?: string;
 }
 
 export interface ProfileImage {

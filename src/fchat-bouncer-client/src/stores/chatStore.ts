@@ -142,8 +142,8 @@ interface ChatStore extends ChatState {
 }
 
 // Storage quota management utilities
-const STORAGE_QUOTA_LIMIT = 5 * 1024 * 1024; // 5MB limit
-const MAX_PROFILES = 100; // Limit number of profiles
+const STORAGE_QUOTA_LIMIT = 15 * 1024 * 1024; // 15MB limit
+const MAX_PROFILES = 350; // Limit number of profiles
 const MAX_MESSAGES_PER_CHANNEL = 500; // Limit messages per channel
 const MAX_MESSAGES_PER_CHARACTER = 1000; // Limit total messages per character
 
@@ -162,7 +162,7 @@ function cleanupOldProfiles(profiles: Record<string, ProfileData>, profileLastRe
   const sortedProfiles = profileEntries.sort(([, a], [, b]) => {
     const aTime = profileLastRequested[a.character] || 0;
     const bTime = profileLastRequested[b.character] || 0;
-    return aTime - bTime;
+    return bTime - aTime;
   });
   
   // Keep only the most recent profiles
@@ -1493,6 +1493,12 @@ export const useChatStore = create<ChatStore>()(
       // Enhanced scrollback methods
       trimChannelMessages: (characterName: string, channelId: string, maxMessages: number = 100) => {
         set((state) => {
+          // Skip trimming for PM channels (they start with PRI-)
+          if (channelId.startsWith('PRI-')) {
+            console.log(`Skipping trim for PM channel: ${channelId}`);
+            return state;
+          }
+          
           const characterMessages = state.characterMessages[characterName] || [];
           const channelMessages = characterMessages.filter(msg => msg.channel === channelId);
           

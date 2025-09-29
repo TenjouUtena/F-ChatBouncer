@@ -25,7 +25,11 @@ import Console from './Console';
 import MobileDrawer from './MobileDrawer';
 import MobileTabs from './MobileTabs';
 
-export default function ChatInterface() {
+interface ChatInterfaceProps {
+  isCharacterRestoring?: boolean;
+}
+
+export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterStore();
   const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText } = useChatStore();
@@ -601,7 +605,7 @@ export default function ChatInterface() {
           
           {/* Character Management */}
           <div className="mt-3 space-y-2">
-            <CharacterSwitcher className="w-full" />
+            <CharacterSwitcher className="w-full" isCharacterRestoring={isCharacterRestoring} />
             <button
               onClick={() => setShowCharacterManagement(true)}
               className="w-full px-3 py-2 text-xs bg-gray-700 text-gray-300 rounded hover:bg-gray-600 transition-colors"
@@ -1123,7 +1127,7 @@ export default function ChatInterface() {
             {/* Character Switcher */}
             <div>
               <h3 className="font-semibold text-sm text-gray-400 mb-2">Switch Character</h3>
-              <CharacterSwitcher className="w-full" />
+              <CharacterSwitcher className="w-full" isCharacterRestoring={isCharacterRestoring} />
             </div>
 
             {/* Character Management Button */}

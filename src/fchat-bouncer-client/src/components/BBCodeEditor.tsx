@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
 import TextAlign from '@tiptap/extension-text-align';
-import TextStyle from '@tiptap/extension-text-style';
+import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import FontFamily from '@tiptap/extension-font-family';
 import Strike from '@tiptap/extension-strike';
@@ -59,6 +59,8 @@ export default function BBCodeEditor({
         strike: false, // We'll use our custom strike
         hardBreak: false, // We'll use our custom hardBreak
         horizontalRule: false, // We'll use our custom horizontalRule
+        underline: false, // Disable default underline in v3
+        link: false, // Disable default link in v3
         bulletList: false,
         orderedList: false,
         listItem: false,
@@ -67,9 +69,6 @@ export default function BBCodeEditor({
         code: false,
         dropcursor: false,
         gapcursor: false,
-        history: {
-          depth: 100,
-        },
         // Keep basic formatting - only specify what we want to keep
         bold: {},
         italic: {},
@@ -108,6 +107,7 @@ export default function BBCodeEditor({
     content: '',
     editable: !disabled,
     immediatelyRender: false,
+    shouldRerenderOnTransaction: true,
     onUpdate: ({ editor }) => {
       if (!isInitialized) return;
       

@@ -343,6 +343,34 @@ export default function Home() {
         }
       });
 
+      // Set up friends list updated listener
+      signalRService.setFriendsListUpdatedCallback(async (data) => {
+        console.log('Friends list updated from backend:', data);
+        
+        // Re-request friends list to get the latest data
+        try {
+          const friendsResponse = await api.getFriends(token!);
+          console.log('Re-fetched friends after backend update:', friendsResponse);
+          
+          const { setFriendsAndBookmarks } = useAuthStore.getState();
+          
+          // Convert friends data to Friend objects
+          const friends = friendsResponse.friends.map((friend: any) => ({
+            name: friend.Name || friend.name,
+            status: friend.Status || friend.status as any,
+            statusMessage: friend.StatusMessage || friend.statusMessage,
+            isOnline: friend.IsOnline || friend.isOnline,
+            lastSeen: friend.LastSeen || friend.lastSeen,
+            gender: friend.Gender || friend.gender
+          }));
+          
+          setFriendsAndBookmarks(friends, friendsResponse.bookmarks, friendsResponse.bookmarksWithStatus);
+          console.log('Updated friends store with new data:', friends.length, 'friends');
+        } catch (error) {
+          console.error('Failed to re-fetch friends after backend update:', error);
+        }
+      });
+
       // Sync character store with backend state (with a small delay to ensure listeners are set up)
       setTimeout(async () => {
         await signalRService.getActiveCharacters();
@@ -558,23 +586,5 @@ export default function Home() {
     );
   }
 
-  // Show loading while character is being restored
-  if (isCharacterRestoring) {
-    console.log('Rendering character restoration loading - isCharacterRestoring:', isCharacterRestoring);
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="flex justify-center mb-4">
-            <img src="/logo.svg" alt="F-Chat Bouncer" className="h-16 w-16" />
-          </div>
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-indigo-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">
-            Restoring your character...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return <ChatInterface />;
+  return <ChatInterface isCharacterRestoring={isCharacterRestoring} />;
 }

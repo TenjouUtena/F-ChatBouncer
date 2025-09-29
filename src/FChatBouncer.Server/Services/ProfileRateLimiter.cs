@@ -40,10 +40,10 @@ public class ProfileRateLimiter : IProfileRateLimiter
     private readonly ILogger<ProfileRateLimiter> _logger;
     private readonly ConcurrentDictionary<string, RequestRecord> _requestHistory = new();
     
-    // Rate limiting configuration
-    private static readonly TimeSpan RequestWindow = TimeSpan.FromMinutes(5); // 5-minute window
-    private static readonly int MaxRequestsPerWindow = 3; // Max 3 requests per 5 minutes per character
-    private static readonly TimeSpan MinTimeBetweenRequests = TimeSpan.FromSeconds(30); // Minimum 30 seconds between requests for same character
+    // Rate limiting configuration - Updated to allow 10 requests per second
+    private static readonly TimeSpan RequestWindow = TimeSpan.FromSeconds(1); // 1-second window
+    private static readonly int MaxRequestsPerWindow = 10; // Max 10 requests per second per character
+    private static readonly TimeSpan MinTimeBetweenRequests = TimeSpan.FromMilliseconds(100); // Minimum 100ms between requests for same character
     
     public ProfileRateLimiter(ILogger<ProfileRateLimiter> logger)
     {
@@ -75,8 +75,8 @@ public class ProfileRateLimiter : IProfileRateLimiter
         var requestsInWindow = record.RequestTimes.Count(t => now - t < RequestWindow);
         if (requestsInWindow >= MaxRequestsPerWindow)
         {
-            _logger.LogWarning("Profile request rate limited for {CharacterName} (User: {UserId}) - exceeded {MaxRequests} requests in {WindowMinutes} minutes", 
-                characterName, userId, MaxRequestsPerWindow, RequestWindow.TotalMinutes);
+            _logger.LogWarning("Profile request rate limited for {CharacterName} (User: {UserId}) - exceeded {MaxRequests} requests in {WindowSeconds} seconds", 
+                characterName, userId, MaxRequestsPerWindow, RequestWindow.TotalSeconds);
             return Task.FromResult(false);
         }
         
@@ -139,7 +139,7 @@ public class ProfileRateLimiter : IProfileRateLimiter
         {
             try
             {
-                await Task.Delay(TimeSpan.FromMinutes(10)); // Clean up every 10 minutes
+                await Task.Delay(TimeSpan.FromMinutes(1)); // Clean up every 1 minute
                 
                 var cutoff = DateTime.UtcNow - RequestWindow;
                 var keysToRemove = new List<string>();

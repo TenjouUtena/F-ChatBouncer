@@ -5,12 +5,14 @@ import { useCharacterStore } from '@/stores/characterStore';
 import { useChatStore } from '@/stores/chatStore';
 import { signalRService } from '@/lib/signalr';
 import { ChevronDownIcon, UserIcon, CheckCircleIcon, ExclamationTriangleIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
+import ConnectionStatusIndicator from './ConnectionStatusIndicator';
 
 interface CharacterSwitcherProps {
   className?: string;
+  isCharacterRestoring?: boolean;
 }
 
-export default function CharacterSwitcher({ className = '' }: CharacterSwitcherProps) {
+export default function CharacterSwitcher({ className = '', isCharacterRestoring = false }: CharacterSwitcherProps) {
   const { connections, activeCharacter, getConnection } = useCharacterStore();
   const { 
     getUnreadCountsForCharacter, 
@@ -115,7 +117,11 @@ export default function CharacterSwitcher({ className = '' }: CharacterSwitcherP
           disabled={isLoading}
           className="flex items-center gap-2 px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg hover:bg-gray-600 transition-colors disabled:opacity-50"
         >
-          {getStatusIcon(activeCharacter || '')}
+          <ConnectionStatusIndicator 
+            isConnected={getConnection(activeCharacter || '')?.isConnected || false}
+            isConnecting={isCharacterRestoring}
+            className="mr-1"
+          />
           <span className="text-sm font-medium text-white">
             {activeCharacter || 'No Character'}
           </span>

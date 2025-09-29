@@ -43,7 +43,7 @@ export default function UserContextMenu({
 
     // Adjust position to keep menu in viewport
     const adjustPosition = () => {
-      if (!menuRef.current) return;
+      if (!menuRef.current || typeof window === 'undefined') return;
 
       const rect = menuRef.current.getBoundingClientRect();
       const viewportWidth = window.innerWidth;

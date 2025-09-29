@@ -112,7 +112,9 @@ export const api = {
 
   async googleLogin(): Promise<void> {
     // Redirect to Google OAuth
-    window.location.href = `${API_BASE}/auth/google`;
+    if (typeof window !== 'undefined') {
+      window.location.href = `${API_BASE}/auth/google`;
+    }
   },
 
   async updateFChatCredentials(token: string, credentials: FChatCredentialsRequest): Promise<void> {
@@ -211,7 +213,7 @@ export const api = {
         
         // If it's a rate limit error or server error (5xx), retry with exponential backoff
         if (error instanceof ApiError && (error.status === 429 || error.status >= 500 || isRateLimited)) {
-          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 1s, 2s, 4s
+          const delay = Math.pow(2, attempt) * 10000; // Exponential backoff: 10s, 20s, 40s
           
           if (isRateLimited) {
             console.log(`Profile request rate limited (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);

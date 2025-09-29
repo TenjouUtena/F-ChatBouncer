@@ -273,7 +273,8 @@ public class FListCharacterDataService : IFListCharacterDataService
                 KinkId = customKinkEntry.Key,
                 KinkName = customKink.Name,
                 KinkPreference = customKink.Choice,
-                IsCustom = true
+                IsCustom = true,
+                Description = customKink.Description
             };
             profileData.Kinks.Add(kinkInfo);
         }

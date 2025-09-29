@@ -33,7 +33,8 @@ class NotificationService {
   private isServiceWorkerReady: boolean = false;
 
   constructor() {
-    this.isSupported = 'Notification' in window;
+    // Check if we're in browser environment (SSR safety)
+    this.isSupported = typeof window !== 'undefined' && 'Notification' in window;
     this.permission = this.getPermissionStatus();
     this.initializeServiceWorker();
   }
@@ -49,7 +50,7 @@ class NotificationService {
    * Get current permission status
    */
   public getPermissionStatus(): NotificationPermission {
-    if (!this.isSupported) {
+    if (!this.isSupported || typeof window === 'undefined') {
       return { granted: false, denied: true, default: false };
     }
 
@@ -120,8 +121,7 @@ class NotificationService {
         tag: options.tag,
         data: options.data,
         requireInteraction: options.requireInteraction || false,
-        silent: options.silent || false,
-        actions: options.actions || []
+        silent: options.silent || false
       });
       
       // Return a mock notification object for consistency
@@ -150,8 +150,7 @@ class NotificationService {
         tag: options.tag,
         data: options.data,
         requireInteraction: options.requireInteraction || false,
-        silent: options.silent || false,
-        actions: options.actions || []
+        silent: options.silent || false
       });
 
       // Auto-close after 5 seconds unless requireInteraction is true
@@ -253,7 +252,7 @@ class NotificationService {
    * Initialize service worker for mobile notifications
    */
   private async initializeServiceWorker(): Promise<void> {
-    if (!('serviceWorker' in navigator)) {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
       return;
     }
 
@@ -283,6 +282,8 @@ class NotificationService {
    * Handle notification actions
    */
   private handleNotificationAction(action: string, data: any): void {
+    if (typeof window === 'undefined') return;
+    
     switch (action) {
       case 'open':
         // Focus the window and open the PM
@@ -304,14 +305,14 @@ class NotificationService {
    * Check if the app is in the foreground
    */
   public isAppInForeground(): boolean {
-    return document.visibilityState === 'visible';
+    return typeof document !== 'undefined' && document.visibilityState === 'visible';
   }
 
   /**
    * Check if the app is on mobile
    */
   public isMobile(): boolean {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    return typeof navigator !== 'undefined' && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   }
 }
 

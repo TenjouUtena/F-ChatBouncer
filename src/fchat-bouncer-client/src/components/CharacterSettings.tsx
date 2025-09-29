@@ -83,7 +83,7 @@ export default function CharacterSettings({ characterName, isOpen, onClose }: Ch
       document.documentElement.classList.add('dark');
     } else {
       // Auto theme - use system preference
-      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
         document.documentElement.classList.add('dark');
       } else {
         document.documentElement.classList.remove('dark');

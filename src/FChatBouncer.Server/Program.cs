@@ -42,6 +42,8 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
     
     
+    string finalConnectionString;
+    
     if (!string.IsNullOrEmpty(databaseUrl))
     {
         // Use Railway's DATABASE_URL if available
@@ -50,7 +52,7 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
             // Validate the connection string format
             if (databaseUrl.StartsWith("postgresql://") || databaseUrl.StartsWith("postgres://"))
             {
-                options.UseNpgsql(databaseUrl);
+                finalConnectionString = databaseUrl;
             }
             else
             {
@@ -65,7 +67,7 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
     else if (!string.IsNullOrEmpty(connectionString))
     {
         // Fall back to configuration connection string
-        options.UseNpgsql(connectionString);
+        finalConnectionString = connectionString;
     }
     else
     {
@@ -76,9 +78,30 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
         var username = Environment.GetEnvironmentVariable("PGUSER") ?? "postgres";
         var password = Environment.GetEnvironmentVariable("PGPASSWORD") ?? "password";
         
+        finalConnectionString = $"Host={host};Port={port};Database={database};Username={username};Password={password}";
+    }
+
+    // Configure PostgreSQL with connection resilience
+    options.UseNpgsql(finalConnectionString, npgsqlOptions =>
+    {
+        // Enable connection resilience with retry policy
+        npgsqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorCodesToAdd: null);
         
-        var builtConnectionString = $"Host={host};Port={port};Database={database};Username={username};Password={password}";
-        options.UseNpgsql(builtConnectionString);
+        // Set command timeout to 30 seconds
+        npgsqlOptions.CommandTimeout(30);
+    });
+    
+    // Configure Entity Framework execution strategy for transient failures
+    options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+    
+    // Enable sensitive data logging in development
+    if (builder.Environment.IsDevelopment())
+    {
+        options.EnableSensitiveDataLogging();
+        options.EnableDetailedErrors();
     }
 });
 
@@ -335,12 +358,19 @@ builder.Services.AddHealthChecks()
             using var scope = builder.Services.BuildServiceProvider().CreateScope();
 #pragma warning restore ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' in 'ConfigureServices'
             var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
-            context.Database.CanConnect();
+            
+            // Test basic connection synchronously
+            var canConnect = context.Database.CanConnect();
+            if (!canConnect)
+            {
+                return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Cannot connect to database");
+            }
+            
             return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Database connection is working");
         }
         catch (Exception ex)
         {
-            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Database connection failed", ex);
+            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy($"Database connection failed: {ex.Message}", ex);
         }
     });
 

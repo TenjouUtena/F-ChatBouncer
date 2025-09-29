@@ -9,45 +9,37 @@ namespace FChatBouncer.Server.Services;
 
 public class ProfileService : IProfileService
 {
-    private readonly BouncerDbContext _context;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IFChatService _fChatService;
-    private readonly ICharacterService _characterService;
-    private readonly IMemoService _memoService;
-    private readonly IFListCharacterDataService _characterDataService;
-    private readonly IUserService _userService;
     private readonly ILogger<ProfileService> _logger;
     private readonly IProfileRateLimiter _rateLimiter;
     private readonly ConcurrentDictionary<string, Task> _pendingRequests = new();
 
     public ProfileService(
-        BouncerDbContext context,
+        IServiceProvider serviceProvider,
         IFChatService fChatService,
-        ICharacterService characterService,
-        IMemoService memoService,
-        IFListCharacterDataService characterDataService,
-        IUserService userService,
         ILogger<ProfileService> logger,
         IProfileRateLimiter rateLimiter)
     {
-        _context = context;
+        _serviceProvider = serviceProvider;
         _fChatService = fChatService;
-        _characterService = characterService;
-        _memoService = memoService;
-        _characterDataService = characterDataService;
-        _userService = userService;
         _logger = logger;
         _rateLimiter = rateLimiter;
     }
 
     public async Task SaveProfileAsync(string userId, string characterName, string profileData, string? rawProData = null)
     {
+        using var scope = _serviceProvider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
+        var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
+        
         try
         {
             // Use CharacterService to update the character profile
-            await _characterService.UpdateCharacterProfileAsync(characterName, profileData, rawProData);
+            await characterService.UpdateCharacterProfileAsync(characterName, profileData, rawProData);
 
             // Also maintain legacy Profile table for backward compatibility
-            var existingProfile = await _context.Profiles
+            var existingProfile = await context.Profiles
                 .FirstOrDefaultAsync(p => p.UserId == userId && p.CharacterName == characterName);
 
             if (existingProfile != null)
@@ -71,13 +63,13 @@ public class ProfileService : IProfileService
                     UpdatedAt = DateTime.UtcNow
                 };
 
-                _context.Profiles.Add(profile);
+                context.Profiles.Add(profile);
                 _logger.LogInformation("Created new legacy profile for character {CharacterName} (User: {UserId})", characterName, userId);
             }
 
             try
             {
-                await _context.SaveChangesAsync();
+                await context.SaveChangesAsync();
             }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
             {
@@ -100,13 +92,19 @@ public class ProfileService : IProfileService
 
     public async Task<Profile?> GetProfileAsync(string userId, string characterName)
     {
-        return await _context.Profiles
+        using var scope = _serviceProvider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
+        
+        return await context.Profiles
             .FirstOrDefaultAsync(p => p.UserId == userId && p.CharacterName == characterName);
     }
 
     public async Task<List<Profile>> GetUserProfilesAsync(string userId)
     {
-        return await _context.Profiles
+        using var scope = _serviceProvider.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
+        
+        return await context.Profiles
             .Where(p => p.UserId == userId)
             .OrderByDescending(p => p.UpdatedAt)
             .ToListAsync();
@@ -114,10 +112,13 @@ public class ProfileService : IProfileService
 
     public async Task SaveStructuredProfileAsync(string userId, ProfileData profileData)
     {
+        using var scope = _serviceProvider.CreateScope();
+        var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
+        
         try
         {
             // Use CharacterService to update the character profile
-            await _characterService.UpdateCharacterProfileAsync(profileData.CharacterName, profileData);
+            await characterService.UpdateCharacterProfileAsync(profileData.CharacterName, profileData);
 
             // Also maintain legacy Profile table for backward compatibility
             var profileJson = JsonSerializer.Serialize(profileData, new JsonSerializerOptions
@@ -154,10 +155,13 @@ public class ProfileService : IProfileService
 
     public async Task<ProfileData?> GetStructuredProfileAsync(string userId, string characterName)
     {
+        using var scope = _serviceProvider.CreateScope();
+        var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
+        
         try
         {
             // First try to get from CharacterService (unified character data)
-            var characterProfile = await _characterService.GetCharacterProfileAsync(characterName);
+            var characterProfile = await characterService.GetCharacterProfileAsync(characterName);
             if (characterProfile != null)
             {
                 _logger.LogDebug("Retrieved structured profile from CharacterService for character {CharacterName} (User: {UserId}): {Summary}",
@@ -198,8 +202,67 @@ public class ProfileService : IProfileService
 
     public async Task<ProfileData?> GetCachedProfileAsync(string userId, string characterName, bool allowStale = false)
     {
+        using var scope = _serviceProvider.CreateScope();
+        var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
+        
         try
         {
+            // First try to get from CharacterService (unified character data) - this is the most efficient path
+            var characterProfile = await characterService.GetCharacterProfileAsync(characterName);
+            if (characterProfile != null)
+            {
+                // Check if this profile is stale by looking at the timestamp
+                var age = DateTime.UtcNow - characterProfile.Timestamp;
+                var isStale = age.TotalHours >= 6;
+
+                _logger.LogDebug("Retrieved cached profile from CharacterService for character {CharacterName} (User: {UserId}). Age: {Age:F1} hours, stale: {IsStale}",
+                    characterName, userId, age.TotalHours, isStale);
+
+                // If profile is fresh (< 6 hours), return it immediately
+                if (!isStale)
+                {
+                    _logger.LogDebug("Returning fresh cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
+                    return characterProfile;
+                }
+
+                // If profile is stale (>= 6 hours)
+                if (isStale)
+                {
+                    // Check if there's already a pending request to avoid duplicate requests
+                    var requestKey = $"{userId}:{characterName}";
+                    if (!_pendingRequests.ContainsKey(requestKey))
+                    {
+                        // Trigger a background refresh (fire and forget)
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                _logger.LogInformation("Triggering background refresh for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
+                                await RequestProfileAsync(userId, characterName);
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to refresh stale profile for {CharacterName} (User: {UserId})", characterName, userId);
+                            }
+                        });
+                    }
+                    else
+                    {
+                        _logger.LogDebug("Background refresh already in progress for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
+                    }
+
+                    // Return stale data if allowed, otherwise return null
+                    if (allowStale)
+                    {
+                        _logger.LogDebug("Returning stale cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
+                        return characterProfile;
+                    }
+                }
+
+                return null;
+            }
+
+            // Fallback to legacy Profile table
             var profile = await GetProfileAsync(userId, characterName);
             if (profile == null)
             {
@@ -207,49 +270,58 @@ public class ProfileService : IProfileService
                 return null;
             }
 
-            var age = DateTime.UtcNow - profile.UpdatedAt;
-            var isStale = age.TotalHours >= 6;
+            var legacyAge = DateTime.UtcNow - profile.UpdatedAt;
+            var legacyIsStale = legacyAge.TotalHours >= 6;
 
-            _logger.LogDebug("Cached profile for character {CharacterName} (User: {UserId}) is {Age:F1} hours old, stale: {IsStale}",
-                characterName, userId, age.TotalHours, isStale);
+            _logger.LogDebug("Retrieved cached profile from legacy table for character {CharacterName} (User: {UserId}). Age: {Age:F1} hours, stale: {IsStale}",
+                characterName, userId, legacyAge.TotalHours, legacyIsStale);
 
-            // If profile is fresh (< 6 hours), return it
-            if (!isStale)
+            // Try to deserialize the profile data
+            var profileData = JsonSerializer.Deserialize<ProfileData>(profile.ProfileData);
+            if (profileData == null)
             {
-                var profileData = await GetStructuredProfileAsync(userId, characterName);
-                if (profileData != null)
-                {
-                    _logger.LogDebug("Returning fresh cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
-                    return profileData;
-                }
+                _logger.LogDebug("No structured profile data found for character {CharacterName} (User: {UserId})", characterName, userId);
+                return null;
+            }
+
+            // If profile is fresh (< 6 hours), return it immediately
+            if (!legacyIsStale)
+            {
+                _logger.LogDebug("Returning fresh cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
+                return profileData;
             }
 
             // If profile is stale (>= 6 hours)
-            if (isStale)
+            if (legacyIsStale)
             {
-                // Trigger a background refresh (fire and forget)
-                _ = Task.Run(async () =>
+                // Check if there's already a pending request to avoid duplicate requests
+                var requestKey = $"{userId}:{characterName}";
+                if (!_pendingRequests.ContainsKey(requestKey))
                 {
-                    try
+                    // Trigger a background refresh (fire and forget)
+                    _ = Task.Run(async () =>
                     {
-                        _logger.LogInformation("Triggering background refresh for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
-                        await RequestProfileAsync(userId, characterName);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to refresh stale profile for {CharacterName} (User: {UserId})", characterName, userId);
-                    }
-                });
+                        try
+                        {
+                            _logger.LogInformation("Triggering background refresh for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
+                            await RequestProfileAsync(userId, characterName);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to refresh stale profile for {CharacterName} (User: {UserId})", characterName, userId);
+                        }
+                    });
+                }
+                else
+                {
+                    _logger.LogDebug("Background refresh already in progress for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
+                }
 
                 // Return stale data if allowed, otherwise return null
                 if (allowStale)
                 {
-                    var staleProfileData = await GetStructuredProfileAsync(userId, characterName);
-                    if (staleProfileData != null)
-                    {
-                        _logger.LogDebug("Returning stale cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
-                        return staleProfileData;
-                    }
+                    _logger.LogDebug("Returning stale cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
+                    return profileData;
                 }
             }
 
@@ -273,7 +345,15 @@ public class ProfileService : IProfileService
             {
                 _logger.LogDebug("Profile request already in progress for {CharacterName} (User: {UserId}), waiting for existing request", 
                     characterName, userId);
-                await existingTask;
+                try
+                {
+                    await existingTask;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Existing profile request failed for {CharacterName} (User: {UserId}), continuing with new request", 
+                        characterName, userId);
+                }
                 return;
             }
 
@@ -294,8 +374,18 @@ public class ProfileService : IProfileService
             // Create a new task for this request
             var requestTask = RequestProfileWithFallbackAsync(userId, characterName);
             
-            // Store the task to prevent duplicate requests
-            _pendingRequests.TryAdd(requestKey, requestTask);
+            // Store the task to prevent duplicate requests - use TryAdd to be thread-safe
+            if (!_pendingRequests.TryAdd(requestKey, requestTask))
+            {
+                // Another thread added a task between our check and add, wait for it instead
+                _logger.LogDebug("Another thread started profile request for {CharacterName} (User: {UserId}), waiting for it", 
+                    characterName, userId);
+                if (_pendingRequests.TryGetValue(requestKey, out var concurrentTask))
+                {
+                    await concurrentTask;
+                }
+                return;
+            }
             
             try
             {
@@ -319,6 +409,10 @@ public class ProfileService : IProfileService
 
     private async Task RequestProfileWithFallbackAsync(string userId, string characterName)
     {
+        using var scope = _serviceProvider.CreateScope();
+        var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var characterDataService = scope.ServiceProvider.GetRequiredService<IFListCharacterDataService>();
+        
         try
         {
             // Try F-List API first with automatic ticket renewal
@@ -328,7 +422,7 @@ public class ProfileService : IProfileService
                     characterName, userId);
                 
                 // Get F-Chat credentials from user settings
-                var settings = await _userService.GetUserSettingsAsync(userId);
+                var settings = await userService.GetUserSettingsAsync(userId);
                 if (settings?.FChatCredentialsEncrypted == null)
                 {
                     _logger.LogInformation("No F-Chat credentials found for user {UserId}, falling back to PRO/PRD commands", userId);
@@ -352,7 +446,7 @@ public class ProfileService : IProfileService
                 var password = parts[1];
                 
                 // Use the new method with automatic ticket renewal
-                var characterData = await _characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
+                var characterData = await characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
                 
                 // Convert CharacterDataResponse to ProfileData
                 var profileData = ConvertCharacterDataToProfileData(characterData);
@@ -425,7 +519,8 @@ public class ProfileService : IProfileService
                 KinkId = customKinkEntry.Key,
                 KinkName = customKink.Name,
                 KinkPreference = customKink.Choice,
-                IsCustom = true
+                IsCustom = true,
+                Description = customKink.Description
             };
             profileData.Kinks.Add(kinkInfo);
         }
@@ -478,12 +573,16 @@ public class ProfileService : IProfileService
 
     public async Task<ProfileData?> GetCharacterDataAsync(string userId, string characterName)
     {
+        using var scope = _serviceProvider.CreateScope();
+        var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+        var characterDataService = scope.ServiceProvider.GetRequiredService<IFListCharacterDataService>();
+        
         try
         {
             _logger.LogInformation("Getting character data for {CharacterName} (User: {UserId}) with automatic ticket renewal", characterName, userId);
 
             // Get F-Chat credentials from user settings
-            var settings = await _userService.GetUserSettingsAsync(userId);
+            var settings = await userService.GetUserSettingsAsync(userId);
             if (settings?.FChatCredentialsEncrypted == null)
             {
                 _logger.LogWarning("No F-Chat credentials found for user {UserId}", userId);
@@ -517,10 +616,10 @@ public class ProfileService : IProfileService
             _rateLimiter.RecordRequest(userId, characterName);
 
             // Get character data from F-List API with automatic ticket renewal
-            var characterData = await _characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
+            var characterData = await characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
 
             // Convert to ProfileData format
-            var profileData = _characterDataService.ConvertToProfileData(characterData);
+            var profileData = characterDataService.ConvertToProfileData(characterData);
 
             // Save the profile data
             await SaveStructuredProfileAsync(userId, profileData);

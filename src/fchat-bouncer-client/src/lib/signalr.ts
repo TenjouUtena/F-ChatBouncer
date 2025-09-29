@@ -215,6 +215,7 @@ class SignalRService {
   private onSearchResultsReceived?: (data: { Results: any[]; Timestamp: string }) => void;
   private onBookmarkAdded?: (data: { characterName: string }) => void;
   private onBookmarkRemoved?: (data: { characterName: string }) => void;
+  private onFriendsListUpdated?: (data: { Friends: any[]; Timestamp: string }) => void;
 
   public setFChatConnectionCallbacks(
     onEstablished: (characterName: string) => void,
@@ -234,6 +235,10 @@ this.onSearchResultsReceived = callback;
   ): void {
     this.onBookmarkAdded = onAdded;
     this.onBookmarkRemoved = onRemoved;
+  }
+
+  public setFriendsListUpdatedCallback(callback: (data: { Friends: any[]; Timestamp: string }) => void): void {
+    this.onFriendsListUpdated = callback;
   }
 
   private setupEventHandlers(): void {
@@ -315,6 +320,13 @@ this.onSearchResultsReceived = callback;
 
     this.connection.on('ReceiveTypingNotification', (data: { FromCharacter: string; ReceivingCharacter: string; Status: string; Timestamp: string; characterName: string }) => {
       console.log('Typing notification received:', data);
+    });
+
+    this.connection.on('FriendsListUpdated', (data: { Friends: any[]; Timestamp: string }) => {
+      console.log('Friends list updated:', data);
+      if (this.onFriendsListUpdated) {
+        this.onFriendsListUpdated(data);
+      }
     });
 
     // Secure credential request handlers
@@ -541,6 +553,7 @@ this.onSearchResultsReceived = callback;
   onUserOffline(callback: (data: { characterName: string; timestamp: string; isOnline: boolean }) => void): void {
     this.addUniqueListener('UserOffline', callback);
   }
+
 
   private addUniqueListener(eventName: string, callback: Function): void {
     if (!this.connection) return;
@@ -801,7 +814,9 @@ this.onSearchResultsReceived = callback;
       }
     });
     
-    window.dispatchEvent(event);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(event);
+    }
   }
 
   private hideCredentialDialog(): void {
@@ -809,8 +824,10 @@ this.onSearchResultsReceived = callback;
     this.credentialDialogCallback = undefined;
     
     // Emit event for UI to hide credential dialog
-    const event = new CustomEvent('hideCredentialDialog');
-    window.dispatchEvent(event);
+    if (typeof window !== 'undefined') {
+      const event = new CustomEvent('hideCredentialDialog');
+      window.dispatchEvent(event);
+    }
   }
 
   private async handleCredentialSubmission(credentials: { username: string; password: string }): Promise<void> {

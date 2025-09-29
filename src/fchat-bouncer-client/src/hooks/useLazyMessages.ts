@@ -214,7 +214,8 @@ export function useLazyMessages({
 
     // Only trim when we're at the bottom AND we have more than 100 messages loaded
     // This prevents trimming during scrollback operations
-    if (isNearBottom && allStoredMessages.length > 100) {
+    // Skip trimming for PM channels (they start with PRI-)
+    if (isNearBottom && allStoredMessages.length > 100 && !channelId.startsWith('PRI-')) {
       console.log('Near bottom with many messages, trimming to 100');
       trimChannelMessages(characterName, channelId, 100);
     }

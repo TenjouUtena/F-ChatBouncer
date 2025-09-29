@@ -6,6 +6,7 @@ import { getCharacterNameStyle, getGenderDisplayName } from '@/lib/genderColors'
 import { useChatStore } from '@/stores/chatStore';
 import kinksData from '@/kinks';
 import { bbcodeToHtml } from '@/lib/bbcode';
+import Tooltip from './Tooltip';
 
 interface ProfileModalProps {
   isOpen: boolean;
@@ -192,7 +193,7 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
               </span>
               <span>({kinks.length})</span>
             </div>
-            <div className="space-y-1 max-h-full overflow-y-auto">
+            <div className="flex flex-wrap gap-1 max-h-full overflow-y-auto">
               {kinks.length === 0 ? (
                 <div className="text-gray-500 italic text-xs">None</div>
               ) : (
@@ -206,12 +207,19 @@ export default function ProfileModal({ isOpen, onClose, profileData, characterNa
                     return a.kink_name.localeCompare(b.kink_name);
                   }
                 }).map((kink, index) => (
-                  <div key={index} className="text-gray-300 text-xs p-1 bg-gray-700 rounded">
-                    <div className="font-medium">{kink.kink_name}</div>
-                    {kink.custom && (
-                      <div className="text-yellow-400 text-xs">(Custom)</div>
-                    )}
-                  </div>
+                  <Tooltip
+                    key={index}
+                    content={kink.description || ''}
+                    position="top"
+                    maxWidth="250px"
+                  >
+                    <div className="text-gray-300 text-xs px-2 py-1 bg-gray-700 rounded cursor-help inline-block">
+                      <div className="font-medium">{kink.kink_name}</div>
+                      {kink.custom && (
+                        <div className="text-yellow-400 text-xs">(Custom)</div>
+                      )}
+                    </div>
+                  </Tooltip>
                 ))
               )}
             </div>

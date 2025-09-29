@@ -18,6 +18,9 @@ public class KinkInfo
 
     [JsonPropertyName("custom")]
     public bool IsCustom { get; set; } = false;
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
 }
 
 /// <summary>
