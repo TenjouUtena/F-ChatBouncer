@@ -34,7 +34,7 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterIndexedDBStore();
-  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText } = useChatStore();
+  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText, clearAllUnreadCountsForCharacter } = useChatStore();
   
   // Initialize notifications
   const { 
@@ -490,11 +490,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   };
 
   const handleChannelsJoined = async (channels: string[]) => {
-    console.log('Joining channels:', channels);
+    console.log('Joining channels:', channels, 'for character:', activeCharacter);
     try {
-      // Actually join the channels via SignalR
+      // Actually join the channels via SignalR with the active character
       // The store will be updated when we receive ChannelsSubscribed confirmation
-      await signalRService.subscribeToChannels(channels);
+      await signalRService.subscribeToChannels(channels, activeCharacter || undefined);
       
       // Switch to the first newly joined channel if no channel is currently selected
       if (!selectedChannel && channels.length > 0) {
@@ -510,7 +510,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   const handleJoinNotificationChannel = () => {
     if (notificationChannel) {
       // Join the channel - store will be updated when we receive ChannelsSubscribed confirmation
-      signalRService.subscribeToChannels([notificationChannel]);
+      signalRService.subscribeToChannels([notificationChannel], activeCharacter || undefined);
       setSelectedChannel(notificationChannel);
       setNotificationChannel(null);
     }
@@ -735,7 +735,26 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           {/* Character Activity Overview */}
           {activeCharacter && (
             <div>
-              <h3 className="font-semibold text-sm text-gray-400 mb-2 flex items-center">
+              <h3 
+                className="font-semibold text-sm text-gray-400 mb-2 flex items-center cursor-pointer hover:text-gray-300"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const hasUnreadActivity = connections.some(connection => {
+                    const totalUnreadCount = getHighUrgencyUnreadCountForCharacter(connection.characterName) + 
+                                           getRegularUnreadCountForCharacter(connection.characterName);
+                    return totalUnreadCount > 0;
+                  });
+                  
+                  if (hasUnreadActivity) {
+                    if (confirm('Mark all unread messages as read for all characters?')) {
+                      connections.forEach(connection => {
+                        clearAllUnreadCountsForCharacter(connection.characterName);
+                      });
+                    }
+                  }
+                }}
+                title="Right-click to mark all as read"
+              >
                 <span className="mr-1">👥</span>
                 Character Activity
               </h3>
@@ -817,7 +836,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                       // setShowJoinModal(true);
                       // Option 2: Auto-join and switch to channel (uncomment below)
                       addToSelectedChannels([channel], activeCharacter || undefined);
-                      signalRService.subscribeToChannels([channel]);
+                      signalRService.subscribeToChannels([channel], activeCharacter || undefined);
                       setSelectedChannel(channel);
                     }}
                     className="w-full text-left px-3 py-2 rounded text-sm text-yellow-300 hover:bg-yellow-600 hover:bg-opacity-20 border border-yellow-600 border-opacity-30"

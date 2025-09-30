@@ -20,6 +20,9 @@ export interface LightweightCharacterData {
   gender: string;
   species: string;
   lastSeen: number;
+  status?: 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline';
+  statusMessage?: string;
+  isOnline?: boolean;
   timestamp: number;
   type: 'LIGHT';
 }

@@ -6,6 +6,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
 import { useFriendsStore } from '@/stores/friendsStore';
+import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import AuthFlow from '@/components/AuthFlow';
 import CharacterSelection from '@/components/CharacterSelection';
 import ChannelSelection from '@/components/ChannelSelection';
@@ -309,12 +310,15 @@ export default function Home() {
 
       // Set up friends status event listeners
       signalRService.onStatusUpdated((data) => {
-        // Only update if this character is actually a friend or bookmark
+        // Update status in lightweight character store for all characters
+        const { updateStatus } = useLightweightCharacterStore.getState();
+        updateStatus(data.characterName, data.status as any, data.statusMessage);
+        
+        // Also update friends store if this character is a friend or bookmark
         if (isFriendOrBookmark(data.characterName)) {
           updateFriendStatus(data.characterName, data.status as any, data.statusMessage);
           consoleUtils.friend(`Status updated: ${data.characterName} is now ${data.status}`, data);
         }
-
       });
 
       // Set up bookmark event listeners
@@ -556,8 +560,8 @@ export default function Home() {
 
   const handleChannelsSelected = async (channels: string[]) => {
     try {
-      // Subscribe to the selected channels via SignalR
-      await signalRService.subscribeToChannels(channels);
+      // Subscribe to the selected channels via SignalR with the active character
+      await signalRService.subscribeToChannels(channels, activeCharacter || undefined);
       setChannelsSelected(true);
     } catch (error) {
       console.error('Failed to subscribe to channels:', error);

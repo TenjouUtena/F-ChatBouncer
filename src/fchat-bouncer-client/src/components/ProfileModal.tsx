@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { ProfileData, KinkInfo, ProfileImage } from '@/types';
 import { getCharacterNameStyle, getGenderDisplayName } from '@/lib/genderColors';
 import { useChatStore } from '@/stores/chatStore';
+import { useFriendsStore } from '@/stores/friendsStore';
 import kinksData from '@/kinks';
 import { bbcodeToHtml } from '@/lib/bbcode';
 import Tooltip from './Tooltip';
@@ -18,9 +19,61 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
   const [activeTab, setActiveTab] = useState<'description' | 'info' | 'kinks' | 'images'>('description');
   const [profileData, setProfileData] = useState<ProfileData | null>(null);
   const { getProfile, getProfileRequestStatus, isProfileStale, refreshProfile, requestProfileForCharacter } = useChatStore();
+  const { friends, bookmarksWithStatus } = useFriendsStore();
 
   const profileStatus = getProfileRequestStatus(characterName);
   const isStale = isProfileStale(characterName);
+
+  // Helper function to get character status from friends store
+  const getCharacterStatus = () => {
+    // Check friends first
+    const friend = friends.find(f => f.name === characterName);
+    if (friend) {
+      return {
+        status: friend.status,
+        isOnline: friend.isOnline,
+        statusMessage: friend.statusMessage
+      };
+    }
+    
+    // Check bookmarks
+    const bookmark = bookmarksWithStatus.find(b => b.name === characterName);
+    if (bookmark) {
+      return {
+        status: bookmark.status,
+        isOnline: bookmark.isOnline,
+        statusMessage: bookmark.statusMessage
+      };
+    }
+    
+    return null;
+  };
+
+  // Helper function to get status color
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'online':
+        return 'text-green-500';
+      case 'busy':
+        return 'text-red-500';
+      case 'dnd':
+        return 'text-red-600';
+      case 'idle':
+        return 'text-yellow-500';
+      case 'away':
+        return 'text-orange-500';
+      case 'crown':
+        return 'text-purple-500';
+      case 'looking':
+        return 'text-blue-500';
+      case 'offline':
+        return 'text-gray-400';
+      default:
+        return 'text-gray-400';
+    }
+  };
+
+  const characterStatus = getCharacterStatus();
 
   const handleRefreshProfile = async () => {
     if (profileData) {
@@ -367,6 +420,11 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
                   ({getGenderDisplayName(profileData.gender)})
                 </span>
               )}
+              {characterStatus && (
+                <span className={`text-xs ${getStatusColor(characterStatus.status)}`}>
+                  {characterStatus.status}
+                </span>
+              )}
               {profileStatus === 'requesting' && (
                 <span className="text-xs text-blue-400 animate-spin">⟳</span>
               )}
@@ -386,6 +444,19 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
               <p className="text-gray-500 text-xs mt-1">
                 No profile data available
               </p>
+            )}
+            
+            {/* Custom Status Message */}
+            {characterStatus?.statusMessage && (
+              <div className="mt-3 max-w-md">
+                <div className="text-xs text-gray-400 mb-1">Status Message:</div>
+                <div 
+                  className="text-sm text-gray-300 bg-gray-700 rounded p-2 max-h-20 overflow-y-auto border border-gray-600"
+                  dangerouslySetInnerHTML={{ 
+                    __html: bbcodeToHtml(characterStatus.statusMessage) 
+                  }}
+                />
+              </div>
             )}
           </div>
           <div className="flex items-center gap-2">

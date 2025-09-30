@@ -117,6 +117,7 @@ interface ChatStore extends ChatState {
   getTotalUnreadCountForCharacter: (characterName: string) => number;
   getUnreadCountsForCharacter: (characterName: string) => Record<string, number>;
   clearUnreadCountForChannel: (characterName: string, channelId: string) => void;
+  clearAllUnreadCountsForCharacter: (characterName: string) => void;
   
   // High-urgency alert management
   isHighUrgencyChannel: (channelId: string) => boolean;
@@ -295,6 +296,27 @@ export const useChatStore = create<ChatStore>()(
             characterMessages: cleanedMessages
           };
 
+          // Update lazy loading state to expand loaded messages by 1 (capped at 100)
+          if (message.channel) {
+            const currentLazyState = state.characterLazyLoadingState[characterName]?.[message.channel];
+            if (currentLazyState) {
+              const newLoadedCount = Math.min(currentLazyState.loadedMessageCount + 1, 100);
+              
+              //console.log(`Expanding loaded messages for ${characterName}:${message.channel} from ${currentLazyState.loadedMessageCount} to ${newLoadedCount}`);
+              
+              newState.characterLazyLoadingState = {
+                ...state.characterLazyLoadingState,
+                [characterName]: {
+                  ...state.characterLazyLoadingState[characterName],
+                  [message.channel]: {
+                    ...currentLazyState,
+                    loadedMessageCount: newLoadedCount
+                  }
+                }
+              };
+            }
+          }
+
           // Handle unread counts for messages
           const isPM = message.channel && message.channel.startsWith('PRI-');
           const isActiveCharacter = message.isActiveCharacter === true;
@@ -409,12 +431,41 @@ export const useChatStore = create<ChatStore>()(
             )
           );
 
-          return {
+          const newState: Partial<ChatStore> = {
             characterMessages: {
               ...state.characterMessages,
               [characterName]: [...existingMessages, ...newMessages]
             }
           };
+
+          // Update lazy loading state for each unique channel that received new messages
+          const channelsWithNewMessages = new Set(newMessages.map(msg => msg.channel).filter(Boolean));
+          if (channelsWithNewMessages.size > 0) {
+            newState.characterLazyLoadingState = { ...state.characterLazyLoadingState };
+            
+            channelsWithNewMessages.forEach(channel => {
+              if (channel && newState.characterLazyLoadingState) {
+                const currentLazyState = state.characterLazyLoadingState[characterName]?.[channel];
+                if (currentLazyState) {
+                  const newMessagesInChannel = newMessages.filter(msg => msg.channel === channel);
+                  const newLoadedCount = Math.min(currentLazyState.loadedMessageCount + newMessagesInChannel.length, 100);
+                  
+                  console.log(`Expanding loaded messages for ${characterName}:${channel} from ${currentLazyState.loadedMessageCount} to ${newLoadedCount} (${newMessagesInChannel.length} new messages)`);
+                  
+                  if (!newState.characterLazyLoadingState[characterName]) {
+                    newState.characterLazyLoadingState[characterName] = {};
+                  }
+                  
+                  newState.characterLazyLoadingState[characterName][channel] = {
+                    ...currentLazyState,
+                    loadedMessageCount: newLoadedCount
+                  };
+                }
+              }
+            });
+          }
+
+          return newState;
         });
       },
 
@@ -741,8 +792,16 @@ export const useChatStore = create<ChatStore>()(
         if (!characterName) {
           // Legacy behavior
           set((state) => {
-            const existingIds = new Set(state.messages.map(m => m.id));
-            const newMessages = messages.filter(m => !existingIds.has(m.id));
+            const existingMessages = state.messages;
+            const newMessages = messages.filter(newMsg => 
+              !existingMessages.some(existingMsg => 
+                existingMsg.id === newMsg.id ||
+                (existingMsg.timestamp === newMsg.timestamp &&
+                 existingMsg.sender === newMsg.sender &&
+                 existingMsg.content === newMsg.content &&
+                 existingMsg.channel === newMsg.channel)
+              )
+            );
             return {
               messages: [...newMessages, ...state.messages]
             };
@@ -752,8 +811,15 @@ export const useChatStore = create<ChatStore>()(
 
         set((state) => {
           const existingMessages = state.characterMessages[characterName] || [];
-          const existingIds = new Set(existingMessages.map(m => m.id));
-          const newMessages = messages.filter(m => !existingIds.has(m.id));
+          const newMessages = messages.filter(newMsg => 
+            !existingMessages.some(existingMsg => 
+              existingMsg.id === newMsg.id ||
+              (existingMsg.timestamp === newMsg.timestamp &&
+               existingMsg.sender === newMsg.sender &&
+               existingMsg.content === newMsg.content &&
+               existingMsg.channel === newMsg.channel)
+            )
+          );
           
           return {
             characterMessages: {
@@ -1063,6 +1129,17 @@ export const useChatStore = create<ChatStore>()(
             characterUnreadCounts: {
               ...state.characterUnreadCounts,
               [characterName]: newCounts
+            }
+          };
+        });
+      },
+
+      clearAllUnreadCountsForCharacter: (characterName: string) => {
+        set((state) => {
+          return {
+            characterUnreadCounts: {
+              ...state.characterUnreadCounts,
+              [characterName]: {}
             }
           };
         });
@@ -1677,13 +1754,25 @@ export const useChatStore = create<ChatStore>()(
             try {
               const messages = await messageIndexedDBService.getMessages(characterName);
               if (messages.length > 0) {
+                // Deduplicate messages from IndexedDB
+                const deduplicatedMessages = messages.filter((message, index, arr) => {
+                  // Remove duplicates based on ID or content/timestamp/sender/channel
+                  return arr.findIndex(m => 
+                    m.id === message.id ||
+                    (m.timestamp === message.timestamp &&
+                     m.sender === message.sender &&
+                     m.content === message.content &&
+                     m.channel === message.channel)
+                  ) === index;
+                });
+                
                 set(currentState => ({
                   characterMessages: {
                     ...currentState.characterMessages,
-                    [characterName]: messages
+                    [characterName]: deduplicatedMessages
                   }
                 }));
-                console.log(`Loaded ${messages.length} messages for ${characterName} from IndexedDB`);
+                console.log(`Loaded ${deduplicatedMessages.length} messages for ${characterName} from IndexedDB (${messages.length - deduplicatedMessages.length} duplicates removed)`);
               }
             } catch (error) {
               console.error(`Failed to load messages for ${characterName}:`, error);
@@ -1705,13 +1794,25 @@ export const useChatStore = create<ChatStore>()(
           if (existingMessages.length === 0) {
             const messages = await messageIndexedDBService.getMessages(characterName);
             if (messages.length > 0) {
+              // Deduplicate messages from IndexedDB
+              const deduplicatedMessages = messages.filter((message, index, arr) => {
+                // Remove duplicates based on ID or content/timestamp/sender/channel
+                return arr.findIndex(m => 
+                  m.id === message.id ||
+                  (m.timestamp === message.timestamp &&
+                   m.sender === message.sender &&
+                   m.content === message.content &&
+                   m.channel === message.channel)
+                ) === index;
+              });
+              
               set(state => ({
                 characterMessages: {
                   ...state.characterMessages,
-                  [characterName]: messages
+                  [characterName]: deduplicatedMessages
                 }
               }));
-              console.log(`Loaded ${messages.length} messages for ${characterName} from IndexedDB`);
+              console.log(`Loaded ${deduplicatedMessages.length} messages for ${characterName} from IndexedDB (${messages.length - deduplicatedMessages.length} duplicates removed)`);
             }
           }
         } catch (error) {

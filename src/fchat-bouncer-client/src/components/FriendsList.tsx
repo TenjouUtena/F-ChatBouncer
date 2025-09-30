@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import { Friend } from '@/types';
 import { ChevronDownIcon, ChevronRightIcon, UserIcon, BookmarkIcon } from '@heroicons/react/24/outline';
 import Character, { CharacterData, getCharacterStatusColor, getCharacterStatusIcon } from './Character';
@@ -22,6 +23,7 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
   const { friends, bookmarks, bookmarksWithStatus, isCollapsed, toggleCollapsed, isLoading, deduplicateFriends, addBookmark, removeBookmark } = useFriendsStore();
   const { token } = useAuthStore();
   const { getProfile } = useChatStore();
+  const { getCharacter } = useLightweightCharacterStore();
   const [hoveredFriend, setHoveredFriend] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [userContextMenu, setUserContextMenu] = useState<{
@@ -35,11 +37,35 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
   // Deduplicate friends by name to prevent React key conflicts
   const uniqueFriends = deduplicateFriends(friends);
 
-  const onlineFriends = uniqueFriends.filter(friend => friend.isOnline);
-  const offlineFriends = uniqueFriends.filter(friend => !friend.isOnline);
+  // Get status from lightweight character store for all friends
+  const friendsWithLightweightStatus = uniqueFriends.map(friend => {
+    const lightweightData = getCharacter(friend.name);
+    return {
+      ...friend,
+      // Use lightweight store status if available, fallback to friend status
+      isOnline: lightweightData?.isOnline ?? friend.isOnline,
+      status: lightweightData?.status ?? friend.status,
+      statusMessage: lightweightData?.statusMessage ?? friend.statusMessage
+    };
+  });
+
+  const onlineFriends = friendsWithLightweightStatus.filter(friend => friend.isOnline);
+  const offlineFriends = friendsWithLightweightStatus.filter(friend => !friend.isOnline);
+  
+  // Get status from lightweight character store for bookmarks
+  const bookmarksWithLightweightStatus = bookmarksWithStatus.map(bookmark => {
+    const lightweightData = getCharacter(bookmark.name);
+    return {
+      ...bookmark,
+      // Use lightweight store status if available, fallback to bookmark status
+      isOnline: lightweightData?.isOnline ?? bookmark.isOnline,
+      status: lightweightData?.status ?? bookmark.status,
+      statusMessage: lightweightData?.statusMessage ?? bookmark.statusMessage
+    };
+  });
   
   // Show only online bookmarks from bookmarksWithStatus
-  const onlineBookmarks = bookmarksWithStatus.filter(bookmark => bookmark.isOnline);
+  const onlineBookmarks = bookmarksWithLightweightStatus.filter(bookmark => bookmark.isOnline);
 
   // Handle mouse movement for tooltip positioning
   const handleMouseMove = (e: React.MouseEvent) => {

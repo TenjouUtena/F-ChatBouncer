@@ -606,9 +606,17 @@ this.onSearchResultsReceived = callback;
   }
 
   // Methods to send messages to server
-  async subscribeToChannels(channels: string[]): Promise<void> {
+  async subscribeToChannels(channels: string[], characterName?: string): Promise<void> {
     if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
-      await this.connection.invoke('SubscribeToChannels', channels);
+      if (characterName) {
+        // Use character-specific channel joining
+        for (const channel of channels) {
+          await this.connection.invoke('JoinChannelForCharacter', characterName, channel);
+        }
+      } else {
+        // Fallback to the old method for backward compatibility
+        await this.connection.invoke('SubscribeToChannels', channels);
+      }
     }
   }
 

@@ -14,6 +14,7 @@ interface LightweightCharacterStore {
   getCharacter: (character: string) => LightweightCharacterData | null;
   hasCharacter: (character: string) => boolean;
   updateLastSeen: (character: string) => Promise<void>;
+  updateStatus: (character: string, status: 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline', statusMessage?: string) => Promise<void>;
   cleanupOldCharacters: () => Promise<number>;
   getStorageSize: () => number;
   getStorageInfo: () => Promise<{ connections: number; lightweight: number; estimatedSize: number }>;
@@ -141,6 +142,17 @@ export const useLightweightCharacterStore = create<LightweightCharacterStore>()(
       updateLastSeen: async (character: string) => {
         const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
         await indexedDBStore.updateLastSeen(character);
+        
+        // Sync state
+        const indexedDBState = indexedDBStore;
+        set({
+          characters: indexedDBState.characters
+        });
+      },
+      
+      updateStatus: async (character: string, status: 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline', statusMessage?: string) => {
+        const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+        await indexedDBStore.updateStatus(character, status, statusMessage);
         
         // Sync state
         const indexedDBState = indexedDBStore;

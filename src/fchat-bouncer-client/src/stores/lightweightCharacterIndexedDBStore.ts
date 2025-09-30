@@ -12,6 +12,7 @@ interface LightweightCharacterIndexedDBStore {
   getCharacter: (character: string) => LightweightCharacterDataType | null;
   hasCharacter: (character: string) => boolean;
   updateLastSeen: (character: string) => Promise<void>;
+  updateStatus: (character: string, status: 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline', statusMessage?: string) => Promise<void>;
   cleanupOldCharacters: () => Promise<number>;
   getStorageSize: () => number;
   getStorageInfo: () => Promise<{ connections: number; lightweight: number; estimatedSize: number }>;
@@ -38,7 +39,10 @@ export const useLightweightCharacterIndexedDBStore = create<LightweightCharacter
           character: char.character,
           gender: char.gender,
           species: char.species,
-          lastSeen: char.lastSeen
+          lastSeen: char.lastSeen,
+          status: char.status,
+          statusMessage: char.statusMessage,
+          isOnline: char.isOnline
         };
         return acc;
       }, {} as Record<string, LightweightCharacterDataType>);
@@ -57,7 +61,10 @@ export const useLightweightCharacterIndexedDBStore = create<LightweightCharacter
         character,
         gender,
         species,
-        lastSeen: Date.now()
+        lastSeen: Date.now(),
+        status: undefined,
+        statusMessage: undefined,
+        isOnline: undefined
       };
       
       // Store in IndexedDB
@@ -65,7 +72,10 @@ export const useLightweightCharacterIndexedDBStore = create<LightweightCharacter
         character,
         gender,
         species,
-        lastSeen: Date.now()
+        lastSeen: Date.now(),
+        status: undefined,
+        statusMessage: undefined,
+        isOnline: undefined
       });
       
       // Update in-memory cache
@@ -109,7 +119,10 @@ export const useLightweightCharacterIndexedDBStore = create<LightweightCharacter
         character: updatedData.character,
         gender: updatedData.gender,
         species: updatedData.species,
-        lastSeen: updatedData.lastSeen
+        lastSeen: updatedData.lastSeen,
+        status: updatedData.status,
+        statusMessage: updatedData.statusMessage,
+        isOnline: updatedData.isOnline
       });
       
       // Update in-memory cache
@@ -123,6 +136,48 @@ export const useLightweightCharacterIndexedDBStore = create<LightweightCharacter
       console.log(`Last seen updated for ${character}`);
     } catch (error) {
       console.error(`Failed to update last seen for ${character}:`, error);
+      throw error;
+    }
+  },
+
+  updateStatus: async (character: string, status: 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline', statusMessage?: string) => {
+    try {
+      const characterData = get().characters[character];
+      if (!characterData) {
+        console.warn(`Cannot update status for unknown character: ${character}`);
+        return;
+      }
+
+      const updatedData = {
+        ...characterData,
+        status,
+        statusMessage,
+        isOnline: status !== 'offline',
+        lastSeen: Date.now()
+      };
+      
+      // Update in IndexedDB
+      await characterIndexedDBService.storeLightweightCharacter({
+        character: updatedData.character,
+        gender: updatedData.gender,
+        species: updatedData.species,
+        lastSeen: updatedData.lastSeen,
+        status: updatedData.status,
+        statusMessage: updatedData.statusMessage,
+        isOnline: updatedData.isOnline
+      });
+      
+      // Update in-memory cache
+      set((state) => ({
+        characters: {
+          ...state.characters,
+          [character]: updatedData
+        }
+      }));
+      
+      console.log(`Status updated for ${character}: ${status}${statusMessage ? ` - ${statusMessage}` : ''}`);
+    } catch (error) {
+      console.error(`Failed to update status for ${character}:`, error);
       throw error;
     }
   },
