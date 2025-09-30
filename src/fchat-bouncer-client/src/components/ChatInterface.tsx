@@ -106,11 +106,8 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       const unreadCounts = getUnreadCountsForCharacter(activeCharacter);
     }
     
-    // If this is a message for the active character, we need to handle unread counts specially
-    // Clear unread count for the currently selected channel if this message is for it
-    if (message.isActiveCharacter && message.channel === selectedChannel && activeCharacter) {
-      clearUnreadCountForChannel(activeCharacter, message.channel);
-    }
+    // Note: Unread count handling is now done in the store's addMessage method
+    // to prevent unnecessary increments for messages in the currently selected channel
 
     // Check if this is a PM message
     const isPM = message.channel && message.channel.startsWith('PRI-');

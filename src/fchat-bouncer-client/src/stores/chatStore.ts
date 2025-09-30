@@ -295,13 +295,25 @@ export const useChatStore = create<ChatStore>()(
             characterMessages: cleanedMessages
           };
 
-          // Handle unread counts for all messages
+          // Handle unread counts for messages
           const isPM = message.channel && message.channel.startsWith('PRI-');
           const isActiveCharacter = message.isActiveCharacter === true;
           
-          // Always increment unread count for PMs (even if window is open)
-          // For regular channels, increment for all messages (the component will clear it for the active channel)
-          if (message.channel) {
+          // Get the current selected channel for this character to determine if we should mark as read
+          const selectedChannels = state.characterSelectedChannels[characterName] || [];
+          const isCurrentChannel = selectedChannels.length > 0 && message.channel === selectedChannels[0];
+          
+          // Only increment unread count if:
+          // 1. It's a PM (always increment for PMs)
+          // 2. It's not for the active character
+          // 3. It's for the active character but not the currently selected channel
+          const shouldIncrementUnread = message.channel && (
+            isPM || 
+            !isActiveCharacter || 
+            (isActiveCharacter && !isCurrentChannel)
+          );
+          
+          if (shouldIncrementUnread) {
             const currentUnreadCounts = state.characterUnreadCounts[characterName] || {};
             const newUnreadCounts = { ...currentUnreadCounts };
             const oldCount = newUnreadCounts[message.channel] || 0;
@@ -315,7 +327,6 @@ export const useChatStore = create<ChatStore>()(
 
           // Check if message is from an unknown channel for this character
           // A channel is "unknown" if it's not in the selected channels (what's open in the UI)
-          const selectedChannels = state.characterSelectedChannels[characterName] || [];
           if (message.channel && !selectedChannels.includes(message.channel)) {
             // Add to character-specific unknown channels
             const currentUnknownChannels = state.characterUnknownChannels[characterName] || new Set();

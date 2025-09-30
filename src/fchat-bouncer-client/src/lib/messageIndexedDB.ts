@@ -153,8 +153,8 @@ class MessageIndexedDBService {
           results = results.filter((item: { channelId: string; }) => item.channelId === channelId);
         }
         
-        // Sort by timestamp (newest first)
-        results.sort((a: { timestamp: number; }, b: { timestamp: number; }) => b.timestamp - a.timestamp);
+        // Sort by timestamp (oldest first)
+        results.sort((a: { timestamp: number; }, b: { timestamp: number; }) => a.timestamp - b.timestamp);
         
         // Apply limit if specified
         if (limit) {

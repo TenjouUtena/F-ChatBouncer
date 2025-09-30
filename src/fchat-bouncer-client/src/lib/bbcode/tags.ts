@@ -604,7 +604,7 @@ export const urlTag: BBCodeTag = {
     const hasHtmlTags = /<[^>]+>/.test(displayText);
     if (hasHtmlTags) {
       // Content is already processed HTML, use it as-is
-      console.log('URL tag detected HTML content:', displayText);
+      //console.log('URL tag detected HTML content:', displayText);
     } else {
       // Content is plain text, HTML-encode it for safety
       displayText = sanitizeContent(displayText);

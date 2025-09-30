@@ -131,11 +131,6 @@ docker tag "$DOCKER_USERNAME/$FRONTEND_IMAGE:$IMAGE_TAG" "$DOCKER_USERNAME/$FRON
 echo ""
 echo "🚀 Pushing images to Docker Hub..."
 
-# Push backend image with both versioned and latest tags
-echo "Pushing backend image..."
-docker push "$DOCKER_USERNAME/$BACKEND_IMAGE:$IMAGE_TAG"
-docker push "$DOCKER_USERNAME/$BACKEND_IMAGE:latest"
-
 # Push frontend image with both versioned and latest tags
 echo "Pushing frontend image..."
 docker push "$DOCKER_USERNAME/$FRONTEND_IMAGE:$IMAGE_TAG"
