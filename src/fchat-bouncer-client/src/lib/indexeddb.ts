@@ -18,16 +18,36 @@ class IndexedDBService {
 
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
+      // Check if IndexedDB is available
+      if (!window.indexedDB) {
+        const error = new Error('IndexedDB is not supported in this browser');
+        console.error('IndexedDB not supported:', error);
+        reject(error);
+        return;
+      }
+
+      console.log('Opening IndexedDB:', this.dbName, 'version:', this.dbVersion);
+      
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
       request.onerror = () => {
-        console.error('Failed to open IndexedDB:', request.error);
-        reject(request.error);
+        const error = request.error || new Error('Unknown IndexedDB error');
+        console.error('Failed to open IndexedDB:', error);
+        console.error('Error details:', {
+          name: error.name,
+          message: error.message,
+          code: (error as any).code
+        });
+        reject(error);
       };
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('IndexedDB initialized successfully');
+        console.log('IndexedDB initialized successfully:', {
+          dbName: this.dbName,
+          version: this.dbVersion,
+          objectStoreNames: Array.from(this.db.objectStoreNames)
+        });
         resolve();
       };
 
@@ -110,10 +130,8 @@ class IndexedDBService {
       request.onsuccess = () => {
         const result = request.result;
         if (result) {
-          console.log(`Retrieved ${type} profile for ${characterName}`);
           resolve(result.profileData);
         } else {
-          console.log(`No ${type} profile found for ${characterName}`);
           resolve(null);
         }
       };

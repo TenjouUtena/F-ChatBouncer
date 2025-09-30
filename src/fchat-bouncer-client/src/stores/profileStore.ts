@@ -8,6 +8,7 @@ interface ProfileStore {
   profiles: Record<string, ProfileData>;
   profileRequestStatus: Record<string, 'idle' | 'requesting' | 'failed' | 'success'>;
   profileLastRequested: Record<string, number>;
+  isIndexedDBAvailable: boolean;
   
   // Actions
   initialize: () => Promise<void>;
@@ -28,10 +29,12 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
   profiles: {},
   profileRequestStatus: {},
   profileLastRequested: {},
+  isIndexedDBAvailable: false,
 
   initialize: async () => {
     try {
       await indexedDBService.initialize();
+      set({ isIndexedDBAvailable: true });
       console.log('Profile store initialized with IndexedDB');
       
       // Check for and migrate legacy profiles
@@ -42,17 +45,21 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         console.log(`Migration completed: ${result.migrated} profiles migrated, ${result.errors} errors`);
       }
     } catch (error) {
-      console.error('Failed to initialize profile store:', error);
-      throw error;
+      console.error('Failed to initialize profile store with IndexedDB:', error);
+      set({ isIndexedDBAvailable: false });
+      console.warn('Profile store will operate in memory-only mode');
+      // Don't throw error - allow the store to continue with limited functionality
     }
   },
 
   addProfile: async (characterName: string, profileData: ProfileData) => {
     try {
-      // Store in IndexedDB
-      await indexedDBService.storeProfile(characterName, profileData, 'FULL');
+      // Store in IndexedDB if available
+      if (get().isIndexedDBAvailable) {
+        await indexedDBService.storeProfile(characterName, profileData, 'FULL');
+      }
       
-      // Update in-memory cache
+      // Always update in-memory cache
       set((state) => ({
         profiles: {
           ...state.profiles,
@@ -68,7 +75,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         }
       }));
       
-      console.log(`Profile stored for ${characterName}`);
+      console.log(`Profile stored for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
     } catch (error) {
       console.error(`Failed to store profile for ${characterName}:`, error);
       throw error;
@@ -83,17 +90,19 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         return cachedProfile;
       }
 
-      // If not in cache, try to load from IndexedDB
-      const profileData = await indexedDBService.getProfile(characterName, 'FULL');
-      if (profileData) {
-        // Update cache
-        set((state) => ({
-          profiles: {
-            ...state.profiles,
-            [characterName]: profileData
-          }
-        }));
-        return profileData;
+      // If not in cache and IndexedDB is available, try to load from IndexedDB
+      if (get().isIndexedDBAvailable) {
+        const profileData = await indexedDBService.getProfile(characterName, 'FULL');
+        if (profileData) {
+          // Update cache
+          set((state) => ({
+            profiles: {
+              ...state.profiles,
+              [characterName]: profileData
+            }
+          }));
+          return profileData;
+        }
       }
 
       return null;
@@ -109,19 +118,25 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
       return true;
     }
 
-    // Check IndexedDB
-    try {
-      return await indexedDBService.hasProfile(characterName, 'FULL');
-    } catch (error) {
-      console.error(`Failed to check if profile exists for ${characterName}:`, error);
-      return false;
+    // Check IndexedDB if available
+    if (get().isIndexedDBAvailable) {
+      try {
+        return await indexedDBService.hasProfile(characterName, 'FULL');
+      } catch (error) {
+        console.error(`Failed to check if profile exists for ${characterName}:`, error);
+        return false;
+      }
     }
+
+    return false;
   },
 
   deleteProfile: async (characterName: string) => {
     try {
-      // Remove from IndexedDB
-      await indexedDBService.deleteProfile(characterName, 'FULL');
+      // Remove from IndexedDB if available
+      if (get().isIndexedDBAvailable) {
+        await indexedDBService.deleteProfile(characterName, 'FULL');
+      }
       
       // Remove from cache
       set((state) => {
@@ -141,7 +156,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         };
       });
       
-      console.log(`Profile deleted for ${characterName}`);
+      console.log(`Profile deleted for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
     } catch (error) {
       console.error(`Failed to delete profile for ${characterName}:`, error);
       throw error;
@@ -150,8 +165,10 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
 
   clearAllProfiles: async () => {
     try {
-      // Clear IndexedDB
-      await indexedDBService.clearAllProfiles();
+      // Clear IndexedDB if available
+      if (get().isIndexedDBAvailable) {
+        await indexedDBService.clearAllProfiles();
+      }
       
       // Clear cache
       set({
@@ -160,7 +177,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         profileLastRequested: {}
       });
       
-      console.log('All profiles cleared');
+      console.log(`All profiles cleared${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
     } catch (error) {
       console.error('Failed to clear all profiles:', error);
       throw error;
@@ -190,7 +207,15 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
 
   getStorageInfo: async () => {
     try {
-      return await indexedDBService.getStorageInfo();
+      if (get().isIndexedDBAvailable) {
+        return await indexedDBService.getStorageInfo();
+      } else {
+        // Return memory-only stats
+        const profiles = get().profiles;
+        const count = Object.keys(profiles).length;
+        const estimatedSize = JSON.stringify(profiles).length;
+        return { count, estimatedSize };
+      }
     } catch (error) {
       console.error('Failed to get storage info:', error);
       return { count: 0, estimatedSize: 0 };
@@ -199,7 +224,11 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
 
   cleanupOldProfiles: async (maxAge?: number) => {
     try {
-      const deletedCount = await indexedDBService.cleanupOldProfiles(maxAge);
+      let deletedCount = 0;
+      
+      if (get().isIndexedDBAvailable) {
+        deletedCount = await indexedDBService.cleanupOldProfiles(maxAge);
+      }
       
       // Also clean up cache for deleted profiles
       const cutoffTime = Date.now() - (maxAge || 30 * 24 * 60 * 60 * 1000);
@@ -214,6 +243,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
             delete newProfiles[characterName];
             delete newStatus[characterName];
             delete newLastRequested[characterName];
+            deletedCount++;
           }
         });
         

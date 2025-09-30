@@ -32,16 +32,36 @@ class CharacterIndexedDBService {
 
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
+      // Check if IndexedDB is available
+      if (!window.indexedDB) {
+        const error = new Error('IndexedDB is not supported in this browser');
+        console.error('Character IndexedDB not supported:', error);
+        reject(error);
+        return;
+      }
+
+      console.log('Opening Character IndexedDB:', this.dbName, 'version:', this.dbVersion);
+      
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
       request.onerror = () => {
-        console.error('Failed to open Character IndexedDB:', request.error);
-        reject(request.error);
+        const error = request.error || new Error('Unknown Character IndexedDB error');
+        console.error('Failed to open Character IndexedDB:', error);
+        console.error('Error details:', {
+          name: error.name,
+          message: error.message,
+          code: (error as any).code
+        });
+        reject(error);
       };
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('Character IndexedDB initialized successfully');
+        console.log('Character IndexedDB initialized successfully:', {
+          dbName: this.dbName,
+          version: this.dbVersion,
+          objectStoreNames: Array.from(this.db.objectStoreNames)
+        });
         resolve();
       };
 
