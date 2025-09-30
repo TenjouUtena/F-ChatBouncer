@@ -6,6 +6,7 @@ import { api, setTokenRefreshCallback } from '@/lib/api';
 import { useAuthStore } from './authStore';
 import { useLightweightCharacterStore } from './lightweightCharacterStore';
 import { useProfileStore } from './profileStore';
+import { messageIndexedDBService } from '@/lib/messageIndexedDB';
 
 interface ChatStore extends ChatState {
   // Character-scoped data
@@ -137,6 +138,11 @@ interface ChatStore extends ChatState {
   // Storage management
   cleanupStorage: () => void;
   getStorageSize: () => number;
+  
+  // IndexedDB message management
+  loadMessagesFromIndexedDB: (characterName: string, channelId?: string, limit?: number) => Promise<Message[]>;
+  loadAllMessagesFromIndexedDB: () => Promise<void>;
+  loadMessagesForCharacter: (characterName: string) => Promise<void>;
 }
 
 // Storage quota management utilities
@@ -241,6 +247,13 @@ export const useChatStore = create<ChatStore>()(
           ...message,
           id: message.id || generateMessageId()
         };
+
+        // Store message in IndexedDB if character is specified
+        if (characterName && message.channel) {
+          messageIndexedDBService.storeMessage(characterName, message.channel, messageWithId).catch(error => {
+            console.error('Failed to store message in IndexedDB:', error);
+          });
+        }
 
         set((state) => {
           // If no character specified, use legacy behavior
@@ -354,6 +367,17 @@ export const useChatStore = create<ChatStore>()(
       },
 
       addMessages: (messages: Message[], characterName?: string) => {
+        // Store messages in IndexedDB if character is specified
+        if (characterName) {
+          messages.forEach(message => {
+            if (message.channel) {
+              messageIndexedDBService.storeMessage(characterName, message.channel, message).catch(error => {
+                console.error('Failed to store message in IndexedDB:', error);
+              });
+            }
+          });
+        }
+
         if (!characterName) {
           // Legacy behavior
           set((state) => ({
@@ -591,7 +615,17 @@ export const useChatStore = create<ChatStore>()(
       },
 
       getMessagesForCharacter: (characterName: string) => {
-        return get().characterMessages[characterName] || [];
+        const currentState = get();
+        const messages = currentState.characterMessages[characterName] || [];
+        
+        // If no messages in memory, try to load from IndexedDB in background
+        if (messages.length === 0 && characterName) {
+          currentState.loadMessagesForCharacter(characterName).catch(error => {
+            console.error(`Failed to load messages for ${characterName}:`, error);
+          });
+        }
+        
+        return messages;
       },
 
       getSelectedChannelsForCharacter: (characterName: string) => {
@@ -1603,6 +1637,75 @@ export const useChatStore = create<ChatStore>()(
           console.error('Error calculating storage size:', error);
           return 0;
         }
+      },
+
+      loadMessagesFromIndexedDB: async (characterName: string, channelId?: string, limit?: number) => {
+        try {
+          const messages = await messageIndexedDBService.getMessages(characterName, channelId, limit);
+          console.log(`Loaded ${messages.length} messages from IndexedDB for ${characterName}${channelId ? ` in ${channelId}` : ''}`);
+          return messages;
+        } catch (error) {
+          console.error(`Failed to load messages from IndexedDB for ${characterName}:`, error);
+          return [];
+        }
+      },
+
+      loadAllMessagesFromIndexedDB: async () => {
+        try {
+          console.log('Loading all messages from IndexedDB into memory...');
+          
+          // Get all characters that have messages in IndexedDB
+          // For now, we'll try to load for the current active character
+          // This could be enhanced to load for all known characters
+          const state = get();
+          
+          // Load messages for characters that have connections
+          const characterNames = Object.keys(state.characterSelectedChannels);
+          
+          for (const characterName of characterNames) {
+            try {
+              const messages = await messageIndexedDBService.getMessages(characterName);
+              if (messages.length > 0) {
+                set(currentState => ({
+                  characterMessages: {
+                    ...currentState.characterMessages,
+                    [characterName]: messages
+                  }
+                }));
+                console.log(`Loaded ${messages.length} messages for ${characterName} from IndexedDB`);
+              }
+            } catch (error) {
+              console.error(`Failed to load messages for ${characterName}:`, error);
+            }
+          }
+          
+          console.log('Finished loading messages from IndexedDB');
+        } catch (error) {
+          console.error('Failed to load messages from IndexedDB:', error);
+        }
+      },
+
+      loadMessagesForCharacter: async (characterName: string) => {
+        try {
+          const currentState = get();
+          const existingMessages = currentState.characterMessages[characterName] || [];
+          
+          // Only load if we don't already have messages in memory
+          if (existingMessages.length === 0) {
+            const messages = await messageIndexedDBService.getMessages(characterName);
+            if (messages.length > 0) {
+              set(state => ({
+                characterMessages: {
+                  ...state.characterMessages,
+                  [characterName]: messages
+                }
+              }));
+              console.log(`Loaded ${messages.length} messages for ${characterName} from IndexedDB`);
+            }
+          }
+        } catch (error) {
+          console.error(`Failed to load messages for ${characterName}:`, error);
+        }
       }
     }),
     {
@@ -1633,9 +1736,9 @@ export const useChatStore = create<ChatStore>()(
         }
       })),
       partialize: (state) => ({
-        // Note: profiles are now stored in IndexedDB, not localStorage
+        // Note: profiles and messages are now stored in IndexedDB, not localStorage
+        // Only store lightweight data in localStorage to avoid quota issues
         knownCharacters: Array.from(state.knownCharacters),
-        characterMessages: state.characterMessages,
         characterSelectedChannels: state.characterSelectedChannels,
         characterJoinedChannels: state.characterJoinedChannels,
         characterChannelMetadata: state.characterChannelMetadata,
@@ -1645,8 +1748,7 @@ export const useChatStore = create<ChatStore>()(
         characterUnknownChannelCounts: state.characterUnknownChannelCounts,
         characterUnreadCounts: state.characterUnreadCounts,
         characterLazyLoadingState: state.characterLazyLoadingState,
-        // Legacy fields for backward compatibility
-        messages: state.messages,
+        // Legacy fields for backward compatibility (excluding messages)
         selectedChannels: state.selectedChannels,
         channelMetadata: state.channelMetadata
       }),
@@ -1682,6 +1784,14 @@ export const useChatStore = create<ChatStore>()(
           profileStore.initialize().catch(error => {
             console.error('Failed to initialize profile store after rehydration:', error);
           });
+
+          // Load messages from IndexedDB after rehydration
+          setTimeout(() => {
+            const chatStore = useChatStore.getState();
+            chatStore.loadAllMessagesFromIndexedDB().catch((error: any) => {
+              console.error('Failed to load messages from IndexedDB after rehydration:', error);
+            });
+          }, 1000); // Small delay to ensure IndexedDB is ready
         }
       }
     }

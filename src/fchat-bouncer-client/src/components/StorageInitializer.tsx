@@ -5,6 +5,8 @@ import { migrateExistingProfileData, cleanupOldStorageEntries } from '@/lib/stor
 import { useProfileStore } from '@/stores/profileStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useLightweightCharacterIndexedDBStore } from '@/stores/lightweightCharacterIndexedDBStore';
+import { useChatStore } from '@/stores/chatStore';
+import { messageIndexedDBService } from '@/lib/messageIndexedDB';
 import { checkIndexedDBSupport, logIndexedDBStatus, isPrivateMode } from '@/lib/indexeddb-utils';
 
 export default function StorageInitializer() {
@@ -48,14 +50,40 @@ export default function StorageInitializer() {
         await Promise.all([
           profileStore.initialize(),
           characterStore.initialize(),
-          lightweightStore.initialize()
+          lightweightStore.initialize(),
+          messageIndexedDBService.initialize()
         ]);
         
         console.log('All IndexedDB stores initialized successfully');
         
+        // Test IndexedDB functionality
+        try {
+          const testMessage = {
+            id: 'test-' + Date.now(),
+            content: 'Test message',
+            sender: 'TestUser',
+            channel: 'test-channel',
+            timestamp: new Date().toISOString(),
+            messageType: 'Chat'
+          };
+          
+          await messageIndexedDBService.storeMessage('TestCharacter', 'test-channel', testMessage);
+          const retrievedMessages = await messageIndexedDBService.getMessages('TestCharacter', 'test-channel', 1);
+          console.log('IndexedDB test successful:', retrievedMessages.length > 0 ? 'PASS' : 'FAIL');
+          
+          // Clean up test data
+          await messageIndexedDBService.deleteMessages('TestCharacter', 'test-channel');
+        } catch (testError) {
+          console.error('IndexedDB test failed:', testError);
+        }
+        
         // Run migration and cleanup after stores are initialized
         migrateExistingProfileData();
         cleanupOldStorageEntries();
+        
+        // Load messages from IndexedDB into memory
+        const chatStore = useChatStore.getState();
+        await chatStore.loadAllMessagesFromIndexedDB();
         
         console.log('=== Storage Initialization Completed ===');
         

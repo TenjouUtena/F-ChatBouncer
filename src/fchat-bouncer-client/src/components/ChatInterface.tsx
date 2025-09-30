@@ -8,6 +8,7 @@ import { useFriendsStore } from '@/stores/friendsStore';
 import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import { signalRService } from '@/lib/signalr';
 import { Message, ProfileData } from '@/types';
+import { getAppVersion } from '@/lib/version';
 import BBCodeEditor from './BBCodeEditor';
 import { useTypingStatus } from '@/hooks/useTypingStatus';
 import { useNotifications } from '@/hooks/useNotifications';
@@ -841,12 +842,17 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         </div>
 
         <div className="absolute bottom-4 left-4">
-          <button
-            onClick={handleLogout}
-            className="text-sm text-gray-400 hover:text-gray-200"
-          >
-            Logout
-          </button>
+          <div className="flex flex-col items-start space-y-1">
+            <div className="text-xs text-gray-500">
+              v{getAppVersion()}
+            </div>
+            <button
+              onClick={handleLogout}
+              className="text-sm text-gray-400 hover:text-gray-200"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 
