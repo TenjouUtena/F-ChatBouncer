@@ -150,11 +150,11 @@ class MessageIndexedDBService {
         
         // Filter by channel if specified
         if (channelId) {
-          results = results.filter(item => item.channelId === channelId);
+          results = results.filter((item: { channelId: string; }) => item.channelId === channelId);
         }
         
         // Sort by timestamp (newest first)
-        results.sort((a, b) => b.timestamp - a.timestamp);
+        results.sort((a: { timestamp: number; }, b: { timestamp: number; }) => b.timestamp - a.timestamp);
         
         // Apply limit if specified
         if (limit) {
@@ -162,7 +162,7 @@ class MessageIndexedDBService {
         }
         
         // Extract just the message objects
-        const messages = results.map(item => item.message);
+        const messages = results.map((item: { message: any; }) => item.message);
         
         console.log(`Retrieved ${messages.length} messages for ${characterName}${channelId ? ` in ${channelId}` : ''}`);
         resolve(messages);
