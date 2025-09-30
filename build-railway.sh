@@ -98,6 +98,10 @@ dotnet publish -c Release -a amd64 --os linux -t:PublishContainer \
     -p:FileVersion="$BUILD_VERSION"
 
 echo "✅ Backend image built successfully for AMD64"
+
+# Tag the backend image with 'latest' for Railway
+echo "🏷️  Tagging backend image with 'latest'..."
+docker tag "$DOCKER_USERNAME/$BACKEND_IMAGE:$IMAGE_TAG" "$DOCKER_USERNAME/$BACKEND_IMAGE:latest"
 cd ../..
 echo ""
 echo "📦 Building Frontend Image for AMD64..."
@@ -115,11 +119,22 @@ docker build \
 
 echo "✅ Frontend image built successfully for AMD64"
 
+# Tag the frontend image with 'latest' for Railway
+echo "🏷️  Tagging frontend image with 'latest'..."
+docker tag "$DOCKER_USERNAME/$FRONTEND_IMAGE:$IMAGE_TAG" "$DOCKER_USERNAME/$FRONTEND_IMAGE:latest"
+
 echo ""
 echo "🚀 Pushing images to Docker Hub..."
-# Push frontend image
+
+# Push backend image with both versioned and latest tags
+echo "Pushing backend image..."
+docker push "$DOCKER_USERNAME/$BACKEND_IMAGE:$IMAGE_TAG"
+docker push "$DOCKER_USERNAME/$BACKEND_IMAGE:latest"
+
+# Push frontend image with both versioned and latest tags
 echo "Pushing frontend image..."
 docker push "$DOCKER_USERNAME/$FRONTEND_IMAGE:$IMAGE_TAG"
+docker push "$DOCKER_USERNAME/$FRONTEND_IMAGE:latest"
 
 
 echo "Redeploying Railway project..."
@@ -153,7 +168,9 @@ fi
 echo ""
 echo "🎉 Success! AMD64 images pushed to Docker Hub:"
 echo "Backend:  docker pull $DOCKER_USERNAME/$BACKEND_IMAGE:$IMAGE_TAG"
+echo "Backend:  docker pull $DOCKER_USERNAME/$BACKEND_IMAGE:latest"
 echo "Frontend: docker pull $DOCKER_USERNAME/$FRONTEND_IMAGE:$IMAGE_TAG"
+echo "Frontend: docker pull $DOCKER_USERNAME/$FRONTEND_IMAGE:latest"
 echo ""
 echo "📊 Build Summary:"
 echo "   Version: $BUILD_VERSION"
@@ -161,19 +178,3 @@ echo "   Build ID: $BUILD_ID"
 echo "   Branch: $GIT_BRANCH"
 echo "   Full Version: $FULL_VERSION"
 echo "   Git Tag: v$BUILD_VERSION"
-echo ""
-echo "📋 To deploy on Railway:"
-echo "1. Go to Railway dashboard"
-echo "2. Create new project"
-echo "3. Add service from Docker Hub"
-echo "4. Use image: $DOCKER_USERNAME/$BACKEND_IMAGE:$IMAGE_TAG"
-echo "5. Add environment variables from ENVIRONMENT_CONFIG.md"
-echo ""
-echo "🔧 Railway-specific notes:"
-echo "- Railway automatically handles AMD64 architecture"
-echo "- Make sure your Dockerfile doesn't specify ARM64-specific settings"
-echo "- Use the production docker-compose.yml for Railway deployment"
-echo "- Version information is embedded in the images"
-
-
-
