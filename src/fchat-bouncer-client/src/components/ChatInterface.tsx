@@ -34,7 +34,7 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterIndexedDBStore();
-  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText, clearAllUnreadCountsForCharacter } = useChatStore();
+  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText, clearAllUnreadCountsForCharacter, setFocusedChannel } = useChatStore();
   
   // Initialize notifications
   const { 
@@ -436,12 +436,13 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     }
   }, [selectedChannel]);
 
-  // Clear unread when switching to a channel (including PMs)
+  // Clear unread when switching to a channel (including PMs) and set focused channel
   useEffect(() => {
     if (selectedChannel && activeCharacter) {
       clearUnreadCountForChannel(activeCharacter, selectedChannel);
+      setFocusedChannel(activeCharacter, selectedChannel);
     }
-  }, [selectedChannel, activeCharacter, clearUnreadCountForChannel]);
+  }, [selectedChannel, activeCharacter, clearUnreadCountForChannel, setFocusedChannel]);
 
   const handleSendBBCodeMessage = async (bbcode: string) => {
     if (!bbcode.trim() || !selectedChannel || !activeCharacter) return;

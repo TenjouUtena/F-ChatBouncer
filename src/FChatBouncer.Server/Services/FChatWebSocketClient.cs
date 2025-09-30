@@ -1254,8 +1254,12 @@ public class FChatWebSocketClient : IDisposable
             throw new InvalidOperationException("Not authenticated or no character selected");
         }
 
-        var leaveData = new { channel = channelName };
-        await SendCommandAsync("LCH", leaveData);
+        // Don't leave private channels
+        if(channelName[..3] != "PRI") 
+        {
+            var leaveData = new { channel = channelName };
+            await SendCommandAsync("LCH", leaveData);
+        }
 
         // Track left channel
         _joinedChannels.Remove(channelName);

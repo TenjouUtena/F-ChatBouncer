@@ -18,6 +18,7 @@ interface ChatStore extends ChatState {
   characterUnknownChannels: Record<string, Set<string>>; // characterName -> unknown channels
   characterUnknownChannelCounts: Record<string, Record<string, number>>; // characterName -> channelId -> count
   characterUnreadCounts: Record<string, Record<string, number>>; // characterName -> channelId -> unread count
+  characterFocusedChannel: Record<string, string>; // characterName -> currently focused channel
   
   // Lazy loading state
   characterLazyLoadingState: Record<string, Record<string, {
@@ -118,6 +119,10 @@ interface ChatStore extends ChatState {
   getUnreadCountsForCharacter: (characterName: string) => Record<string, number>;
   clearUnreadCountForChannel: (characterName: string, channelId: string) => void;
   clearAllUnreadCountsForCharacter: (characterName: string) => void;
+  
+  // Focused channel management
+  setFocusedChannel: (characterName: string, channelId: string) => void;
+  getFocusedChannel: (characterName: string) => string | null;
   
   // High-urgency alert management
   isHighUrgencyChannel: (channelId: string) => boolean;
@@ -221,6 +226,7 @@ export const useChatStore = create<ChatStore>()(
       characterUnknownChannels: {},
       characterUnknownChannelCounts: {},
       characterUnreadCounts: {},
+      characterFocusedChannel: {},
       characterLazyLoadingState: {},
       
       // Global data
@@ -321,14 +327,14 @@ export const useChatStore = create<ChatStore>()(
           const isPM = message.channel && message.channel.startsWith('PRI-');
           const isActiveCharacter = message.isActiveCharacter === true;
           
-          // Get the current selected channel for this character to determine if we should mark as read
-          const selectedChannels = state.characterSelectedChannels[characterName] || [];
-          const isCurrentChannel = selectedChannels.length > 0 && message.channel === selectedChannels[0];
+          // Get the currently focused channel for this character to determine if we should mark as read
+          const focusedChannel = state.characterFocusedChannel[characterName];
+          const isCurrentChannel = message.channel === focusedChannel;
           
           // Only increment unread count if:
-          // 1. It's a PM (always increment for PMs)
+          // 1. It's a PM (always increment for PMs, even if focused)
           // 2. It's not for the active character
-          // 3. It's for the active character but not the currently selected channel
+          // 3. It's for the active character but not the currently focused channel
           const shouldIncrementUnread = message.channel && (
             isPM || 
             !isActiveCharacter || 
@@ -349,6 +355,7 @@ export const useChatStore = create<ChatStore>()(
 
           // Check if message is from an unknown channel for this character
           // A channel is "unknown" if it's not in the selected channels (what's open in the UI)
+          const selectedChannels = state.characterSelectedChannels[characterName] || [];
           if (message.channel && !selectedChannels.includes(message.channel)) {
             // Add to character-specific unknown channels
             const currentUnknownChannels = state.characterUnknownChannels[characterName] || new Set();
@@ -1145,6 +1152,21 @@ export const useChatStore = create<ChatStore>()(
         });
       },
 
+      // Focused channel management
+      setFocusedChannel: (characterName: string, channelId: string) => {
+        set((state) => ({
+          characterFocusedChannel: {
+            ...state.characterFocusedChannel,
+            [characterName]: channelId
+          }
+        }));
+      },
+
+      getFocusedChannel: (characterName: string) => {
+        const state = get();
+        return state.characterFocusedChannel[characterName] || null;
+      },
+
       // High-urgency alert management
       isHighUrgencyChannel: (channelId: string) => {
         // PMs are considered high-urgency
@@ -1859,6 +1881,7 @@ export const useChatStore = create<ChatStore>()(
         ),
         characterUnknownChannelCounts: state.characterUnknownChannelCounts,
         characterUnreadCounts: state.characterUnreadCounts,
+        characterFocusedChannel: state.characterFocusedChannel,
         characterLazyLoadingState: state.characterLazyLoadingState,
         // Legacy fields for backward compatibility (excluding messages)
         selectedChannels: state.selectedChannels,
