@@ -92,16 +92,21 @@ cd src/FChatBouncer.Server
 dotnet publish -c Release -a amd64 --os linux -t:PublishContainer \
     -p:EnableSdkContainerSupport=true \
     -p:ContainerRegistry=docker.io \
-    -p:ContainerImageTag="$IMAGE_TAG" \
+    -p:ContainerImageTag="latest" \
     -p:Version="$BUILD_VERSION" \
     -p:AssemblyVersion="$BUILD_VERSION" \
     -p:FileVersion="$BUILD_VERSION"
 
+dotnet publish -c Release -a amd64 --os linux -t:PublishContainer \
+    -p:EnableSdkContainerSupport=true \
+    -p:ContainerRegistry=docker.io \
+    -p:ContainerImageTag="$IMAGE_TAG" \
+    -p:Version="$BUILD_VERSION" \
+    -p:AssemblyVersion="$BUILD_VERSION" \
+
 echo "✅ Backend image built successfully for AMD64"
 
 # Tag the backend image with 'latest' for Railway
-echo "🏷️  Tagging backend image with 'latest'..."
-docker tag "$DOCKER_USERNAME/$BACKEND_IMAGE:$IMAGE_TAG" "$DOCKER_USERNAME/$BACKEND_IMAGE:latest"
 cd ../..
 echo ""
 echo "📦 Building Frontend Image for AMD64..."
