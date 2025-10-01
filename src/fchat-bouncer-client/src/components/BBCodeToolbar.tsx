@@ -134,7 +134,7 @@ export function BBCodeToolbar({
           disabled={!editor.can().chain().focus().toggleSubscript().run()}
           title="Subscript [sub]"
         >
-          <Superscript size={16} />
+          <Subscript size={16} />
         </ToolbarButton>
 
         <ToolbarButton
@@ -143,7 +143,7 @@ export function BBCodeToolbar({
           disabled={!editor.can().chain().focus().toggleSuperscript().run()}
           title="Superscript [sup]"
         >
-          <Subscript size={16}/>
+          <Superscript size={16}/>
         </ToolbarButton>
       </ToolbarGroup>
 

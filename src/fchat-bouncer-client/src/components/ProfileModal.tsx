@@ -318,28 +318,38 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
 
     return (
       <div className="space-y-4">
-        {images.map((image, index) => (
-          <div key={index} className="border border-gray-700 rounded-lg overflow-hidden">
-            <img
-              src={`https://static.f-list.net/images/charimage/${image.image_id}.${image.image_ext}`}
-              alt={image.image_description || `Profile image ${index + 1}`}
-              className="w-full h-auto max-h-96 object-contain bg-gray-900"
-              onError={(e) => {
-                const target = e.target as HTMLImageElement;
-                target.style.display = 'none';
-                const parent = target.parentElement;
-                if (parent) {
-                  parent.innerHTML = '<div class="p-4 text-gray-500 italic text-sm">Failed to load image</div>';
-                }
-              }}
-            />
-            {image.image_description && (
-              <div className="p-2 bg-gray-700 text-xs text-gray-300">
-                <div className="font-medium">{image.image_description}</div>
-              </div>
-            )}
-          </div>
-        ))}
+        {images.map((image, index) => {
+          const imageUrl = `https://static.f-list.net/images/charimage/${image.image_id}.${image.image_ext}`;
+          return (
+            <div key={index} className="border border-gray-700 rounded-lg overflow-hidden">
+              <a 
+                href={imageUrl} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="block cursor-pointer hover:opacity-90 transition-opacity"
+              >
+                <img
+                  src={imageUrl}
+                  alt={image.image_description || `Profile image ${index + 1}`}
+                  className="w-full h-auto max-h-96 object-contain bg-gray-900"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.style.display = 'none';
+                    const parent = target.parentElement;
+                    if (parent) {
+                      parent.innerHTML = '<div class="p-4 text-gray-500 italic text-sm">Failed to load image</div>';
+                    }
+                  }}
+                />
+              </a>
+              {image.image_description && (
+                <div className="p-2 bg-gray-700 text-xs text-gray-300">
+                  <div className="font-medium">{image.image_description}</div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     );
   };

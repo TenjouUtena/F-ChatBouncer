@@ -331,9 +331,7 @@ this.onSearchResultsReceived = callback;
       //console.log('User went offline:', data);
     });
 
-    this.connection.on('ReceiveTypingNotification', (data: { FromCharacter: string; ReceivingCharacter: string; Status: string; Timestamp: string; characterName: string }) => {
-      console.log('Typing notification received:', data);
-    });
+    // ReceiveTypingNotification is handled by custom listeners via onReceiveTypingNotification
 
     this.connection.on('FriendsListUpdated', (data: { Friends: any[]; Timestamp: string }) => {
       console.log('Friends list updated:', data);
@@ -456,7 +454,7 @@ this.onSearchResultsReceived = callback;
     this.addUniqueListener('ChannelListError', callback);
   }
 
-  onReceiveTypingNotification(callback: (data: { FromCharacter: string; ReceivingCharacter: string; Status: string; Timestamp: string; characterName: string }) => void): void {
+  onReceiveTypingNotification(callback: (data: { FromCharacter?: string; ReceivingCharacter?: string; Status?: string; Timestamp?: string; characterName?: string; fromCharacter?: string; receivingCharacter?: string; status?: string; timestamp?: string }) => void): void {
     this.addUniqueListener('ReceiveTypingNotification', callback);
   }
 

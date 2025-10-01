@@ -332,14 +332,14 @@ export const useChatStore = create<ChatStore>()(
           const isCurrentChannel = message.channel === focusedChannel;
           
           // Only increment unread count if:
-          // 1. It's a PM (always increment for PMs, even if focused)
-          // 2. It's not for the active character
-          // 3. It's for the active character but not the currently focused channel
+          // 1. It's not for the active character
+          // 2. It's for the active character but not the currently focused channel
           const shouldIncrementUnread = message.channel && (
-            isPM || 
             !isActiveCharacter || 
             (isActiveCharacter && !isCurrentChannel)
           );
+
+          console.log('shouldIncrementUnread', shouldIncrementUnread, message.channel, isActiveCharacter, isCurrentChannel);
           
           if (shouldIncrementUnread) {
             const currentUnreadCounts = state.characterUnreadCounts[characterName] || {};
@@ -1204,6 +1204,7 @@ export const useChatStore = create<ChatStore>()(
       // Typing indicators management
       updateTypingState: (characterName: string, channelId: string, typingState: TypingState | null) => {
         set((state) => {
+          console.log('updateTypingState', characterName, channelId, typingState);
           const characterTypingStates = { ...state.characterTypingStates };
           
           if (!characterTypingStates[characterName]) {

@@ -529,6 +529,14 @@ export default function Home() {
     // Set as active character
     setActiveCharacter(character.name);
 
+    // Inform backend of the active character immediately so features like typing notifications work
+    try {
+      await signalRService.setActiveCharacter(character.name);
+    } catch (error) {
+      console.error('Failed to set active character on backend:', error);
+      // Non-fatal; UI can proceed, but server-side features depending on active character may be delayed
+    }
+
     // Load friends and bookmarks for this character
     try {
       console.log('Attempting to load friends and bookmarks for selected character...');

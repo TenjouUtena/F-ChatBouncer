@@ -36,7 +36,7 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterIndexedDBStore();
-  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingState, clearAllUnreadCountsForCharacter, setFocusedChannel } = useChatStore();
+  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingState, characterTypingStates, clearAllUnreadCountsForCharacter, setFocusedChannel } = useChatStore();
   
   // Initialize notifications
   const { 
@@ -288,32 +288,38 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     signalRService.onReceiveTypingNotification((data) => {
       console.log('Typing notification received:', data);
       
+      // Handle both camelCase and PascalCase property names
+      const fromCharacter = data.FromCharacter || data.fromCharacter;
+      const receivingCharacter = data.ReceivingCharacter || data.receivingCharacter;
+      const status = data.Status || data.status;
+      const timestamp = data.Timestamp || data.timestamp;
+      
       // Only process typing notifications for PM channels
-      if (data.ReceivingCharacter && data.FromCharacter && data.Status) {
-        const pmChannelId = `PRI-${data.FromCharacter}`;
+      if (receivingCharacter && fromCharacter && status) {
+        const pmChannelId = `PRI-${fromCharacter}`;
         
         // Create typing state
         const typingState = {
-          characterName: data.FromCharacter,
-          status: data.Status as 'typing' | 'paused' | 'clear',
-          timestamp: new Date(data.Timestamp)
+          characterName: fromCharacter,
+          status: status as 'typing' | 'paused' | 'clear',
+          timestamp: new Date(timestamp || new Date().toISOString())
         };
         
         // Update typing state in store
-        updateTypingState(data.ReceivingCharacter, pmChannelId, typingState);
+        updateTypingState(receivingCharacter, pmChannelId, typingState);
         
         // Show toast notification if PM window is not currently open
-        if (selectedChannel !== pmChannelId && (data.Status === 'typing' || data.Status === 'paused')) {
-          console.log(`Typing notification from ${data.FromCharacter}: ${data.Status} (PM window not open)`);
+        if (selectedChannel !== pmChannelId && (status === 'typing' || status === 'paused')) {
+          console.log(`Typing notification from ${fromCharacter}: ${status} (PM window not open)`);
           setTypingToast({
-            fromCharacter: data.FromCharacter,
-            status: data.Status as 'typing' | 'paused' | 'clear',
+            fromCharacter: fromCharacter,
+            status: status as 'typing' | 'paused' | 'clear',
             isPM: true
           });
           
           // Show browser notification for typing status
           if (isNotificationReady) {
-            showTypingNotification(data.FromCharacter, data.Status as 'typing' | 'paused');
+            showTypingNotification(fromCharacter, status as 'typing' | 'paused');
           }
         }
       }
@@ -732,13 +738,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                       </span>
                       <div className="flex flex-col">
                         <span>{getChannelDisplayName(channel)}</span>
-                        {/* Show typing indicator for PM channels */}
-                        {isPM && activeCharacter && (
-                          <TypingIndicator 
-                            typingState={getTypingState(activeCharacter, channel)}
-                            isPM={isPM}
-                          />
-                        )}
                       </div>
                     </div>
                     {currentUnreadCounts[channel] && selectedChannel !== channel && (
@@ -1164,13 +1163,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                       </span>
                       <div className="flex flex-col">
                         <span>{getChannelDisplayName(channel)}</span>
-                        {/* Show typing indicator for PM channels */}
-                        {isPM && activeCharacter && (
-                          <TypingIndicator 
-                            typingState={getTypingState(activeCharacter, channel)}
-                            isPM={isPM}
-                          />
-                        )}
+
                       </div>
                     </div>
                     {currentUnreadCounts[channel] && selectedChannel !== channel && (
