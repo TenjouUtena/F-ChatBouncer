@@ -7,6 +7,7 @@
 
 import { useState } from 'react';
 import BBCodeEditor from '@/components/BBCodeEditor';
+import { bbcodeToHtml } from '@/lib/bbcode';
 
 export default function TestBBCodePage() {
   const [bbcodeValue, setBBCodeValue] = useState('');
@@ -65,6 +66,10 @@ export default function TestBBCodePage() {
     {
       name: 'Character Profile Example',
       bbcode: '[right][color=yellow]Horizon Color[/color]- [url=https://iili.io/KEuauBs.png]Horizon Portrait[/url][/right]\r\n[hr]\r\n[heading][color=orange][u]_____________________[color=white]STOP ! I\'m not a KITTY ![/color]____________________________________[/u]\r\n\\[u][color=white][b]Egyptian[/b][/color][/u]/[/color][/heading]\r\n \r\n \r\n[right][heading][color=orange][u]___________________________________[color=white]I\'m a Very MASCULIN JACKAL ![/color]_____________________\r\n[/u]\\[u][color=white][b]Jackal[/b][/color][/u]/[/color][/heading][/right]\r\n[hr]\r\n\r\n[center][indent][indent][indent][indent][indent][indent][big][color=white]" Shota Jackal "[/color]\r\n[color=orange]▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀[/color][/big]\r\n[/indent][/indent][/indent][/indent][/indent][/indent][/center]\r\n\r\n[center][img=4217587]Tarfire[/img][/center]\r\n[collapse=Who am I?]\r\n[center]\r\nAge: 10\r\n\r\nHeight: approximately 1.35 m (rather slender for his age, with thin legs, he already has a figure that promises to grow straight as a reed).\r\n\r\nWeight: around 30 kg, light but agile, his body does not yet have the muscular build of his older brother.\r\n\r\nGeneral appearance:\r\n\r\nStill a child, he has a fragile appearance, but his quick movements show that he is lively and resilient.\r\n\r\nHis body is that of a growing boy: not yet sculpted by training, but already accustomed to running, climbing, and sneaking around.\r\n[/center]\r\n[/collapse]\r\n[center][img=4217588]Tarfire[/img][/center]\r\n\r\n[hr]\r\n[hr]\r\n[right][color=green]L[sub]ooking[/sub][/color] [sub]I\'m looking for role play.[/sub]\r\n[color=blue]O[sub]nline[/sub][/color] [sub]I\'m online, your welcome.[/sub]\r\n[color=orange]B[sub]usy[/sub][/color] [sub]I\'m busy, I may take some time to respond.[/sub]\r\n[color=yellow]A[sub]way[/sub][/color] [sub]I\'m away.[/sub]\r\n[color=red]D[sub]nd[/sub][/color] [sub]Don\'t disturb me, maybe at work.[/sub][hr][/right]\r\n\r\n[color=orange]Horizon Color[/color] - [url=https://iili.io/KKCvHSS.png]Horizon Portrait[/url]'
+    },
+    {
+      name: 'ImageTest',
+      bbcode: '[url=https://i.ibb.co/kbQLrm8/688cda12-27da-45af-8d87-d5d52f611101.png]Lingerie or bikini?  Does it matter? >:3[/url]'
     }
   ];
 
@@ -77,7 +82,7 @@ export default function TestBBCodePage() {
       <div className="max-w-6xl mx-auto">
         <h1 className="text-3xl font-bold mb-8">BBCode Editor Test Page</h1>
         
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Editor */}
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">WYSIWYG Editor</h2>
@@ -90,13 +95,28 @@ export default function TestBBCodePage() {
             />
           </div>
 
-          {/* Output */}
+          {/* BBCode Output */}
           <div className="space-y-4">
             <h2 className="text-xl font-semibold">BBCode Output</h2>
             <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 min-h-[300px]">
               <pre className="whitespace-pre-wrap text-sm text-gray-300">
                 {outputBBCode || 'Submit a message to see the BBCode output here...'}
               </pre>
+            </div>
+          </div>
+
+          {/* Rendered Output */}
+          <div className="space-y-4">
+            <h2 className="text-xl font-semibold">Rendered Output</h2>
+            <div className="bg-gray-800 border border-gray-600 rounded-lg p-4 min-h-[300px]">
+              {outputBBCode ? (
+                <div 
+                  className="text-sm prose prose-invert max-w-none"
+                  dangerouslySetInnerHTML={{ __html: bbcodeToHtml(outputBBCode) }}
+                />
+              ) : (
+                <p className="text-gray-400 text-sm">Submit a message to see the rendered output here...</p>
+              )}
             </div>
           </div>
         </div>

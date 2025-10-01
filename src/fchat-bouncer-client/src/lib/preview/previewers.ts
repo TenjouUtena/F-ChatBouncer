@@ -28,32 +28,13 @@ export class ImagePreviewer implements URLPreviewer {
     const showLink = options?.showLink !== false;
 
     const html = `
-      <span class="url-image-container relative inline-block">
-        <a 
-          href="${safeUrl}" 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          class="text-blue-400 hover:text-blue-300 underline cursor-pointer"
-          onmouseenter="this.nextElementSibling.style.opacity='1'"
-          onmouseleave="this.nextElementSibling.style.opacity='0'"
-        >
-          ${safeDisplayText}
-        </a>
-        <div 
-          class="image-preview-tooltip absolute z-50 bg-gray-900 border border-gray-600 rounded-lg shadow-xl p-2 ${maxWidth}"
-          style="top: 100%; left: 0; margin-top: 4px; opacity: 0; transition: opacity 0.2s; pointer-events: none;"
-        >
-          <img
-            src="${safeUrl}"
-            alt="${safeDisplayText}"
-            class="max-w-full ${maxHeight} rounded-lg ${className}"
-            loading="lazy"
-            onerror="this.style.display='none'; this.nextElementSibling.style.display='block';"
-          />
-          <div class="hidden text-red-400 text-sm italic">Failed to load image</div>
-        </div>
-      </span>
-    `;
+      <span class="url-image-container relative inline">
+      <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" 
+      class="text-blue-400 hover:text-blue-300 underline cursor-pointer" 
+      onmouseenter="this.nextElementSibling.style.opacity='1'" onmouseleave="this.nextElementSibling.style.opacity='0'" > 
+      ${safeDisplayText} </a> <div class="image-preview-tooltip absolute z-50 bg-gray-900 border border-gray-600 rounded-lg shadow-xl p-2 ${maxWidth}" style="top: 100%; left: 0; margin-top: 4px; opacity: 0; transition: opacity 0.2s; pointer-events: none;" > 
+      <img src="${safeUrl}" alt="${safeDisplayText}" class="max-w-full ${maxHeight} rounded-lg ${className}" loading="lazy" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" /> <div class="hidden text-red-400 text-sm italic">Failed to load image</div> 
+      </div> </span> `.replace(/\r\n|\r|\n/g, "");
 
     return {
       html: html.trim(),
@@ -99,7 +80,9 @@ export class DiscordPreviewer implements URLPreviewer {
           ${safeDisplayText}
         </a>
       </div>
-    `;
+    `.replace(/\r\n|\r|\n/g, "");
+
+
 
     return {
       html: html.trim(),
@@ -144,7 +127,7 @@ export class FListPreviewer implements URLPreviewer {
           ${safeDisplayText}
         </a>
       </div>
-    `;
+    `.replace(/\r\n|\r|\n/g, "");
 
     return {
       html: html.trim(),
