@@ -1,10 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { MessageSquare, MessageSquareMore, Hash } from 'lucide-react';
 
 interface TypingToastNotificationProps {
   fromCharacter: string;
   status: 'typing' | 'paused' | 'clear';
+  isPM?: boolean;
   onDismiss: () => void;
   autoHideDelay?: number;
 }
@@ -12,6 +14,7 @@ interface TypingToastNotificationProps {
 export default function TypingToastNotification({
   fromCharacter,
   status,
+  isPM = true,
   onDismiss,
   autoHideDelay = 3000
 }: TypingToastNotificationProps) {
@@ -41,12 +44,24 @@ export default function TypingToastNotification({
   const getStatusIcon = () => {
     switch (status) {
       case 'typing':
-        return '⌨️';
+        return isPM ? (
+          <MessageSquare size={18} className="animate-bounce" />
+        ) : (
+          <Hash size={18} className="animate-bounce" />
+        );
       case 'paused':
-        return '📝';
+        return isPM ? (
+          <MessageSquareMore size={18} />
+        ) : (
+          <Hash size={18} />
+        );
       case 'clear':
       default:
-        return '💬';
+        return isPM ? (
+          <MessageSquare size={18} />
+        ) : (
+          <Hash size={18} />
+        );
     }
   };
 
@@ -62,7 +77,7 @@ export default function TypingToastNotification({
     <div className="fixed top-4 right-4 bg-blue-600 text-white p-3 rounded-lg shadow-lg border border-blue-500 transition-opacity duration-300 z-50">
       <div className="flex items-center justify-between">
         <div className="flex items-center">
-          <span className="mr-2 text-lg">{getStatusIcon()}</span>
+          <span className="mr-2">{getStatusIcon()}</span>
           <div className="flex flex-col">
             <span className="font-semibold text-sm">{fromCharacter}</span>
             <span className="text-xs text-blue-100">{getStatusText()}</span>

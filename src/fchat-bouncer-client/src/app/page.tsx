@@ -247,9 +247,13 @@ export default function Home() {
       setConnected(true);
 
       // Set up the ReceiveActiveCharacters listener after connection is established
-      signalRService.onReceiveActiveCharacters((data) => {
+      signalRService.onReceiveActiveCharacters(async (data) => {
         // Update character store with all character connections from backend
-        const { setConnections } = useCharacterIndexedDBStore.getState();
+        const { setConnections, activeCharacter: currentActiveCharacter } = useCharacterIndexedDBStore.getState();
+        
+        // Preserve the current active character if it exists and is still valid, otherwise use the one from backend
+        const characterToSet = data.activeCharacter || currentActiveCharacter;
+        
         const connections = data.characters.map((char: any) => ({
           characterName: char.characterName,
           isConnected: char.isConnected,
@@ -259,17 +263,8 @@ export default function Home() {
           connectedAt: char.connectedAt || new Date().toISOString()
         }));
         
-        // Clear any persisted data first to avoid conflicts
-        const { clearAllConnections } = useCharacterIndexedDBStore.getState();
-        clearAllConnections();
-        
-        // Now set the new connections
-        setConnections(connections);
-        
-        // Set the active character if specified
-        if (data.activeCharacter) {
-          setActiveCharacter(data.activeCharacter);
-        }
+        // Set the new connections and preserve the active character in one atomic operation
+        await setConnections(connections, characterToSet || undefined);
       });
 
       // Set up the ActiveCharacterSwitched listener after connection is established

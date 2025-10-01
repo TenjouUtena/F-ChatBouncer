@@ -25,7 +25,7 @@ interface CharacterIndexedDBStore {
   setActiveCharacter: (characterName: string) => Promise<void>;
   clearActiveCharacter: () => Promise<void>;
   updateConnectionStatus: (characterName: string, status: 'connecting' | 'connected' | 'disconnected' | 'error') => Promise<void>;
-  setConnections: (connections: CharacterConnection[]) => Promise<void>;
+  setConnections: (connections: CharacterConnection[], preserveActiveCharacter?: string) => Promise<void>;
   getConnection: (characterName: string) => CharacterConnection | null;
   getActiveConnection: () => CharacterConnection | null;
   isCharacterConnected: (characterName: string) => boolean;
@@ -246,17 +246,41 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
     }
   },
 
-  setConnections: async (connections: CharacterConnection[]) => {
+  setConnections: async (connections: CharacterConnection[], preserveActiveCharacter?: string) => {
     try {
-      // Clear existing connections
-      await get().clearAllConnections();
+      // Save the active character to preserve if specified
+      const activeToPreserve = preserveActiveCharacter || get().activeCharacter;
       
-      // Add new connections
-      for (const connection of connections) {
-        await get().addConnection(connection);
+      // Clear existing connections from IndexedDB only
+      const existingConnections = get().connections;
+      for (const connection of existingConnections) {
+        await characterIndexedDBService.deleteConnection(connection.characterName);
       }
       
-      console.log(`Set ${connections.length} connections`);
+      // Add new connections to IndexedDB
+      for (const connection of connections) {
+        await characterIndexedDBService.storeConnection({
+          characterName: connection.characterName,
+          isConnected: connection.isConnected,
+          isActive: connection.isActive,
+          status: connection.status,
+          lastActivity: connection.lastActivity,
+          connectedAt: connection.connectedAt,
+          fchatUsername: connection.fchatUsername
+        });
+      }
+      
+      // Update in-memory state in one atomic operation to prevent intermediate renders
+      set({
+        connections: connections,
+        activeCharacter: activeToPreserve,
+        connectionStatus: connections.reduce((acc, conn) => {
+          acc[conn.characterName] = conn.status;
+          return acc;
+        }, {} as Record<string, 'connecting' | 'connected' | 'disconnected' | 'error'>)
+      });
+      
+      console.log(`Set ${connections.length} connections, preserved active character: ${activeToPreserve}`);
     } catch (error) {
       console.error('Failed to set connections:', error);
       throw error;

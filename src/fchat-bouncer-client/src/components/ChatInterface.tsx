@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { MessageSquare, Hash, MessageSquareMore } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
@@ -16,6 +17,7 @@ import MessageList from './messages/MessageList';
 import JoinChannelModal from './JoinChannelModal';
 import UnknownChannelNotification from './UnknownChannelNotification';
 import TypingToastNotification from './TypingToastNotification';
+import TypingIndicator from './TypingIndicator';
 import ProfileModal from './ProfileModal';
 import CharacterSwitcher from './CharacterSwitcher';
 import CharacterManagement from './CharacterManagement';
@@ -34,7 +36,7 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterIndexedDBStore();
-  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingDisplayText, clearAllUnreadCountsForCharacter, setFocusedChannel } = useChatStore();
+  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingState, clearAllUnreadCountsForCharacter, setFocusedChannel } = useChatStore();
   
   // Initialize notifications
   const { 
@@ -57,7 +59,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   const [showCharacterManagement, setShowCharacterManagement] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [activeMobileTab, setActiveMobileTab] = useState<string | null>(null);
-  const [typingToast, setTypingToast] = useState<{ fromCharacter: string; status: 'typing' | 'paused' | 'clear' } | null>(null);
+  const [typingToast, setTypingToast] = useState<{ fromCharacter: string; status: 'typing' | 'paused' | 'clear'; isPM: boolean } | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const messageListRef = useRef<{ scrollToBottom: () => void; scrollToBottomFast: () => void; isNearBottom: (thresholdPx?: number) => boolean; scrollToMessage: (messageId: string) => void }>(null);
 
@@ -305,7 +307,8 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           console.log(`Typing notification from ${data.FromCharacter}: ${data.Status} (PM window not open)`);
           setTypingToast({
             fromCharacter: data.FromCharacter,
-            status: data.Status as 'typing' | 'paused' | 'clear'
+            status: data.Status as 'typing' | 'paused' | 'clear',
+            isPM: true
           });
           
           // Show browser notification for typing status
@@ -420,7 +423,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
 
   useEffect(() => {
     // Smart autoscroll: only scroll to bottom if user is already near the bottom
-    const nearBottom = messageListRef.current?.isNearBottom?.(120);
+    const nearBottom = messageListRef.current?.isNearBottom?.(220);
     if (nearBottom) {
       messageListRef.current?.scrollToBottom();
     }
@@ -692,6 +695,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           <div className="space-y-1 mb-4">
             {currentSelectedChannels.map((channel) => {
               const isPM = channel.startsWith('PRI-');
+              const typingState = activeCharacter ? getTypingState(activeCharacter, channel) : null;
               return (
                 <button
                   key={channel}
@@ -710,15 +714,30 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                   <div className="flex items-center justify-between">
                     <div className="flex items-center flex-1">
                       <span className="mr-2">
-                        {isPM ? '💬' : '#'}
+                        {isPM ? (
+                          typingState?.status === 'typing' ? (
+                            <MessageSquare size={16} className="text-gray-400 animate-bounce" />
+                          ) : typingState?.status === 'paused' ? (
+                            <MessageSquareMore size={16} className="text-gray-400" />
+                          ) : (
+                            <MessageSquare size={16} className="text-gray-400" />
+                          )
+                        ) : (
+                          typingState?.status === 'typing' ? (
+                            <Hash size={16} className="text-gray-400 animate-bounce" />
+                          ) : (
+                            <Hash size={16} className="text-gray-400" />
+                          )
+                        )}
                       </span>
                       <div className="flex flex-col">
                         <span>{getChannelDisplayName(channel)}</span>
                         {/* Show typing indicator for PM channels */}
                         {isPM && activeCharacter && (
-                          <span className="text-xs text-gray-400 opacity-75">
-                            {getTypingDisplayText(activeCharacter, channel)}
-                          </span>
+                          <TypingIndicator 
+                            typingState={getTypingState(activeCharacter, channel)}
+                            isPM={isPM}
+                          />
                         )}
                       </div>
                     </div>
@@ -843,7 +862,10 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                     className="w-full text-left px-3 py-2 rounded text-sm text-yellow-300 hover:bg-yellow-600 hover:bg-opacity-20 border border-yellow-600 border-opacity-30"
                   >
                     <div className="flex items-center justify-between">
-                      <span>#{getChannelDisplayName(channel)}</span>
+                      <div className="flex items-center">
+                        <Hash size={16} className="text-gray-400 mr-1" />
+                        <span>{getChannelDisplayName(channel)}</span>
+                      </div>
                       {currentUnknownChannelCounts[channel] && (
                         <span className="bg-yellow-600 text-yellow-100 text-xs rounded-full px-2 py-0.5">
                           {currentUnknownChannelCounts[channel]}
@@ -878,15 +900,23 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         {/* Header - Hidden on mobile */}
         <div className="hidden lg:block bg-gray-800 shadow-sm p-4 border-b border-gray-700">
           <div className="flex items-center justify-between">
-            <h1 className="font-semibold text-lg text-white">
-              {selectedChannel ?
-                (selectedChannel.startsWith('PRI-') ?
+            <div className="flex items-center">
+              {selectedChannel && (
+                <span className="mr-2">
+                  {selectedChannel.startsWith('PRI-') ? (
+                    <MessageSquare size={20} className="text-gray-400" />
+                  ) : (
+                    <Hash size={20} className="text-gray-400" />
+                  )}
+                </span>
+              )}
+              <h1 className="font-semibold text-lg text-white">
+                {selectedChannel ?
                   getChannelDisplayName(selectedChannel) :
-                  `#${getChannelDisplayName(selectedChannel)}`
-                ) :
-                'Select a channel'
-              }
-            </h1>
+                  'Select a channel'
+                }
+              </h1>
+            </div>
             <div className="flex items-center space-x-3">
               {/* Unknown channels indicator for current character */}
               {currentUnknownChannels.size > 0 && (
@@ -990,7 +1020,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                   onTypingStart={typingStatus.handleTypingStart}
                   onTypingStop={typingStatus.handleTypingStop}
                   onInputChange={typingStatus.handleInputChange}
-                  placeholder={`Message ${selectedChannel.startsWith('PRI-') ? getChannelDisplayName(selectedChannel) : `#${getChannelDisplayName(selectedChannel)}`}... Use [b], [i], [u] for formatting`}
+                  placeholder={`Message ${getChannelDisplayName(selectedChannel)}... Use [b], [i], [u] for formatting`}
                   disabled={!isConnected}
                   className="w-full"
                 />
@@ -1029,6 +1059,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         <TypingToastNotification
           fromCharacter={typingToast.fromCharacter}
           status={typingToast.status}
+          isPM={typingToast.isPM}
           onDismiss={() => setTypingToast(null)}
         />
       )}
@@ -1095,6 +1126,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           <div className="space-y-1 mb-4">
             {currentSelectedChannels.map((channel) => {
               const isPM = channel.startsWith('PRI-');
+              const typingState = activeCharacter ? getTypingState(activeCharacter, channel) : null;
               return (
                 <button
                   key={channel}
@@ -1114,15 +1146,30 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                   <div className="flex items-center justify-between">
                     <div className="flex items-center flex-1">
                       <span className="mr-2">
-                        {isPM ? '💬' : '#'}
+                        {isPM ? (
+                          typingState?.status === 'typing' ? (
+                            <MessageSquare size={16} className="text-gray-400 animate-bounce" />
+                          ) : typingState?.status === 'paused' ? (
+                            <MessageSquareMore size={16} className="text-gray-400" />
+                          ) : (
+                            <MessageSquare size={16} className="text-gray-400" />
+                          )
+                        ) : (
+                          typingState?.status === 'typing' ? (
+                            <Hash size={16} className="text-gray-400 animate-bounce" />
+                          ) : (
+                            <Hash size={16} className="text-gray-400" />
+                          )
+                        )}
                       </span>
                       <div className="flex flex-col">
                         <span>{getChannelDisplayName(channel)}</span>
                         {/* Show typing indicator for PM channels */}
                         {isPM && activeCharacter && (
-                          <span className="text-xs text-gray-400 opacity-75">
-                            {getTypingDisplayText(activeCharacter, channel)}
-                          </span>
+                          <TypingIndicator 
+                            typingState={getTypingState(activeCharacter, channel)}
+                            isPM={isPM}
+                          />
                         )}
                       </div>
                     </div>
