@@ -144,7 +144,7 @@ export const useLightweightCharacterIndexedDBStore = create<LightweightCharacter
     try {
       const characterData = get().characters[character];
       if (!characterData) {
-        console.warn(`Cannot update status for unknown character: ${character}`);
+        //console.warn(`Cannot update status for unknown character: ${character}`);
         return;
       }
 
