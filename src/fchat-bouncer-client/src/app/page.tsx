@@ -169,6 +169,7 @@ export default function Home() {
           setJoinedChannels(channelNames, data.Character.Name);
           setSelectedChannels(channelNames, data.Character.Name);
           setChannelsSelected(true);
+          console.log(`BouncerReconnected: Set ${channelNames.length} channels and areChannelsSelected=true for ${data.Character.Name}`);
 
           // Request message history for each channel since last known message
           try {
@@ -282,6 +283,16 @@ export default function Home() {
           setActiveCharacter(characterName);
           
           console.log('Called setActiveCharacter with:', characterName);
+          
+          // Check if the character has selected channels and set areChannelsSelected accordingly
+          const { getSelectedChannelsForCharacter } = useChatStore.getState();
+          const characterChannels = getSelectedChannelsForCharacter(characterName);
+          if (characterChannels.length > 0) {
+            console.log(`ActiveCharacterSwitched: Character ${characterName} has ${characterChannels.length} channels, setting areChannelsSelected to true`);
+            setChannelsSelected(true);
+          } else {
+            console.log(`ActiveCharacterSwitched: Character ${characterName} has no channels, keeping areChannelsSelected as false`);
+          }
           
           // Update the character connection status in the store to reflect the switch
           const { updateConnection } = useCharacterIndexedDBStore.getState();
@@ -418,6 +429,16 @@ export default function Home() {
           try {
             await signalRService.setActiveCharacter(activeCharacter);
             console.log('Character restored successfully');
+            
+            // Check if the character has selected channels and set areChannelsSelected accordingly
+            const { getSelectedChannelsForCharacter } = useChatStore.getState();
+            const characterChannels = getSelectedChannelsForCharacter(activeCharacter);
+            if (characterChannels.length > 0) {
+              console.log(`Character ${activeCharacter} has ${characterChannels.length} channels, setting areChannelsSelected to true`);
+              setChannelsSelected(true);
+            } else {
+              console.log(`Character ${activeCharacter} has no channels, keeping areChannelsSelected as false`);
+            }
             
             // Load friends and bookmarks for the restored character
             try {
