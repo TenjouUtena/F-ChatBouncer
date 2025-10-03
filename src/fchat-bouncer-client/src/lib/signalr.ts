@@ -626,7 +626,10 @@ this.onSearchResultsReceived = callback;
 
   async requestHistory(channel: string, since: Date, limit: number = 100): Promise<void> {
     if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
+      console.log('SignalR: Requesting history for channel:', channel, 'since:', since, 'limit:', limit);
       await this.connection.invoke('RequestHistory', channel, since.toISOString(), limit);
+    } else {
+      throw new Error('SignalR connection not available for history request');
     }
   }
 

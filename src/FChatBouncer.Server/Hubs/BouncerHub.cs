@@ -567,15 +567,22 @@ public class BouncerHub : Hub
         var userId = Context.UserIdentifier;
         if (userId == null) return;
 
-        _logger.LogInformation("User {UserId} requesting history for channel {Channel} since {Since}", userId, channel, since);
+        _logger.LogInformation("User {UserId} requesting history for channel {Channel} since {Since} limit {Limit}", userId, channel, since, limit);
 
         try
         {
             var messages = await _messageService.GetMessagesAsync(userId, channel, since, limit);
+            //var messageCount = await _messageService.GetMessagesCountAsync(userId, channel, since);
+            var messageCount = messages.Count;
+            var hasMore = messageCount > limit;
+
+            _logger.LogInformation("Found {MessageCount} messages for user {UserId} channel {Channel}, returning {ReturnedCount}", 
+                messageCount, userId, channel, messages.Count);
+
             await Clients.Caller.SendAsync("ReceiveHistory", new HistoryDto(
                 channel,
                 messages.ToArray(),
-                messages.Count >= limit
+                hasMore
             ));
         }
         catch (Exception ex)

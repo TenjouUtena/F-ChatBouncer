@@ -19,8 +19,8 @@ public class MessageService : IMessageService
         var messages = await _context.Messages
             .Where(m => m.UserId == userId &&
                        m.ChannelName == channel &&
-                       m.Timestamp < since) // Changed to < since to get older messages
-            .OrderByDescending(m => m.Timestamp) // Changed to descending to get most recent older messages first
+                       m.Timestamp < since) // Get older messages than 'since'
+            .OrderByDescending(m => m.Timestamp) // Get most recent older messages first
             .Take(limit)
             .Select(m => new MessageDto(
                 m.ChannelName,
@@ -34,6 +34,20 @@ public class MessageService : IMessageService
         // Reverse the order so we return messages in chronological order (oldest first)
         messages.Reverse();
         return messages;
+    }
+
+    public async Task<int> GetMessagesCountAsync(string userId, string channel, DateTime? before = null)
+    {
+        var query = _context.Messages
+            .Where(m => m.UserId == userId && 
+                       m.ChannelName == channel);
+        
+        if (before.HasValue)
+        {
+            query = query.Where(m => m.Timestamp < before.Value);
+        }
+
+        return await query.CountAsync();
     }
 
     public async Task<List<MessageDto>> GetRecentMessagesAsync(string userId, DateTime since)

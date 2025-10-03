@@ -9,6 +9,7 @@ import MessageComponent from './MessageComponent';
 import UserContextMenu from '../UserContextMenu';
 import ProfileModal from '../ProfileModal';
 import { useLazyMessages } from '@/hooks/useLazyMessages';
+import { useBackscrollService } from '@/hooks/useBackscrollService';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
@@ -58,6 +59,13 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
     channelId: selectedChannel || '',
     initialLimit: 20,
     loadMoreThreshold: 100
+  });
+
+  // Initialize backscroll service
+  const backscrollService = useBackscrollService({
+    characterName: activeCharacter || '',
+    channelId: selectedChannel || '',
+    batchSize: 20
   });
 
   // Use lazy loading if enabled and we have a selected channel and active character
@@ -226,12 +234,48 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
         <div className="text-center">
           <div className="text-6xl mb-4">💬</div>
           <div className="text-lg mb-2">No messages yet</div>
-          <div className="text-sm">
+          <div className="text-sm mb-4">
             {selectedChannel
               ? `Start chatting in #${selectedChannel}!`
               : 'Select a channel to view messages.'
             }
           </div>
+          
+          {/* Backscroll Button - Show only when there should be messages */}
+          {shouldUseLazyLoading && selectedChannel && activeCharacter && (
+            <button
+              onClick={() => backscrollService.actions.loadMore()}
+              disabled={backscrollService.state.isLoading}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 
+                         text-white text-sm rounded-md transition-colors duration-200
+                         flex items-center space-x-2 mx-auto"
+            >
+              {backscrollService.state.isLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>Loading...</span>
+                </>
+              ) : (
+                <>
+                  <span>🔙</span>
+                  <span>Load Backscroll</span>
+                </>
+              )}
+            </button>
+          )}
+          
+          {/* Error Display */}
+          {backscrollService.state.error && (
+            <div className="mt-4 p-3 bg-red-900/50 border border-red-600 rounded-md">
+              <div className="text-red-300 text-sm">{backscrollService.state.error}</div>
+              <button
+                onClick={() => backscrollService.actions.clearError()}
+                className="text-red-400 hover:text-red-300 text-xs mt-1"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -284,157 +328,60 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
           </div>
         )}
         
-        {/* Enhanced test buttons for scrollback debugging */}
-        {shouldUseLazyLoading && (
-          <div className="flex justify-center py-2 space-x-2 flex-wrap">
+        {/* Central Backscroll Button */}
+        {shouldUseLazyLoading && (backscrollService.state.hasMoreLocal || backscrollService.state.hasMoreServer) && (
+          <div className="flex justify-center py-4">
             <button
-              onClick={async () => {
-                console.log('Manual backend test - requesting message history');
-                try {
-                  const { signalRService } = await import('@/lib/signalr');
-                  if (signalRService.isConnected) {
-                    const since = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
-                    console.log('Requesting history from backend:', { selectedChannel, since });
-                    await signalRService.requestHistory(selectedChannel || '', since, 50);
-                  } else {
-                    console.log('SignalR not connected');
-                  }
-                } catch (error) {
-                  console.error('Backend test failed:', error);
-                }
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
+              onClick={() => backscrollService.actions.loadMore()}
+              disabled={backscrollService.state.isLoading}
+              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 
+                         text-white text-sm rounded-lg transition-colors duration-200
+                         flex items-center space-x-3 shadow-lg hover:shadow-xl
+                         disabled:cursor-not-allowed"
             >
-              Test Backend
+              {backscrollService.state.isLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  <span>Loading backscroll...</span>
+                </>
+              ) : (
+                <>
+                  <span className="text-lg">🔙</span>
+                  <div className="text-left">
+                    <div className="font-medium">Load Backscroll</div>
+                    <div className="text-xs opacity-75">
+                      {backscrollService.loadedCount} of {backscrollService.totalCount} messages
+                    </div>
+                  </div>
+                </>
+              )}
             </button>
+          </div>
+        )}
+
+        {/* Server-only backscroll button */}
+        {shouldUseLazyLoading && !backscrollService.state.hasMoreLocal && backscrollService.state.hasMoreServer && (
+          <div className="flex justify-center py-2">
             <button
-              onClick={() => {
-                console.log('Manual load more test');
-                safeLazyMessages.loadMore();
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
+              onClick={() => backscrollService.actions.requestFromServer()}
+              disabled={backscrollService.state.isLoading}
+              className="px-4 py-2 text-gray-500 hover:text-gray-300 border border-gray-600 rounded-md 
+                         hover:border-gray-500 transition-colors duration-200 text-xs"
             >
-              Test Load More
+              Load from Server
             </button>
+          </div>
+        )}
+
+        {/* Error Display */}
+        {backscrollService.state.error && (
+          <div className="mx-4 mb-4 p-3 bg-red-900/50 border border-red-600 rounded-md">
+            <div className="text-red-300 text-sm">{backscrollService.state.error}</div>
             <button
-              onClick={() => {
-                console.log('Check local messages');
-                import('@/stores/chatStore').then(({ useChatStore }) => {
-                  const store = useChatStore.getState();
-                  const allMessages = store.getMessagesForChannel(activeCharacter || '', selectedChannel || '');
-                  const lazyState = store.getLazyLoadingState(activeCharacter || '', selectedChannel || '');
-                  const localMessages = store.getLocalMessagesForChannel(activeCharacter || '', selectedChannel || '', lazyState.oldestMessageTime || undefined, 20);
-                  const hasMoreLocal = store.hasMoreLocalMessages(activeCharacter || '', selectedChannel || '', lazyState.oldestMessageTime || undefined);
-                  
-                  console.log('Local messages check:', {
-                    allMessages: allMessages.length,
-                    loadedCount: lazyState.loadedMessageCount,
-                    oldestMessageTime: lazyState.oldestMessageTime,
-                    localMessages: localMessages.length,
-                    hasMoreLocal,
-                    lazyState
-                  });
-                });
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
+              onClick={() => backscrollService.actions.clearError()}
+              className="text-red-400 hover:text-red-300 text-xs mt-1"
             >
-              Check Local
-            </button>
-            <button
-              onClick={() => {
-                console.log('Manual fix hasMore state');
-                import('@/stores/chatStore').then(({ useChatStore }) => {
-                  const store = useChatStore.getState();
-                  const totalMessages = store.getMessagesForChannel(activeCharacter || '', selectedChannel || '');
-                  const lazyState = store.getLazyLoadingState(activeCharacter || '', selectedChannel || '');
-                  
-                  console.log('Current state:', {
-                    totalMessages: totalMessages.length,
-                    loadedCount: lazyState.loadedMessageCount,
-                    hasMore: lazyState.hasMore
-                  });
-                  
-                  if (totalMessages.length > lazyState.loadedMessageCount) {
-                    console.log('Setting hasMore to true');
-                    store.setLazyLoadingState(activeCharacter || '', selectedChannel || '', { hasMore: true });
-                  } else {
-                    console.log('No need to set hasMore - all messages are loaded');
-                  }
-                });
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
-            >
-              Fix HasMore
-            </button>
-            <button
-              onClick={() => {
-                console.log('Manual reinitialize lazy loading');
-                import('@/stores/chatStore').then(({ useChatStore }) => {
-                  const store = useChatStore.getState();
-                  const messages = store.getMessagesForChannel(activeCharacter || '', selectedChannel || '');
-                  store.initializeLazyLoading(activeCharacter || '', selectedChannel || '', messages);
-                });
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
-            >
-              Reinit Lazy
-            </button>
-            <button
-              onClick={() => {
-                console.log('Scroll to bottom');
-                safeLazyMessages.scrollToBottom();
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
-            >
-              Scroll Bottom
-            </button>
-            <button
-              onClick={() => {
-                console.log('Force load more from local');
-                import('@/stores/chatStore').then(({ useChatStore }) => {
-                  const store = useChatStore.getState();
-                  const lazyState = store.getLazyLoadingState(activeCharacter || '', selectedChannel || '');
-                  console.log('Lazy Loading: Lazy State:', lazyState);
-                  // Get more messages from local storage
-                  const localMessages = store.getLocalMessagesForChannel(
-                    activeCharacter || '', 
-                    selectedChannel || '', 
-                    lazyState.oldestMessageTime || undefined, 
-                    20
-                  );
-                  
-                  if (localMessages.length > 0) {
-                    const sortedMessages = [...localMessages].sort((a, b) => 
-                      new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-                    );
-                    
-                    const oldestMessage = sortedMessages[0];
-                    
-                    store.setLazyLoadingState(activeCharacter || '', selectedChannel || '', {
-                      hasMore: store.hasMoreLocalMessages(activeCharacter || '', selectedChannel || '', oldestMessage ? new Date(oldestMessage.timestamp) : lazyState.oldestMessageTime || undefined),
-                      isLoading: false,
-                      oldestMessageTime: oldestMessage ? new Date(oldestMessage.timestamp) : lazyState.oldestMessageTime,
-                      loadedMessageCount: lazyState.loadedMessageCount + localMessages.length
-                    });
-                    
-                    console.log(`Force loaded ${localMessages.length} messages from local storage`);
-                  } else {
-                    console.log('No more local messages available');
-                  }
-                });
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
-            >
-              Force Load Local
-            </button>
-            <button
-              onClick={() => {
-                console.log('Lazy Loading: Reset Loading....');
-                safeLazyMessages.isLoading = false;
-              }}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-300 border border-gray-700 rounded-md hover:border-gray-600 transition-colors"
-            >
-              Reset Loading....
+              Dismiss
             </button>
           </div>
         )}

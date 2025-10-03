@@ -101,79 +101,24 @@ export function useLazyMessages({
     }
   }, [characterName, channelId, messages, isInitialized, initializeLazyLoading, getLazyLoadingState, getMessagesForChannel, setLazyLoadingState]);
 
-  // Load more messages function with enhanced scrollback behavior
+  // Simplified load more function - now delegates to centralized backscroll service
   const loadMore = useCallback(async () => {
-    console.log('loadMore called:', { characterName, channelId, isLoading: lazyState.isLoading });
+    console.log('useLazyMessages: Delegating load more to centralized service');
     
-    if (!characterName || !channelId || lazyState.isLoading) {
-      console.log('Lazy loading: Skipping load more - conditions not met', {
-        characterName: !!characterName,
-        channelId: !!channelId,
-        isLoading: lazyState.isLoading
-      });
-      return;
-    }
-
+    if (!characterName) return;
+    
     try {
-      console.log('Lazy loading: Starting enhanced load more...');
-      
-      // Set loading state
-      setLazyLoadingState(characterName, channelId, { isLoading: true });
-      
-      // First, check if we have more local messages
-      const hasMoreLocal = hasMoreLocalMessages(characterName, channelId, lazyState.oldestMessageTime || undefined);
-      
-      console.log('Lazy loading: Checking local messages...', {
-        hasMoreLocal,
-        oldestMessageTime: lazyState.oldestMessageTime,
-        currentLoadedCount: lazyState.loadedMessageCount
-      });
-      
-      if (hasMoreLocal) {
-        console.log('Lazy loading: Loading more messages from local storage...');
-        
-        // Simple approach: just increase the loadedMessageCount to show more messages
-        const currentState = getLazyLoadingState(characterName, channelId);
-        const newLoadedCount = Math.min(currentState.loadedMessageCount + 20, allStoredMessages.length);
-        
-        // Calculate the new oldest message time based on the expanded view
-        const sortedMessages = [...allStoredMessages].sort((a, b) => 
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-        
-        // Get the messages we'll be displaying with the new count
-        const displayedMessages = sortedMessages.slice(-newLoadedCount);
-        const oldestDisplayedMessage = displayedMessages[0];
-        
-        // Check if we still have more messages to load
-        const newHasMore = newLoadedCount < allStoredMessages.length || hasMoreLocalMessages(characterName, channelId, oldestDisplayedMessage ? new Date(oldestDisplayedMessage.timestamp) : undefined);
-        
-        console.log('Lazy loading: Updating state to show more local messages...', {
-          oldLoadedCount: currentState.loadedMessageCount,
-          newLoadedCount,
-          totalStoredMessages: allStoredMessages.length,
-          newHasMore,
-          oldestDisplayedTime: oldestDisplayedMessage?.timestamp
-        });
-        
-        setLazyLoadingState(characterName, channelId, {
-          hasMore: newHasMore,
-          isLoading: false,
-          oldestMessageTime: oldestDisplayedMessage ? new Date(oldestDisplayedMessage.timestamp) : currentState.oldestMessageTime,
-          loadedMessageCount: newLoadedCount
-        });
-        
-        console.log(`Lazy loading: Updated state to show ${newLoadedCount} messages from local storage`);
-      } else {
-        // No more local messages, request from server
-        console.log('Lazy loading: No more local messages, requesting from server...');
+      // For backward compatibility, still handle basic loading
+      if (!lazyState.isLoading) {
+        console.log('useLazyMessages: Loading from server via SignalR');
+        setLazyLoadingState(characterName, channelId, { isLoading: true });
         await loadMoreMessages(characterName, channelId);
       }
     } catch (error) {
-      console.error('Failed to load more messages:', error);
+      console.error('useLazyMessages: Failed to load more messages:', error);
       setLazyLoadingState(characterName, channelId, { isLoading: false });
     }
-  }, [characterName, channelId, lazyState.isLoading, lazyState.oldestMessageTime, loadMoreMessages, setLazyLoadingState, hasMoreLocalMessages, getLocalMessagesForChannel, getLazyLoadingState]);
+  }, [characterName, channelId, lazyState.isLoading, loadMoreMessages, setLazyLoadingState]);
 
   // Scroll to bottom function
   const scrollToBottom = useCallback(() => {
