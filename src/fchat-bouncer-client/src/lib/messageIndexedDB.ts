@@ -108,7 +108,7 @@ class MessageIndexedDBService {
       const request = store.put(data);
 
       request.onsuccess = () => {
-        console.log(`Stored message for ${characterName} in ${channelId}`);
+        //console.log(`Stored message for ${characterName} in ${channelId}`);
         resolve();
       };
 
