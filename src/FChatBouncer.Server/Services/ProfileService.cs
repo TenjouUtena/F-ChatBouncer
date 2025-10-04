@@ -221,7 +221,7 @@ public class ProfileService : IProfileService
             {
                 // Check if this profile is stale by looking at the timestamp
                 var age = DateTime.UtcNow - characterProfile.Timestamp;
-                var isStale = age.TotalHours >= 6;
+                var isStale = age.TotalHours >= 24;
 
                 _logger.LogDebug("Retrieved cached profile from CharacterService for character {CharacterName} (User: {UserId}). Age: {Age:F1} hours, stale: {IsStale}",
                     characterName, userId, age.TotalHours, isStale);
@@ -267,7 +267,7 @@ public class ProfileService : IProfileService
                     }
                 }
 
-                return null;
+                return characterProfile;
             }
 
             // Fallback to legacy Profile table

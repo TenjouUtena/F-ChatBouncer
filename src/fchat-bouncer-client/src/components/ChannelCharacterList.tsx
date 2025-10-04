@@ -149,7 +149,7 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
       signalRService.removeListener('ChannelCharacterError');
       signalRService.removeListener('StatusUpdated');
     };
-  }, [channelId]);
+  }, [channelId, signalRService.connectionState, signalRService.connection?.connectionId]);
 
   const loadCharacters = async () => {
     if (!channelId) return;

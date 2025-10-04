@@ -77,7 +77,7 @@ export default function ChannelSelection({
         signalRService.connection.off('ChannelListError');
       }
     };
-  }, []);
+  }, [signalRService.connectionState, signalRService.connection?.connectionId]);
 
   const handleGetChannels = async () => {
     setIsLoading(true);

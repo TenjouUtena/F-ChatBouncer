@@ -1655,7 +1655,6 @@ export const useChatStore = create<ChatStore>()(
         
         // If we have more messages stored than we're currently displaying, we have more to show
         if (lazyState && channelMessages.length > lazyState.loadedMessageCount) {
-          console.log(`Have ${channelMessages.length} messages stored, but only showing ${lazyState.loadedMessageCount}. Can load more locally.`);
           return true;
         }
 
@@ -1664,7 +1663,6 @@ export const useChatStore = create<ChatStore>()(
           const olderMessages = sortedMessages.filter(msg => 
             new Date(msg.timestamp) < beforeTime
           );
-          console.log(`Checking for older messages: ${olderMessages.length} messages older than ${beforeTime.toISOString()}`);
           return olderMessages.length > 0;
         }
 
@@ -1795,7 +1793,7 @@ export const useChatStore = create<ChatStore>()(
                     [characterName]: deduplicatedMessages
                   }
                 }));
-                console.log(`Loaded ${deduplicatedMessages.length} messages for ${characterName} from IndexedDB (${messages.length - deduplicatedMessages.length} duplicates removed)`);
+                //console.log(`Loaded ${deduplicatedMessages.length} messages for ${characterName} from IndexedDB (${messages.length - deduplicatedMessages.length} duplicates removed)`);
               }
             } catch (error) {
               console.error(`Failed to load messages for ${characterName}:`, error);
@@ -1835,7 +1833,6 @@ export const useChatStore = create<ChatStore>()(
                   [characterName]: deduplicatedMessages
                 }
               }));
-              console.log(`Loaded ${deduplicatedMessages.length} messages for ${characterName} from IndexedDB (${messages.length - deduplicatedMessages.length} duplicates removed)`);
             }
           }
         } catch (error) {

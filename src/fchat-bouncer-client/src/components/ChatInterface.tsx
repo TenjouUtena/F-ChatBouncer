@@ -234,9 +234,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     }
   }, [isNotificationReady, requestPermission]);
 
-  // Optimized useEffect for SignalR listeners - only runs when necessary
+  // Optimized useEffect for SignalR listeners - re-runs when connection changes
   useEffect(() => {
     console.log('Setting up SignalR listeners (optimized)');
+    console.log('SignalR connection state:', signalRService.connectionState);
+    console.log('SignalR connection ID:', signalRService.connection?.connectionId);
     
     // Set up SignalR message listeners using stable callbacks
     signalRService.onReceiveMessage(handleReceiveMessage);
@@ -381,7 +383,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       signalRService.removeListener('ProfileReceived');
       signalRService.removeListener('ChannelsSubscribed');
     };
-  }, [handleReceiveMessage, handleReceiveRecentMessages, handleReceiveHistory, handleChannelsSubscribed, addProfile, setConnected, isNotificationReady, showTypingNotification]); // Only re-run when these stable callbacks change
+  }, [handleReceiveMessage, handleReceiveRecentMessages, handleReceiveHistory, handleChannelsSubscribed, addProfile, setConnected, isNotificationReady, showTypingNotification, signalRService.connectionState, signalRService.connection?.connectionId]); // Re-run when callbacks change or SignalR connection changes
 
   // Separate effect for setting initial channel to avoid re-running listeners
   useEffect(() => {
