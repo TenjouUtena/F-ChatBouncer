@@ -175,6 +175,79 @@ class MessageIndexedDBService {
     });
   }
 
+  async getRecentMessagesForChannel(characterName: string, channelId: string, limit: number = 100): Promise<any[]> {
+    await this.ensureInitialized();
+    
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
+
+      const transaction = this.db.transaction([this.storeName], 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const index = store.index('characterName');
+      const range = IDBKeyRange.only(characterName);
+      const request = index.getAll(range);
+
+      request.onsuccess = () => {
+        let results = request.result;
+        
+        // Filter by channel
+        results = results.filter((item: { channelId: string; }) => item.channelId === channelId);
+        
+        // Sort by timestamp (newest first)
+        results.sort((a: { timestamp: number; }, b: { timestamp: number; }) => b.timestamp - a.timestamp);
+        
+        // Take the most recent messages
+        const recentResults = results.slice(0, limit);
+        
+        // Sort by timestamp (oldest first) for consistent ordering
+        recentResults.sort((a: { timestamp: number; }, b: { timestamp: number; }) => a.timestamp - b.timestamp);
+        
+        // Extract just the message objects
+        const messages = recentResults.map((item: { message: any; }) => item.message);
+        
+        console.log(`Retrieved ${messages.length} recent messages for ${characterName} in ${channelId} (limit: ${limit})`);
+        resolve(messages);
+      };
+
+      request.onerror = () => {
+        console.error(`Failed to get recent messages for ${characterName} in ${channelId}:`, request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  async getLimitedMessagesForOpenChannels(characterName: string, openChannels: string[], limitPerChannel: number = 100): Promise<{
+    channelMessages: Record<string, any[]>;
+    totalMessages: number;
+  }> {
+    await this.ensureInitialized();
+    
+    const channelMessages: Record<string, any[]> = {};
+    let totalMessages = 0;
+
+    // Load messages for each open channel
+    for (const channelId of openChannels) {
+      try {
+        const messages = await this.getRecentMessagesForChannel(characterName, channelId, limitPerChannel);
+        channelMessages[channelId] = messages;
+        totalMessages += messages.length;
+      } catch (error) {
+        console.error(`Failed to load messages for channel ${channelId}:`, error);
+        channelMessages[channelId] = [];
+      }
+    }
+
+    console.log(`Loaded ${totalMessages} total messages for ${characterName} across ${openChannels.length} channels (limit: ${limitPerChannel} per channel)`);
+    
+    return {
+      channelMessages,
+      totalMessages
+    };
+  }
+
   async deleteMessages(characterName: string, channelId?: string): Promise<number> {
     await this.ensureInitialized();
     
@@ -331,6 +404,255 @@ class MessageIndexedDBService {
         reject(request.error);
       };
     });
+  }
+
+  async getDeduplicationPreview(characterName?: string): Promise<{
+    totalMessages: number;
+    duplicatesFound: number;
+    characterBreakdown: Array<{
+      characterName: string;
+      totalMessages: number;
+      duplicatesFound: number;
+      channels: Array<{
+        channelId: string;
+        totalMessages: number;
+        duplicatesFound: number;
+      }>;
+    }>;
+  }> {
+    await this.ensureInitialized();
+    
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
+
+      const transaction = this.db.transaction([this.storeName], 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const results = request.result;
+        let filteredResults = results;
+        
+        // Filter by character if specified
+        if (characterName) {
+          filteredResults = results.filter(item => item.characterName === characterName);
+        }
+
+        // Group by character and channel
+        const characterMap = new Map<string, Map<string, any[]>>();
+        
+        filteredResults.forEach(message => {
+          const charName = message.characterName;
+          const channelId = message.channelId;
+          
+          if (!characterMap.has(charName)) {
+            characterMap.set(charName, new Map());
+          }
+          
+          const channelMap = characterMap.get(charName)!;
+          if (!channelMap.has(channelId)) {
+            channelMap.set(channelId, []);
+          }
+          
+          channelMap.get(channelId)!.push(message);
+        });
+
+        let totalMessages = 0;
+        let totalDuplicates = 0;
+        const characterBreakdown: Array<{
+          characterName: string;
+          totalMessages: number;
+          duplicatesFound: number;
+          channels: Array<{
+            channelId: string;
+            totalMessages: number;
+            duplicatesFound: number;
+          }>;
+        }> = [];
+
+        characterMap.forEach((channelMap, charName) => {
+          let charTotalMessages = 0;
+          let charTotalDuplicates = 0;
+          const channels: Array<{
+            channelId: string;
+            totalMessages: number;
+            duplicatesFound: number;
+          }> = [];
+
+          channelMap.forEach((messages, channelId) => {
+            const channelTotal = messages.length;
+            const channelDuplicates = this.findDuplicatesInMessages(messages);
+            
+            charTotalMessages += channelTotal;
+            charTotalDuplicates += channelDuplicates.length;
+            
+            channels.push({
+              channelId,
+              totalMessages: channelTotal,
+              duplicatesFound: channelDuplicates.length
+            });
+          });
+
+          totalMessages += charTotalMessages;
+          totalDuplicates += charTotalDuplicates;
+
+          characterBreakdown.push({
+            characterName: charName,
+            totalMessages: charTotalMessages,
+            duplicatesFound: charTotalDuplicates,
+            channels
+          });
+        });
+
+        resolve({
+          totalMessages,
+          duplicatesFound: totalDuplicates,
+          characterBreakdown
+        });
+      };
+
+      request.onerror = () => {
+        console.error('Failed to get deduplication preview:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  async deduplicateMessages(characterName?: string): Promise<{
+    totalMessages: number;
+    duplicatesRemoved: number;
+    characterBreakdown: Array<{
+      characterName: string;
+      totalMessages: number;
+      duplicatesRemoved: number;
+    }>;
+  }> {
+    await this.ensureInitialized();
+    
+    return new Promise((resolve, reject) => {
+      if (!this.db) {
+        reject(new Error('Database not initialized'));
+        return;
+      }
+
+      const transaction = this.db.transaction([this.storeName], 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.getAll();
+
+      request.onsuccess = () => {
+        const results = request.result;
+        let filteredResults = results;
+        
+        // Filter by character if specified
+        if (characterName) {
+          filteredResults = results.filter(item => item.characterName === characterName);
+        }
+
+        // Group by character and channel
+        const characterMap = new Map<string, Map<string, any[]>>();
+        
+        filteredResults.forEach(message => {
+          const charName = message.characterName;
+          const channelId = message.channelId;
+          
+          if (!characterMap.has(charName)) {
+            characterMap.set(charName, new Map());
+          }
+          
+          const channelMap = characterMap.get(charName)!;
+          if (!channelMap.has(channelId)) {
+            channelMap.set(channelId, []);
+          }
+          
+          channelMap.get(channelId)!.push(message);
+        });
+
+        let totalMessages = 0;
+        let totalDuplicatesRemoved = 0;
+        const characterBreakdown: Array<{
+          characterName: string;
+          totalMessages: number;
+          duplicatesRemoved: number;
+        }> = [];
+
+        const deletePromises: Promise<void>[] = [];
+
+        characterMap.forEach((channelMap, charName) => {
+          let charTotalMessages = 0;
+          let charTotalDuplicates = 0;
+
+          channelMap.forEach((messages, channelId) => {
+            const duplicates = this.findDuplicatesInMessages(messages);
+            charTotalMessages += messages.length;
+            charTotalDuplicates += duplicates.length;
+
+            // Delete duplicate messages
+            duplicates.forEach(duplicate => {
+              const deletePromise = new Promise<void>((deleteResolve, deleteReject) => {
+                const deleteRequest = store.delete(duplicate.key);
+                deleteRequest.onsuccess = () => {
+                  deleteResolve();
+                };
+                deleteRequest.onerror = () => deleteReject(deleteRequest.error);
+              });
+              deletePromises.push(deletePromise);
+            });
+          });
+
+          totalMessages += charTotalMessages;
+          totalDuplicatesRemoved += charTotalDuplicates;
+
+          characterBreakdown.push({
+            characterName: charName,
+            totalMessages: charTotalMessages,
+            duplicatesRemoved: charTotalDuplicates
+          });
+        });
+
+        Promise.all(deletePromises).then(() => {
+          console.log(`Deduplication completed: ${totalDuplicatesRemoved} duplicates removed from ${totalMessages} total messages`);
+          resolve({
+            totalMessages,
+            duplicatesRemoved: totalDuplicatesRemoved,
+            characterBreakdown
+          });
+        }).catch(error => {
+          console.error('Failed to deduplicate messages:', error);
+          reject(error);
+        });
+      };
+
+      request.onerror = () => {
+        console.error('Failed to deduplicate messages:', request.error);
+        reject(request.error);
+      };
+    });
+  }
+
+  private findDuplicatesInMessages(messages: any[]): any[] {
+    const duplicates: any[] = [];
+    const seen = new Set<string>();
+    
+    // Sort messages by timestamp to keep the most recent version
+    const sortedMessages = [...messages].sort((a, b) => b.timestamp - a.timestamp);
+    
+    for (const message of sortedMessages) {
+      const msg = message.message;
+      
+      // Create a unique key for deduplication
+      const duplicateKey = `${msg.id || ''}-${msg.timestamp}-${msg.sender}-${msg.content}-${msg.channel}`;
+      
+      if (seen.has(duplicateKey)) {
+        duplicates.push(message);
+      } else {
+        seen.add(duplicateKey);
+      }
+    }
+    
+    return duplicates;
   }
 }
 

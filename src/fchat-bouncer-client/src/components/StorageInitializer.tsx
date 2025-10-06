@@ -81,9 +81,23 @@ export default function StorageInitializer() {
         migrateExistingProfileData();
         cleanupOldStorageEntries();
         
-        // Load messages from IndexedDB into memory
+        // Load limited messages from IndexedDB into memory for open channels only
         const chatStore = useChatStore.getState();
-        await chatStore.loadAllMessagesFromIndexedDB();
+        
+        // Get characters with selected channels (open channels)
+        const characterSelectedChannels = chatStore.characterSelectedChannels || {};
+        
+        // Load limited messages for each character's open channels
+        for (const [characterName, openChannels] of Object.entries(characterSelectedChannels)) {
+          if (openChannels.length > 0) {
+            try {
+              // Load 100 messages per channel (configurable limit)
+              await chatStore.loadLimitedMessagesFromIndexedDB(characterName, openChannels, 100);
+            } catch (error) {
+              console.error(`Failed to load limited messages for ${characterName}:`, error);
+            }
+          }
+        }
         
         console.log('=== Storage Initialization Completed ===');
         

@@ -11,10 +11,14 @@ type LogsTab = 'backend' | 'frontend';
 
 export default function LogsPage() {
   const { token, isAuthenticated } = useAuthStore();
-  const { characterMessages } = useChatStore();
+  const { characterMessages, getDeduplicationPreview, deduplicateMessages } = useChatStore();
   const [activeTab, setActiveTab] = useState<LogsTab>('backend');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deduplicationPreview, setDeduplicationPreview] = useState<any>(null);
+  const [showDeduplicationPreview, setShowDeduplicationPreview] = useState(false);
+  const [isDeduplicating, setIsDeduplicating] = useState(false);
+  const [deduplicationResult, setDeduplicationResult] = useState<any>(null);
 
   // Get frontend log statistics
   const frontendStats = {
@@ -26,6 +30,37 @@ export default function LogsPage() {
       lastMessageTime: messages.length > 0 ? new Date(messages[messages.length - 1].timestamp) : new Date(0),
       channels: Array.from(new Set(messages.map(m => m.channel)))
     }))
+  };
+
+  const handleGetDeduplicationPreview = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const preview = await getDeduplicationPreview();
+      setDeduplicationPreview(preview);
+      setShowDeduplicationPreview(true);
+    } catch (error) {
+      console.error('Failed to get deduplication preview:', error);
+      setError('Failed to get deduplication preview');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeduplicateMessages = async () => {
+    try {
+      setIsDeduplicating(true);
+      setError(null);
+      const result = await deduplicateMessages();
+      setDeduplicationResult(result);
+      setShowDeduplicationPreview(false);
+      setDeduplicationPreview(null);
+    } catch (error) {
+      console.error('Failed to deduplicate messages:', error);
+      setError('Failed to deduplicate messages');
+    } finally {
+      setIsDeduplicating(false);
+    }
   };
 
   if (!isAuthenticated) {
@@ -101,6 +136,138 @@ export default function LogsPage() {
             </div>
           </div>
         )}
+
+        {/* Deduplication Controls */}
+        <div className="mb-6 bg-gray-800 rounded-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-semibold text-white">Message Deduplication</h2>
+              <p className="text-gray-400 text-sm mt-1">
+                Remove duplicate messages from your IndexedDB storage
+              </p>
+            </div>
+            <div className="flex space-x-3">
+              <button
+                onClick={handleGetDeduplicationPreview}
+                disabled={isLoading}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 
+                           text-white text-sm rounded-lg transition-colors duration-200
+                           flex items-center space-x-2"
+              >
+                {isLoading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    <span>Analyzing...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>🔍</span>
+                    <span>Preview Duplicates</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Deduplication Preview */}
+          {showDeduplicationPreview && deduplicationPreview && (
+            <div className="bg-gray-700 rounded-lg p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-medium text-white">Deduplication Preview</h3>
+                <button
+                  onClick={() => setShowDeduplicationPreview(false)}
+                  className="text-gray-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div className="bg-gray-600 rounded p-3">
+                  <div className="text-2xl font-bold text-white">{deduplicationPreview.totalMessages}</div>
+                  <div className="text-sm text-gray-300">Total Messages</div>
+                </div>
+                <div className="bg-orange-600 rounded p-3">
+                  <div className="text-2xl font-bold text-white">{deduplicationPreview.duplicatesFound}</div>
+                  <div className="text-sm text-gray-300">Duplicates Found</div>
+                </div>
+                <div className="bg-green-600 rounded p-3">
+                  <div className="text-2xl font-bold text-white">
+                    {deduplicationPreview.totalMessages - deduplicationPreview.duplicatesFound}
+                  </div>
+                  <div className="text-sm text-gray-300">After Cleanup</div>
+                </div>
+              </div>
+
+              {/* Character Breakdown */}
+              <div className="space-y-3">
+                <h4 className="text-md font-medium text-white">Character Breakdown:</h4>
+                {deduplicationPreview.characterBreakdown.map((char: any) => (
+                  <div key={char.characterName} className="bg-gray-600 rounded p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-medium text-white">{char.characterName}</span>
+                      <span className="text-sm text-gray-300">
+                        {char.duplicatesFound} duplicates of {char.totalMessages} messages
+                      </span>
+                    </div>
+                    {char.channels.map((channel: any) => (
+                      <div key={channel.channelId} className="ml-4 text-sm text-gray-300">
+                        {channel.channelId}: {channel.duplicatesFound} duplicates of {channel.totalMessages} messages
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end mt-4">
+                <button
+                  onClick={handleDeduplicateMessages}
+                  disabled={isDeduplicating || deduplicationPreview.duplicatesFound === 0}
+                  className="px-6 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 
+                             text-white text-sm rounded-lg transition-colors duration-200
+                             flex items-center space-x-2"
+                >
+                  {isDeduplicating ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Removing Duplicates...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🗑️</span>
+                      <span>Remove {deduplicationPreview.duplicatesFound} Duplicates</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Deduplication Result */}
+          {deduplicationResult && (
+            <div className="bg-green-900/50 border border-green-500 rounded-lg p-4">
+              <div className="flex items-center space-x-3">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-medium text-green-400">Deduplication Complete</h3>
+                  <div className="mt-1 text-sm text-green-300">
+                    <p>Removed {deduplicationResult.duplicatesRemoved} duplicate messages from {deduplicationResult.totalMessages} total messages</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDeduplicationResult(null)}
+                  className="ml-auto text-green-400 hover:text-green-300"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Tab Content */}
         <div className="bg-gray-800 rounded-lg p-6">

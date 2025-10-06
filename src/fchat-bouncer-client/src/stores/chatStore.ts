@@ -148,6 +148,15 @@ interface ChatStore extends ChatState {
   // IndexedDB message management
   loadMessagesFromIndexedDB: (characterName: string, channelId?: string, limit?: number) => Promise<Message[]>;
   loadAllMessagesFromIndexedDB: () => Promise<void>;
+  loadLimitedMessagesFromIndexedDB: (characterName: string, openChannels: string[], limitPerChannel?: number) => Promise<void>;
+  loadRecentMessagesForChannel: (characterName: string, channelId: string, limit?: number) => Promise<Message[]>;
+  
+  // Deduplication management
+  getDeduplicationPreview: (characterName?: string) => Promise<any>;
+  deduplicateMessages: (characterName?: string) => Promise<any>;
+  
+  // Channel-specific loading
+  loadMessagesForNewChannel: (characterName: string, channelId: string, limit?: number) => Promise<void>;
   loadMessagesForCharacter: (characterName: string) => Promise<void>;
 }
 
@@ -1803,6 +1812,150 @@ export const useChatStore = create<ChatStore>()(
           console.log('Finished loading messages from IndexedDB');
         } catch (error) {
           console.error('Failed to load messages from IndexedDB:', error);
+        }
+      },
+
+      loadLimitedMessagesFromIndexedDB: async (characterName: string, openChannels: string[], limitPerChannel: number = 100) => {
+        try {
+          console.log(`Loading limited messages from IndexedDB for ${characterName} (${limitPerChannel} per channel)...`);
+          
+          const { channelMessages, totalMessages } = await messageIndexedDBService.getLimitedMessagesForOpenChannels(
+            characterName, 
+            openChannels, 
+            limitPerChannel
+          );
+
+          // Combine all channel messages into a single array for the character
+          const allMessages: Message[] = [];
+          Object.values(channelMessages).forEach(messages => {
+            allMessages.push(...messages);
+          });
+
+          // Sort all messages by timestamp
+          allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+          // Deduplicate messages from IndexedDB
+          const deduplicatedMessages = allMessages.filter((message, index, arr) => {
+            // Remove duplicates based on ID or content/timestamp/sender/channel
+            return arr.findIndex(m => 
+              m.id === message.id ||
+              (m.timestamp === message.timestamp &&
+               m.sender === message.sender &&
+               m.content === message.content &&
+               m.channel === message.channel)
+            ) === index;
+          });
+
+          set(currentState => ({
+            characterMessages: {
+              ...currentState.characterMessages,
+              [characterName]: deduplicatedMessages
+            }
+          }));
+
+          console.log(`Loaded ${deduplicatedMessages.length} limited messages for ${characterName} from IndexedDB (${totalMessages - deduplicatedMessages.length} duplicates removed)`);
+        } catch (error) {
+          console.error(`Failed to load limited messages for ${characterName}:`, error);
+        }
+      },
+
+      loadRecentMessagesForChannel: async (characterName: string, channelId: string, limit: number = 100) => {
+        try {
+          const messages = await messageIndexedDBService.getRecentMessagesForChannel(characterName, channelId, limit);
+          
+          // Get current messages for this character
+          const state = get();
+          const currentMessages = state.characterMessages[characterName] || [];
+          
+          // Filter out existing messages for this channel to avoid duplicates
+          const existingChannelMessages = currentMessages.filter(m => m.channel !== channelId);
+          
+          // Combine existing messages with new channel messages
+          const allMessages = [...existingChannelMessages, ...messages];
+          
+          // Sort by timestamp
+          allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+          set(currentState => ({
+            characterMessages: {
+              ...currentState.characterMessages,
+              [characterName]: allMessages
+            }
+          }));
+
+          console.log(`Loaded ${messages.length} recent messages for ${characterName} in ${channelId}`);
+          return messages;
+        } catch (error) {
+          console.error(`Failed to load recent messages for ${characterName} in ${channelId}:`, error);
+          return [];
+        }
+      },
+
+      getDeduplicationPreview: async (characterName?: string) => {
+        try {
+          return await messageIndexedDBService.getDeduplicationPreview(characterName);
+        } catch (error) {
+          console.error('Failed to get deduplication preview:', error);
+          throw error;
+        }
+      },
+
+      deduplicateMessages: async (characterName?: string) => {
+        try {
+          const result = await messageIndexedDBService.deduplicateMessages(characterName);
+          
+          // If we deduplicated for a specific character, reload their messages
+          if (characterName) {
+            const state = get();
+            const openChannels = state.characterSelectedChannels[characterName] || [];
+            if (openChannels.length > 0) {
+              await get().loadLimitedMessagesFromIndexedDB(characterName, openChannels);
+            }
+          } else {
+            // If global deduplication, reload all characters
+            const state = get();
+            const characterNames = Object.keys(state.characterSelectedChannels);
+            
+            for (const charName of characterNames) {
+              const openChannels = state.characterSelectedChannels[charName] || [];
+              if (openChannels.length > 0) {
+                await get().loadLimitedMessagesFromIndexedDB(charName, openChannels);
+              }
+            }
+          }
+          
+          return result;
+        } catch (error) {
+          console.error('Failed to deduplicate messages:', error);
+          throw error;
+        }
+      },
+
+      loadMessagesForNewChannel: async (characterName: string, channelId: string, limit: number = 100) => {
+        try {
+          console.log(`Loading messages for new channel ${channelId} for ${characterName}...`);
+          
+          // Check if we already have messages for this channel
+          const state = get();
+          const existingMessages = state.characterMessages[characterName] || [];
+          const hasChannelMessages = existingMessages.some(m => m.channel === channelId);
+          
+          if (hasChannelMessages) {
+            console.log(`Channel ${channelId} already has messages loaded for ${characterName}`);
+            return;
+          }
+          
+          // Load recent messages for this channel
+          const messages = await get().loadRecentMessagesForChannel(characterName, channelId, limit);
+          
+          // Initialize lazy loading state for this channel
+          if (messages.length > 0) {
+            get().initializeLazyLoading(characterName, channelId, messages);
+          }
+          
+          console.log(`Loaded ${messages.length} messages for new channel ${channelId} for ${characterName}`);
+        } catch (error) {
+          console.error(`Failed to load messages for new channel ${channelId} for ${characterName}:`, error);
         }
       },
 

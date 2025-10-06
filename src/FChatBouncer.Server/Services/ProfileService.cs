@@ -119,6 +119,7 @@ public class ProfileService : IProfileService
     {
         using var scope = _serviceProvider.CreateScope();
         var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
+        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
         
         try
         {
@@ -131,7 +132,43 @@ public class ProfileService : IProfileService
                 WriteIndented = true
             });
 
-            await SaveProfileAsync(userId, profileData.CharacterName, profileJson);
+            // Directly implement profile saving logic instead of calling SaveProfileAsync to avoid nested scopes
+            var existingProfile = await context.Profiles
+                .FirstOrDefaultAsync(p => p.UserId == userId && p.CharacterName == profileData.CharacterName);
+
+            if (existingProfile != null)
+            {
+                // Update existing profile
+                existingProfile.ProfileData = profileJson;
+                existingProfile.UpdatedAt = DateTime.UtcNow;
+                _logger.LogInformation("Updated legacy profile for character {CharacterName} (User: {UserId})", profileData.CharacterName, userId);
+            }
+            else
+            {
+                // Create new profile
+                var profile = new Profile
+                {
+                    UserId = userId,
+                    CharacterName = profileData.CharacterName,
+                    ProfileData = profileJson,
+                    RawProData = null,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                context.Profiles.Add(profile);
+                _logger.LogInformation("Created new legacy profile for character {CharacterName} (User: {UserId})", profileData.CharacterName, userId);
+            }
+
+            try
+            {
+                await context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
+            {
+                // Handle unique constraint violation - character was created/updated by another thread
+                _logger.LogWarning("Character {CharacterName} profile was updated by another thread, skipping duplicate profile save", profileData.CharacterName);
+            }
 
             _logger.LogInformation("Saved structured profile for character {CharacterName} (User: {UserId}): {Summary}",
                 profileData.CharacterName, userId, profileData.GetSummary());
@@ -240,13 +277,19 @@ public class ProfileService : IProfileService
                     var requestKey = $"{userId}:{characterName}";
                     if (!_pendingRequests.ContainsKey(requestKey))
                     {
-                        // Trigger a background refresh (fire and forget)
+                        // Capture the service provider before starting the background task to avoid disposed scope issues
+                        var serviceProvider = scope.ServiceProvider;
+                        
+                        // Trigger a background refresh (fire and forget) - create new scope for background task
                         _ = Task.Run(async () =>
                         {
                             try
                             {
                                 _logger.LogInformation("Triggering background refresh for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
-                                await RequestProfileAsync(userId, characterName);
+                                // Create a new scope for the background task using the captured service provider
+                                using var backgroundScope = serviceProvider.CreateScope();
+                                var backgroundProfileService = backgroundScope.ServiceProvider.GetRequiredService<IProfileService>();
+                                await backgroundProfileService.RequestProfileAsync(userId, characterName);
                             }
                             catch (Exception ex)
                             {
@@ -306,13 +349,19 @@ public class ProfileService : IProfileService
                 var requestKey = $"{userId}:{characterName}";
                 if (!_pendingRequests.ContainsKey(requestKey))
                 {
-                    // Trigger a background refresh (fire and forget)
+                    // Capture the service provider before starting the background task to avoid disposed scope issues
+                    var serviceProvider = scope.ServiceProvider;
+                    
+                    // Trigger a background refresh (fire and forget) - create new scope for background task
                     _ = Task.Run(async () =>
                     {
                         try
                         {
                             _logger.LogInformation("Triggering background refresh for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
-                            await RequestProfileAsync(userId, characterName);
+                            // Create a new scope for the background task using the captured service provider
+                            using var backgroundScope = serviceProvider.CreateScope();
+                            var backgroundProfileService = backgroundScope.ServiceProvider.GetRequiredService<IProfileService>();
+                            await backgroundProfileService.RequestProfileAsync(userId, characterName);
                         }
                         catch (Exception ex)
                         {
