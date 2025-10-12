@@ -3,6 +3,7 @@ using System;
 using FChatBouncer.Server.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FChatBouncer.Server.Migrations
 {
     [DbContext(typeof(BouncerDbContext))]
-    partial class BouncerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251010143850_AddProfileQueueItem")]
+    partial class AddProfileQueueItem
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

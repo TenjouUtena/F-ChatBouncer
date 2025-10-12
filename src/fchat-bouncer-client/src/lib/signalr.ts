@@ -10,6 +10,7 @@ class SignalRService {
   private isConnecting: boolean = false;
   private eventListenersSetup: boolean = false;
   private onProfileAvailable: ((data: { characterName: string; timestamp: string }) => void) | null = null;
+  private isHandlingAuthFailure: boolean = false;
 
   async connect(token: string, credentials?: { username: string; password: string; fchatUsername?: string; fchatPassword?: string }): Promise<void> {
     // Prevent multiple simultaneous connections
@@ -54,18 +55,28 @@ class SignalRService {
     } catch (err) {
       console.error('SignalR Connection Error:', err);
 
-      // Check if it's a 401 error and try to re-authenticate
-      if (this.is401Error(err) && this.storedCredentials) {
-        console.log('401 error detected, attempting re-authentication...');
-        try {
-          await this.attemptReauth();
-          // Retry connection with new token
-          if (this.connection) {
-            await this.connection.start();
+      // Check if it's a 401 error
+      if (this.is401Error(err)) {
+        // Try to re-authenticate if we have stored credentials
+        if (this.storedCredentials) {
+          console.log('401 error detected, attempting re-authentication...');
+          try {
+            await this.attemptReauth();
+            // Retry connection with new token
+            if (this.connection) {
+              await this.connection.start();
+            }
+          } catch (reauthErr) {
+            console.error('Re-authentication failed:', reauthErr);
+            // Re-auth failed, invalidate all credentials
+            await this.handleAuthenticationFailure('Your session has expired. Please log in again.');
+            throw new Error('Authentication failed. Please log in again.');
           }
-        } catch (reauthErr) {
-          console.error('Re-authentication failed:', reauthErr);
-          throw reauthErr;
+        } else {
+          // No stored credentials to try, invalidate session
+          console.error('401 error with no stored credentials');
+          await this.handleAuthenticationFailure('Your session has expired. Please log in again.');
+          throw new Error('Authentication failed. Please log in again.');
         }
       } else {
         throw err;
@@ -93,6 +104,7 @@ class SignalRService {
     this.callbacks.clear();
     this.currentToken = null;
     this.storedCredentials = null;
+    this.isHandlingAuthFailure = false;
   }
 
   private cleanupAllListeners(): void {
@@ -200,7 +212,58 @@ class SignalRService {
       this.onTokenUpdated?.(this.currentToken);
     } catch (error) {
       console.error('Re-authentication failed:', error);
+      // If re-auth fails, it could be a 401 as well, let the caller handle it
       throw new Error('Failed to re-authenticate: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  }
+
+  /**
+   * Handles authentication failure by clearing credentials and triggering a logout
+   */
+  private async handleAuthenticationFailure(message: string): Promise<void> {
+    // Prevent multiple simultaneous auth failure handlers
+    if (this.isHandlingAuthFailure) {
+      console.log('Already handling authentication failure, skipping...');
+      return;
+    }
+
+    this.isHandlingAuthFailure = true;
+    console.log('Handling authentication failure:', message);
+    
+    try {
+      // Disconnect SignalR
+      await this.disconnect();
+
+      // Clear stored credentials
+      try {
+        const { useCredentialsStore } = await import('@/stores/credentialsStore');
+        const credentialsStore = useCredentialsStore.getState();
+        credentialsStore.clearCredentials();
+        console.log('Cleared stored credentials');
+      } catch (error) {
+        console.error('Failed to clear credentials store:', error);
+      }
+
+      // Logout from auth store
+      try {
+        const { useAuthStore } = await import('@/stores/authStore');
+        const authStore = useAuthStore.getState();
+        authStore.logout();
+        console.log('Logged out from auth store');
+      } catch (error) {
+        console.error('Failed to logout from auth store:', error);
+      }
+
+      // Dispatch event to notify UI
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth:signalr-unauthorized', {
+          detail: { message }
+        }));
+      }
+    } catch (error) {
+      console.error('Error during authentication failure handling:', error);
+    } finally {
+      this.isHandlingAuthFailure = false;
     }
   }
 
@@ -250,6 +313,20 @@ this.onSearchResultsReceived = callback;
   private setupEventHandlers(): void {
     if (!this.connection || this.eventListenersSetup) return;
 
+    // Handle connection close events (including failed reconnection attempts)
+    this.connection.onclose(async (error) => {
+      if (error) {
+        console.error('SignalR connection closed with error:', error);
+        // Check if it's a 401 error during reconnection
+        if (this.is401Error(error)) {
+          console.error('401 error during connection/reconnection');
+          // Handle authentication failure
+          await this.handleAuthenticationFailure('Your session has expired. Please log in again.');
+        }
+      } else {
+        console.log('SignalR connection closed normally');
+      }
+    });
 
     this.connection.on('ReceiveMessage', (message: Message) => {
       // This will be handled by the component that sets up the listener

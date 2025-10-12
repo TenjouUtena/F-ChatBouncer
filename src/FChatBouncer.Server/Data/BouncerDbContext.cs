@@ -21,6 +21,9 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
     public DbSet<Character> Characters { get; set; }
     public DbSet<CharacterConnection> CharacterConnections { get; set; }
     public DbSet<CharacterChannel> CharacterChannels { get; set; }
+    
+    // Profile queue models
+    public DbSet<ProfileQueueItem> ProfileQueueItems { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -130,5 +133,18 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
         builder.Entity<CharacterConnection>()
             .HasIndex(cc => cc.IsConnected)
             .HasDatabaseName("IX_CharacterConnections_IsConnected");
+
+        // ProfileQueueItem indexes
+        builder.Entity<ProfileQueueItem>()
+            .HasIndex(q => new { q.UserId, q.CharacterName, q.Status })
+            .HasDatabaseName("IX_ProfileQueueItems_User_Character_Status");
+
+        builder.Entity<ProfileQueueItem>()
+            .HasIndex(q => new { q.Status, q.Priority, q.RequestedAt })
+            .HasDatabaseName("IX_ProfileQueueItems_Status_Priority_Requested");
+
+        builder.Entity<ProfileQueueItem>()
+            .HasIndex(q => q.UpdatedAt)
+            .HasDatabaseName("IX_ProfileQueueItems_UpdatedAt");
     }
 }

@@ -806,6 +806,7 @@ export const useChatStore = create<ChatStore>()(
 
       mergeHistoryMessages: (messages: Message[], characterName?: string) => {
         if (!characterName) {
+          console.log("using legacy behavior for mergeHistoryMessages");
           // Legacy behavior
           set((state) => {
             const existingMessages = state.messages;

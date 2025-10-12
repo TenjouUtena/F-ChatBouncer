@@ -16,6 +16,7 @@ public class ProfileService : IProfileService
     private readonly ILogger<ProfileService> _logger;
     private readonly IProfileRateLimiter _rateLimiter;
     private readonly IHubContext<BouncerHub> _hubContext;
+    private readonly IProfileQueueService _profileQueueService;
     private readonly ConcurrentDictionary<string, Task> _pendingRequests = new();
 
     public ProfileService(
@@ -23,13 +24,15 @@ public class ProfileService : IProfileService
         IFChatService fChatService,
         ILogger<ProfileService> logger,
         IProfileRateLimiter rateLimiter,
-        IHubContext<BouncerHub> hubContext)
+        IHubContext<BouncerHub> hubContext,
+        IProfileQueueService profileQueueService)
     {
         _serviceProvider = serviceProvider;
         _fChatService = fChatService;
         _logger = logger;
         _rateLimiter = rateLimiter;
         _hubContext = hubContext;
+        _profileQueueService = profileQueueService;
     }
 
     public async Task SaveProfileAsync(string userId, string characterName, string profileData, string? rawProData = null)
@@ -270,36 +273,33 @@ public class ProfileService : IProfileService
                     return characterProfile;
                 }
 
-                // If profile is stale (>= 6 hours)
+                // If profile is stale (>= 24 hours)
                 if (isStale)
                 {
-                    // Check if there's already a pending request to avoid duplicate requests
-                    var requestKey = $"{userId}:{characterName}";
-                    if (!_pendingRequests.ContainsKey(requestKey))
+                    // Check if there's already a request in the queue to avoid duplicates
+                    var isInQueue = await _profileQueueService.IsProfileRequestInQueueAsync(userId, characterName);
+                    
+                    if (!isInQueue)
                     {
-                        // Capture the service provider before starting the background task to avoid disposed scope issues
-                        var serviceProvider = scope.ServiceProvider;
+                        // Add stale profile to queue for background refresh
+                        var queued = await _profileQueueService.EnqueueProfileRequestAsync(
+                            userId, 
+                            characterName, 
+                            ProfileRequestType.StaleRefresh, 
+                            ProfileRequestPriority.Normal);
                         
-                        // Trigger a background refresh (fire and forget) - create new scope for background task
-                        _ = Task.Run(async () =>
+                        if (queued)
                         {
-                            try
-                            {
-                                _logger.LogInformation("Triggering background refresh for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
-                                // Create a new scope for the background task using the captured service provider
-                                using var backgroundScope = serviceProvider.CreateScope();
-                                var backgroundProfileService = backgroundScope.ServiceProvider.GetRequiredService<IProfileService>();
-                                await backgroundProfileService.RequestProfileAsync(userId, characterName);
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Failed to refresh stale profile for {CharacterName} (User: {UserId})", characterName, userId);
-                            }
-                        });
+                            _logger.LogInformation("Queued stale profile refresh for {CharacterName} (User: {UserId})", characterName, userId);
+                        }
+                        else
+                        {
+                            _logger.LogDebug("Stale profile refresh already queued for {CharacterName} (User: {UserId})", characterName, userId);
+                        }
                     }
                     else
                     {
-                        _logger.LogDebug("Background refresh already in progress for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
+                        _logger.LogDebug("Stale profile refresh already in queue for {CharacterName} (User: {UserId})", characterName, userId);
                     }
 
                     // Return stale data if allowed, otherwise return null
@@ -313,75 +313,36 @@ public class ProfileService : IProfileService
                 return characterProfile;
             }
 
-            // Fallback to legacy Profile table
-            var profile = await GetProfileAsync(userId, characterName);
-            if (profile == null)
+            // No profile found - queue a new profile request
+            _logger.LogInformation("No profile found for {CharacterName} (User: {UserId}), queuing new profile request", characterName, userId);
+            
+            // Check if there's already a request in the queue to avoid duplicates
+            var newRequestInQueue = await _profileQueueService.IsProfileRequestInQueueAsync(userId, characterName);
+            
+            if (!newRequestInQueue)
             {
-                _logger.LogDebug("No cached profile found for character {CharacterName} (User: {UserId})", characterName, userId);
-                return null;
-            }
-
-            var legacyAge = DateTime.UtcNow - profile.UpdatedAt;
-            var legacyIsStale = legacyAge.TotalHours >= 6;
-
-            _logger.LogDebug("Retrieved cached profile from legacy table for character {CharacterName} (User: {UserId}). Age: {Age:F1} hours, stale: {IsStale}",
-                characterName, userId, legacyAge.TotalHours, legacyIsStale);
-
-            // Try to deserialize the profile data
-            var profileData = JsonSerializer.Deserialize<ProfileData>(profile.ProfileData);
-            if (profileData == null)
-            {
-                _logger.LogDebug("No structured profile data found for character {CharacterName} (User: {UserId})", characterName, userId);
-                return null;
-            }
-
-            // If profile is fresh (< 6 hours), return it immediately
-            if (!legacyIsStale)
-            {
-                _logger.LogDebug("Returning fresh cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
-                return profileData;
-            }
-
-            // If profile is stale (>= 6 hours)
-            if (legacyIsStale)
-            {
-                // Check if there's already a pending request to avoid duplicate requests
-                var requestKey = $"{userId}:{characterName}";
-                if (!_pendingRequests.ContainsKey(requestKey))
+                // Add new profile request to queue
+                var newRequestQueued = await _profileQueueService.EnqueueProfileRequestAsync(
+                    userId, 
+                    characterName, 
+                    ProfileRequestType.InitialLoad, 
+                    ProfileRequestPriority.High);
+                
+                if (newRequestQueued)
                 {
-                    // Capture the service provider before starting the background task to avoid disposed scope issues
-                    var serviceProvider = scope.ServiceProvider;
-                    
-                    // Trigger a background refresh (fire and forget) - create new scope for background task
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            _logger.LogInformation("Triggering background refresh for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
-                            // Create a new scope for the background task using the captured service provider
-                            using var backgroundScope = serviceProvider.CreateScope();
-                            var backgroundProfileService = backgroundScope.ServiceProvider.GetRequiredService<IProfileService>();
-                            await backgroundProfileService.RequestProfileAsync(userId, characterName);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Failed to refresh stale profile for {CharacterName} (User: {UserId})", characterName, userId);
-                        }
-                    });
+                    _logger.LogInformation("Queued new profile request for {CharacterName} (User: {UserId})", characterName, userId);
                 }
                 else
                 {
-                    _logger.LogDebug("Background refresh already in progress for stale profile: {CharacterName} (User: {UserId})", characterName, userId);
-                }
-
-                // Return stale data if allowed, otherwise return null
-                if (allowStale)
-                {
-                    _logger.LogDebug("Returning stale cached profile for character {CharacterName} (User: {UserId})", characterName, userId);
-                    return profileData;
+                    _logger.LogDebug("Profile request already queued for {CharacterName} (User: {UserId})", characterName, userId);
                 }
             }
+            else
+            {
+                _logger.LogDebug("Profile request already in queue for {CharacterName} (User: {UserId})", characterName, userId);
+            }
 
+            // Failed to get profile from CharacterService, try legacy Profile table
             return null;
         }
         catch (Exception ex)
@@ -392,6 +353,28 @@ public class ProfileService : IProfileService
     }
 
     public async Task RequestProfileAsync(string userId, string characterName)
+    {
+        // For manual requests, add to queue with high priority
+        var queued = await _profileQueueService.EnqueueProfileRequestAsync(
+            userId, 
+            characterName, 
+            ProfileRequestType.ManualRequest, 
+            ProfileRequestPriority.High);
+        
+        if (!queued)
+        {
+            _logger.LogDebug("Profile request already queued for {CharacterName} (User: {UserId})", characterName, userId);
+        }
+        else
+        {
+            _logger.LogInformation("Queued manual profile request for {CharacterName} (User: {UserId})", characterName, userId);
+        }
+    }
+
+    /// <summary>
+    /// Process a profile request from the queue (called by ProfileQueueProcessor)
+    /// </summary>
+    public async Task ProcessProfileRequestAsync(string userId, string characterName)
     {
         var requestKey = $"{userId}:{characterName}";
         
@@ -423,7 +406,7 @@ public class ProfileService : IProfileService
                 throw new InvalidOperationException($"Rate limited. Next request allowed in {timeUntilNext.TotalSeconds:F0} seconds.");
             }
 
-            _logger.LogInformation("Requesting profile for character {CharacterName} (User: {UserId})", characterName, userId);
+            _logger.LogInformation("Processing profile request for character {CharacterName} (User: {UserId})", characterName, userId);
 
             // Record the request for rate limiting
             _rateLimiter.RecordRequest(userId, characterName);
@@ -459,7 +442,7 @@ public class ProfileService : IProfileService
         {
             // Make sure to remove from pending requests on error
             _pendingRequests.TryRemove(requestKey, out _);
-            _logger.LogError(ex, "Failed to request profile for character {CharacterName} (User: {UserId})", characterName, userId);
+            _logger.LogError(ex, "Failed to process profile request for character {CharacterName} (User: {UserId})", characterName, userId);
             throw;
         }
     }

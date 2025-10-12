@@ -289,6 +289,10 @@ builder.Services.AddSingleton<IFChatService, FChatService>();
 builder.Services.AddSingleton<IProfileRateLimiter, ProfileRateLimiter>();
 builder.Services.AddSingleton<TicketManager>();
 
+// Profile Queue Services
+builder.Services.AddScoped<IProfileQueueService, ProfileQueueService>();
+builder.Services.AddHostedService<ProfileQueueProcessor>();
+
 // HTTP Client for external API calls
 builder.Services.AddHttpClient<MemoService>();
 builder.Services.AddHttpClient<FListMappingService>();

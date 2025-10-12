@@ -11,6 +11,7 @@ public interface IProfileService
     Task<ProfileData?> GetCachedProfileAsync(string userId, string characterName, bool allowStale = false);
     Task<List<Profile>> GetUserProfilesAsync(string userId);
     Task RequestProfileAsync(string userId, string characterName);
+    Task ProcessProfileRequestAsync(string userId, string characterName);
     Task<ProfileData?> GetCharacterDataAsync(string userId, string characterName);
     Task NotifyProfileAvailableAsync(string userId, string characterName);
 }

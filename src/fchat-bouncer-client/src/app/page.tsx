@@ -99,7 +99,18 @@ export default function Home() {
       alert('Your session has expired. Please log in again.');
     };
 
+    // Set up SignalR unauthorized listener
+    const handleSignalRUnauthorized = (event: CustomEvent) => {
+      console.log('SignalR authentication failed:', event.detail?.message);
+      // The credentials and auth have already been cleared by SignalR service
+      // Just show the error message to the user
+      alert(event.detail?.message || 'Your session has expired. Please log in again.');
+      // Reset the auto-login attempt flag so user can try again
+      hasAttemptedAutoLoginRef.current = false;
+    };
+
     window.addEventListener('auth:token-expired', handleTokenExpired);
+    window.addEventListener('auth:signalr-unauthorized', handleSignalRUnauthorized as EventListener);
 
     // Set up character restoration listener
     signalRService.onCharacterRestored(async (data) => {
@@ -237,8 +248,9 @@ export default function Home() {
       signalRService.removeListener('CharacterJoinedChannel');
       signalRService.removeListener('ReceiveActiveCharacters');
       
-      // Cleanup token expiration listener
+      // Cleanup auth event listeners
       window.removeEventListener('auth:token-expired', handleTokenExpired);
+      window.removeEventListener('auth:signalr-unauthorized', handleSignalRUnauthorized as EventListener);
     };
   }, [setToken, setActiveCharacter, addConnection, setChannelsSelected, setSelectedChannels]);
 
