@@ -1370,31 +1370,53 @@ export const useChatStore = create<ChatStore>()(
         const storedMessages = state.characterMessages[characterName] || [];
         const channelMessages = storedMessages.filter(m => m.channel === channelId);
         
-        // If we have very few messages locally, try to load more from backend
-        if (channelMessages.length < 50) {
-          console.log(`Only ${channelMessages.length} messages stored locally for ${channelId}, attempting to load more from backend`);
+        console.log(`checkAndLoadMissingMessages: ${channelMessages.length} messages stored locally for ${characterName}:${channelId}`);
+        
+        try {
+          // Import signalr connection
+          const { signalRService } = await import('@/lib/signalr');
           
-          try {
-            // Import signalr connection
-            const { signalRService } = await import('@/lib/signalr');
-            
-            if (!signalRService.isConnected) {
-              console.log('SignalR not connected, skipping backend fetch');
-              return;
-            }
-
-            // Request recent messages from backend
-            const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // Last 7 days
-            const limit = 100; // Load up to 100 messages
-            
-            console.log('Requesting recent messages from backend:', { channelId, since, limit });
-            
-            // This will trigger the message loading via SignalR
-            await signalRService.requestHistory(channelId, since, limit);
-            
-          } catch (error) {
-            console.error('Failed to load missing messages from backend:', error);
+          if (!signalRService.isConnected) {
+            console.log('SignalR not connected, skipping backend fetch');
+            return;
           }
+
+          // Case 1: No messages locally - request the latest 100 messages
+          if (channelMessages.length === 0) {
+            console.log(`No messages for ${channelId}, requesting latest 100 messages from backend`);
+            
+            // Request messages before 'now' to get the most recent ones
+            const now = new Date();
+            const limit = 100;
+            
+            console.log('Requesting latest messages from backend:', { channelId, since: now, limit });
+            await signalRService.requestHistory(channelId, now, limit);
+            
+          } 
+          // Case 2: Very few messages locally - request more history
+          else if (channelMessages.length < 50) {
+            console.log(`Only ${channelMessages.length} messages stored locally for ${channelId}, attempting to load more from backend`);
+            
+            // Sort messages to find the oldest one
+            const sortedMessages = [...channelMessages].sort((a, b) => 
+              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+            );
+            const oldestMessage = sortedMessages[0];
+            
+            // Request messages before the oldest message we have
+            const since = new Date(oldestMessage.timestamp);
+            const limit = 100;
+            
+            console.log('Requesting older messages from backend:', { channelId, since, limit });
+            await signalRService.requestHistory(channelId, since, limit);
+          }
+          // Case 3: We have enough messages, no need to load more automatically
+          else {
+            console.log(`${channelMessages.length} messages available for ${channelId}, no automatic load needed`);
+          }
+          
+        } catch (error) {
+          console.error('Failed to load missing messages from backend:', error);
         }
       },
 

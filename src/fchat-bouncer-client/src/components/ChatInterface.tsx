@@ -36,7 +36,7 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterIndexedDBStore();
-  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingState, characterTypingStates, clearAllUnreadCountsForCharacter, setFocusedChannel } = useChatStore();
+  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingState, characterTypingStates, clearAllUnreadCountsForCharacter, setFocusedChannel, checkAndLoadMissingMessages } = useChatStore();
   
   // Initialize notifications
   const { 
@@ -391,6 +391,18 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       setSelectedChannel(currentSelectedChannels[0]);
     }
   }, [selectedChannel, currentSelectedChannels]);
+
+  // Effect to load messages when switching to a new channel
+  useEffect(() => {
+    if (selectedChannel && activeCharacter) {
+      console.log(`Channel selected: ${selectedChannel} for character: ${activeCharacter}`);
+      
+      // Check and load missing messages for this channel
+      checkAndLoadMissingMessages(activeCharacter, selectedChannel).catch(error => {
+        console.error(`Failed to check/load messages for ${selectedChannel}:`, error);
+      });
+    }
+  }, [selectedChannel, activeCharacter, checkAndLoadMissingMessages]);
 
   // Separate effect for ActiveCharacterSwitched listener (only runs once)
   useEffect(() => {
