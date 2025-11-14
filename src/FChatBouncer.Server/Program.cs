@@ -1,6 +1,12 @@
 using System.Collections.Generic;
+using FChatBouncer.Server.Configuration;
 using FChatBouncer.Server.Data;
+using FChatBouncer.Server.BackgroundServices;
+using FChatBouncer.Server.HealthChecks;
 using FChatBouncer.Server.Hubs;
+using FChatBouncer.Server.Infrastructure;
+using FChatBouncer.Server.Middleware;
+using FChatBouncer.Server.MessageQueue;
 using FChatBouncer.Server.Models;
 using FChatBouncer.Server.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -9,25 +15,29 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
+using Serilog.Events;
+using StackExchange.Redis;
 using System.Security.Claims;
 using System.Text;
+using Prometheus;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure Serilog
+// Configure Serilog with enhanced logging
 builder.Host.UseSerilog((context, config) =>
 {
     config
         .ReadFrom.Configuration(context.Configuration)
-        .WriteTo.Console(restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning)
-        .WriteTo.File(
-            path: "logs/fchat-bouncer-.log",
-            rollingInterval: RollingInterval.Day,
-            retainedFileCountLimit: 7,
-            fileSizeLimitBytes: 100_000_000,
-            rollOnFileSizeLimit: true,
-            restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Information
-        );
+        .Enrich.FromLogContext()
+        .Enrich.WithMachineName()
+        .Enrich.WithEnvironmentName()
+        .Enrich.WithThreadId()
+        .Enrich.WithProcessId()
+        .Enrich.WithProperty("Application", "FChatBouncer")
+        .Enrich.WithProperty("Version", typeof(Program).Assembly.GetName().Version?.ToString() ?? "Unknown");
+    
+    // Note: WriteTo configuration is now handled in appsettings.json for better control
+    // This allows different log levels per sink (Console vs File) without code changes
 });
 
 // Add services to the container
@@ -103,6 +113,28 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
         options.EnableSensitiveDataLogging();
         options.EnableDetailedErrors();
     }
+});
+
+// Redis Configuration (supports Railway/production environment variables)
+var redisSettingsSnapshot = RedisEnvironmentConfiguration.CreateFromConfiguration(builder.Configuration);
+
+builder.Services.Configure<RedisSettings>(builder.Configuration.GetSection("Redis"));
+builder.Services.PostConfigure<RedisSettings>(RedisEnvironmentConfiguration.ApplyEnvironmentOverrides);
+builder.Services.Configure<MessageQueueOptions>(builder.Configuration.GetSection("MessageQueue"));
+builder.Services.AddSingleton<IRedisConnectionFactory, RedisConnectionFactory>();
+builder.Services.AddSingleton<IMessageQueue, RedisStreamMessageQueue>();
+
+// Register IConnectionMultiplexer for services that need direct Redis access
+builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
+{
+    var factory = sp.GetRequiredService<IRedisConnectionFactory>();
+    return factory.GetConnection();
+});
+
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = redisSettingsSnapshot.ConnectionString;
+    options.InstanceName = redisSettingsSnapshot.InstanceName ?? "FChatBouncer:";
 });
 
 // Identity
@@ -279,12 +311,23 @@ builder.Services.Configure<CookiePolicyOptions>(options =>
 });
 
 
+// Security Services
+builder.Services.AddSingleton<IEncryptionService, EncryptionService>();
+builder.Services.AddSingleton<ISecretsService, SecretsService>();
+builder.Services.AddSingleton<ITokenBlacklistService, RedisTokenBlacklistService>();
+
+// Rate Limiting
+builder.Services.AddRateLimitingPolicies();
+builder.Services.AddSingleton<SignalRRateLimiter>();
+
 // Custom Services
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IMessageService, MessageService>();
+builder.Services.AddScoped<IMessageQueueService, MessageQueueService>();
 builder.Services.AddScoped<IProfileService, ProfileService>();
 builder.Services.AddScoped<ICharacterService, CharacterService>();
 builder.Services.AddScoped<IMemoService, MemoService>();
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddSingleton<IFChatService, FChatService>();
 builder.Services.AddSingleton<IProfileRateLimiter, ProfileRateLimiter>();
 builder.Services.AddSingleton<TicketManager>();
@@ -292,6 +335,13 @@ builder.Services.AddSingleton<TicketManager>();
 // Profile Queue Services
 builder.Services.AddScoped<IProfileQueueService, ProfileQueueService>();
 builder.Services.AddHostedService<ProfileQueueProcessor>();
+
+// Background Services
+builder.Services.AddHostedService<MetricsCollectionService>();
+builder.Services.AddHostedService<AuditLogCleanupService>();
+builder.Services.AddHostedService<StreamRetentionService>();
+builder.Services.AddHostedService<StreamMonitoringService>();
+builder.Services.AddHostedService<PendingEntryListProcessor>();
 
 // HTTP Client for external API calls
 builder.Services.AddHttpClient<MemoService>();
@@ -376,7 +426,10 @@ builder.Services.AddHealthChecks()
         {
             return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy($"Database connection failed: {ex.Message}", ex);
         }
-    });
+    })
+    .AddCheck<RedisHealthCheck>("redis")
+    .AddCheck<FChatWebSocketHealthCheck>("fchat_websocket")
+    .AddCheck<FListApiHealthCheck>("flist_api");
 
 // Add Swagger for development
 if (builder.Environment.IsDevelopment())
@@ -395,15 +448,33 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Add correlation ID middleware early in the pipeline
+app.UseCorrelationId();
+
+// Enable Prometheus metrics collection (before UseRouting for accurate metrics)
+app.UseHttpMetrics();
+
 app.UseCors("AllowClient");
 app.UseRouting();
+
+// Rate limiting (after routing, before authentication)
+app.UseRateLimiter();
+app.UseRateLimitHeaders();
+
 app.UseCookiePolicy();
 app.UseSession();
 app.UseAuthentication();
+
+// Token blacklist check (after authentication, before authorization)
+app.UseTokenBlacklist();
+
 app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<BouncerHub>("/bouncerHub");
+
+// Add Prometheus metrics endpoint
+app.MapMetrics();
 
 // Add health check endpoint
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions

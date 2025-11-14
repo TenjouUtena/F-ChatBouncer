@@ -1,9 +1,12 @@
 using FChatBouncer.Server.Models;
 using FChatBouncer.Server.Services;
+using FChatBouncer.Server.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
@@ -21,22 +24,32 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly ILogger<AuthController> _logger;
     private readonly SignInManager<BouncerUser> _signInManager;
+    private readonly IEncryptionService _encryptionService;
+    private readonly ITokenBlacklistService _tokenBlacklistService;
+    private readonly IAuditLogService _auditLogService;
 
     public AuthController(
         UserManager<BouncerUser> userManager,
         IUserService userService,
         IConfiguration configuration,
         ILogger<AuthController> logger,
-        SignInManager<BouncerUser> signInManager)
+        SignInManager<BouncerUser> signInManager,
+        IEncryptionService encryptionService,
+        ITokenBlacklistService tokenBlacklistService,
+        IAuditLogService auditLogService)
     {
         _userManager = userManager;
         _userService = userService;
         _configuration = configuration;
         _logger = logger;
         _signInManager = signInManager;
+        _encryptionService = encryptionService;
+        _tokenBlacklistService = tokenBlacklistService;
+        _auditLogService = auditLogService;
     }
 
     [HttpPost("login")]
+    [EnableRateLimiting(RateLimitPolicies.Authentication)]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
     {
         try
@@ -83,6 +96,21 @@ public class AuthController : ControllerBase
 
             var token = GenerateJwtToken(user);
             var refreshToken = await GenerateRefreshTokenAsync(user);
+            
+            // Audit log successful login
+            await _auditLogService.LogAsync(
+                AuditEventType.Login,
+                AuditEventCategory.Authentication,
+                $"User {user.UserName} logged in successfully",
+                true,
+                user.Id,
+                "User",
+                user.Id,
+                null,
+                null,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                HttpContext.Request.Headers.UserAgent.ToString(),
+                HttpContext.Items["CorrelationId"]?.ToString());
 
             return Ok(new LoginResponse
             {
@@ -109,6 +137,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("register")]
+    [EnableRateLimiting(RateLimitPolicies.Registration)]
     public async Task<ActionResult<LoginResponse>> Register([FromBody] LoginRequest request)
     {
         try
@@ -333,6 +362,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("refresh")]
+    [EnableRateLimiting(RateLimitPolicies.TokenRefresh)]
     public async Task<ActionResult<RefreshResponse>> Refresh([FromBody] RefreshRequest request)
     {
         try
@@ -369,6 +399,73 @@ public class AuthController : ControllerBase
         {
             _logger.LogError(ex, "Token refresh failed for user {UserId}", request.UserId);
             return StatusCode(500, new { message = "Token refresh failed" });
+        }
+    }
+
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<ActionResult> Logout()
+    {
+        try
+        {
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId == null)
+            {
+                return Unauthorized();
+            }
+
+            // Extract JTI claim from current token
+            var jtiClaim = User.FindFirst(JwtRegisteredClaimNames.Jti);
+            if (jtiClaim == null)
+            {
+                _logger.LogWarning("Logout called but no JTI claim found for user {UserId}", userId);
+                return BadRequest(new { message = "Invalid token" });
+            }
+
+            var tokenJti = jtiClaim.Value;
+
+            // Extract expiration claim to set Redis TTL
+            var expClaim = User.FindFirst(JwtRegisteredClaimNames.Exp);
+            DateTime expiresAt;
+            
+            if (expClaim != null && long.TryParse(expClaim.Value, out var exp))
+            {
+                // Convert Unix timestamp to DateTime
+                expiresAt = DateTimeOffset.FromUnixTimeSeconds(exp).UtcDateTime;
+            }
+            else
+            {
+                // Default to 1 hour from now if we can't determine expiration
+                expiresAt = DateTime.UtcNow.AddHours(1);
+                _logger.LogWarning("Could not determine token expiration for user {UserId}, using default TTL", userId);
+            }
+
+            // Add token to blacklist
+            await _tokenBlacklistService.BlacklistTokenAsync(tokenJti, expiresAt);
+
+            _logger.LogInformation("User {UserId} logged out successfully, token {TokenJti} blacklisted", userId, tokenJti);
+            
+            // Audit log logout
+            await _auditLogService.LogAsync(
+                AuditEventType.Logout,
+                AuditEventCategory.Authentication,
+                "User logged out successfully",
+                true,
+                userId,
+                "User",
+                userId,
+                null,
+                null,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                HttpContext.Request.Headers.UserAgent.ToString(),
+                HttpContext.Items["CorrelationId"]?.ToString());
+
+            return Ok(new { message = "Logged out successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Logout failed for user {UserId}", User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+            return StatusCode(500, new { message = "Logout failed" });
         }
     }
 
@@ -421,15 +518,26 @@ public class AuthController : ControllerBase
 
     private async Task UpdateFChatCredentials(BouncerUser user, string fchatUsername, string fchatPassword)
     {
-        var settings = await _userService.GetUserSettingsAsync(user.Id) ?? new UserSettings { UserId = user.Id };
-        var credentials = $"{fchatUsername}:{fchatPassword}";
-        settings.FChatCredentialsEncrypted = Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials));
-        await _userService.UpdateUserSettingsAsync(user.Id, settings);
-        
-        // Update user flags
-        user.HasFChatCredentials = true;
-        user.LastFChatCredentialsUpdate = DateTime.UtcNow;
-        await _userManager.UpdateAsync(user);
+        try
+        {
+            var settings = await _userService.GetUserSettingsAsync(user.Id) ?? new UserSettings { UserId = user.Id };
+            
+            // Use AES-256-GCM encryption instead of Base64
+            settings.FChatCredentialsEncrypted = _encryptionService.EncryptCredentials(fchatUsername, fchatPassword);
+            await _userService.UpdateUserSettingsAsync(user.Id, settings);
+            
+            // Update user flags
+            user.HasFChatCredentials = true;
+            user.LastFChatCredentialsUpdate = DateTime.UtcNow;
+            await _userManager.UpdateAsync(user);
+            
+            _logger.LogInformation("Updated F-Chat credentials for user {UserId}", user.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to encrypt F-Chat credentials for user {UserId}", user.Id);
+            throw;
+        }
     }
 }
 

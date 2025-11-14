@@ -2857,7 +2857,10 @@ public class FChatWebSocketClient : IDisposable
                 _logger.LogInformation("Parsed {FriendCount} total friends from FRL response", allFriends.Count);
                 
                 // Fire event with complete friends list
+                _logger.LogInformation("About to invoke FriendsListReceived event. Event has {SubscriberCount} subscribers", 
+                    FriendsListReceived?.GetInvocationList().Length ?? 0);
                 FriendsListReceived?.Invoke(allFriends);
+                _logger.LogInformation("FriendsListReceived event invoked");
             }
             else if (data.TryGetProperty("count", out var countElement))
             {

@@ -57,13 +57,30 @@ export default function ChannelSelection({
       setIsLoading(false);
     });
 
-    // Request channel list when component mounts, but wait for SignalR to be ready
+    // Request channel list when component mounts, but wait for SignalR to be ready AND active character to be set
     const requestChannelsWhenReady = async () => {
-      if (signalRService.isConnected) {
-        await handleGetChannels();
-      } else {
+      if (!signalRService.isConnected) {
         // Wait a bit and try again
         setTimeout(requestChannelsWhenReady, 500);
+        return;
+      }
+      
+      if (!activeCharacter) {
+        // No active character yet, wait and try again
+        console.log('ChannelSelection: Waiting for active character to be set...');
+        setTimeout(requestChannelsWhenReady, 500);
+        return;
+      }
+      
+      // Ensure backend has the active character set before requesting channels
+      try {
+        console.log('ChannelSelection: Ensuring backend active character is set to:', activeCharacter);
+        await signalRService.setActiveCharacter(activeCharacter);
+        console.log('ChannelSelection: Active character set on backend, requesting channels...');
+        await handleGetChannels();
+      } catch (error) {
+        console.error('ChannelSelection: Failed to set active character or get channels:', error);
+        setError('Failed to initialize channel list. Please try again.');
       }
     };
     
@@ -77,7 +94,7 @@ export default function ChannelSelection({
         signalRService.connection.off('ChannelListError');
       }
     };
-  }, [signalRService.connectionState, signalRService.connection?.connectionId]);
+  }, [signalRService.connectionState, signalRService.connection?.connectionId, activeCharacter]);
 
   const handleGetChannels = async () => {
     setIsLoading(true);

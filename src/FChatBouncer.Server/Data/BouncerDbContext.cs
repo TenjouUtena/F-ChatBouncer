@@ -15,7 +15,7 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
     public DbSet<Message> Messages { get; set; }
     public DbSet<Channel> Channels { get; set; }
     public DbSet<QueuedMessage> QueuedMessages { get; set; }
-    public DbSet<Profile> Profiles { get; set; }
+    // Profile DbSet removed - data migrated to Character.StructuredProfileData
     
     // New unified character models
     public DbSet<Character> Characters { get; set; }
@@ -24,6 +24,9 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
     
     // Profile queue models
     public DbSet<ProfileQueueItem> ProfileQueueItems { get; set; }
+    
+    // Audit log models
+    public DbSet<AuditLog> AuditLogs { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -59,11 +62,7 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
             .WithMany(u => u.QueuedMessages)
             .HasForeignKey(qm => qm.UserId);
 
-        // Profile relationship
-        builder.Entity<Profile>()
-            .HasOne(p => p.User)
-            .WithMany(u => u.Profiles)
-            .HasForeignKey(p => p.UserId);
+        // Profile relationship removed - data migrated to Character model
 
         // Character relationships
         builder.Entity<Character>()
@@ -146,5 +145,29 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
         builder.Entity<ProfileQueueItem>()
             .HasIndex(q => q.UpdatedAt)
             .HasDatabaseName("IX_ProfileQueueItems_UpdatedAt");
+        
+        // AuditLog indexes
+        builder.Entity<AuditLog>()
+            .HasIndex(al => new { al.UserId, al.Timestamp })
+            .HasDatabaseName("IX_AuditLogs_User_Timestamp");
+        
+        builder.Entity<AuditLog>()
+            .HasIndex(al => new { al.EventType, al.Timestamp })
+            .HasDatabaseName("IX_AuditLogs_EventType_Timestamp");
+        
+        builder.Entity<AuditLog>()
+            .HasIndex(al => al.Timestamp)
+            .HasDatabaseName("IX_AuditLogs_Timestamp");
+        
+        builder.Entity<AuditLog>()
+            .HasIndex(al => al.CorrelationId)
+            .HasDatabaseName("IX_AuditLogs_CorrelationId");
+        
+        // AuditLog relationship
+        builder.Entity<AuditLog>()
+            .HasOne(al => al.User)
+            .WithMany()
+            .HasForeignKey(al => al.UserId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }

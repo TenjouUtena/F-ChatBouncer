@@ -1,4 +1,5 @@
 using FChatBouncer.Server.Services;
+using FChatBouncer.Server.MessageQueue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Security.Claims;
@@ -13,28 +14,36 @@ public class BouncerHub : Hub
 {
     private readonly IUserService _userService;
     private readonly IMessageService _messageService;
+    private readonly IMessageQueueService _messageQueueService;
     private readonly IFChatService _fChatService;
     private readonly IProfileService _profileService;
     private readonly TicketManager _ticketManager;
     private readonly ILogger<BouncerHub> _logger;
+    private readonly IEncryptionService _encryptionService;
     
     // Store pending credential requests
     private static readonly Dictionary<string, CredentialRequest> _pendingCredentialRequests = new();
+    private const string AgentIdContextKey = "MessageQueueAgentId";
+    private const string AgentIdGeneratedKey = "MessageQueueAgentIdGenerated";
 
     public BouncerHub(
         IUserService userService,
         IMessageService messageService,
+        IMessageQueueService messageQueueService,
         IFChatService fChatService,
         IProfileService profileService,
         TicketManager ticketManager,
-        ILogger<BouncerHub> logger)
+        ILogger<BouncerHub> logger,
+        IEncryptionService encryptionService)
     {
         _userService = userService;
         _messageService = messageService;
+        _messageQueueService = messageQueueService;
         _fChatService = fChatService;
         _profileService = profileService;
         _ticketManager = ticketManager;
         _logger = logger;
+        _encryptionService = encryptionService;
     }
 
     public override async Task OnConnectedAsync()
@@ -44,6 +53,9 @@ public class BouncerHub : Hub
         
         if (userId != null)
         {
+            var agentId = EnsureAgentId();
+            await Clients.Caller.SendAsync("AgentRegistered", new { AgentId = agentId });
+
             _logger.LogInformation("User {UserId} connected to bouncer hub", userId);
 
             // Add to user group for targeted messaging
@@ -52,58 +64,56 @@ public class BouncerHub : Hub
             // Clean up any invalid character connections first
             await _fChatService.CleanupInvalidCharactersAsync(userId);
 
-            // Check if user is already connected to F-Chat (bouncer pattern)
-            var isAlreadyConnected = await _fChatService.IsUserConnectedAsync(userId);
-            _logger.LogInformation("User {UserId} connection check: Already connected to F-Chat = {IsConnected}", userId, isAlreadyConnected);
-
-            if (isAlreadyConnected)
+            // Check if user has an active character (multi-character model)
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            bool isAlreadyConnected = false;
+            
+            if (activeCharacter != null)
             {
-                _logger.LogInformation("User {UserId} reconnecting to existing F-Chat connection (bouncer mode), will reuse WebSocket connection", userId);
+                isAlreadyConnected = await _fChatService.IsCharacterConnectedAsync(userId, activeCharacter);
+            }
+            
+            _logger.LogInformation("User {UserId} connection check: Active character = {ActiveCharacter}, Connected = {IsConnected}", 
+                userId, activeCharacter ?? "None", isAlreadyConnected);
+
+            if (isAlreadyConnected && activeCharacter != null)
+            {
+                _logger.LogInformation("User {UserId} reconnecting to existing F-Chat connection for character {ActiveCharacter} (bouncer mode)", 
+                    userId, activeCharacter);
 
                 // Get current state from existing connection
-                var selectedCharacter = await _fChatService.GetSelectedCharacterAsync(userId);
-                var joinedChannelDetails = await _fChatService.GetJoinedChannelDetailsAsync(userId);
+                var joinedChannelDetails = await _fChatService.GetJoinedChannelDetailsAsync(userId, activeCharacter);
 
-                if (selectedCharacter != null)
-                {
-                    // Send recent messages for all joined channels
-                    await SendRecentMessages(userId);
+                // Send recent messages for all joined channels
+                await SendRecentMessages(userId);
 
-                    // Notify bouncer reconnection with full state
-                    await Clients.Caller.SendAsync("BouncerReconnected", new
-                    {
-                        Character = new
-                        {
-                            selectedCharacter.Name,
-                            selectedCharacter.Status,
-                            selectedCharacter.StatusMessage,
-                            selectedCharacter.Gender
-                        },
-                        JoinedChannels = joinedChannelDetails.Select(c => new
-                        {
-                            c.Id,
-                            c.Name,
-                            c.Title,
-                            c.UserCount,
-                            Mode = c.Mode.ToString()
-                        }).ToArray(),
-                        Message = "Reconnected to existing F-Chat session"
-                    });
-                }
-                else
+                // Get character info from database/connections
+                var characterConnection = await _fChatService.GetCharacterConnectionAsync(userId, activeCharacter);
+
+                // Notify bouncer reconnection with full state
+                await Clients.Caller.SendAsync("BouncerReconnected", new
                 {
-                    // F-Chat connected but no character selected yet
-                    await Clients.Caller.SendAsync("BouncerReconnected", new
+                    Character = new
                     {
-                        Character = (object?)null,
-                        JoinedChannels = Array.Empty<string>(),
-                        Message = "Reconnected to F-Chat, please select character"
-                    });
-                }
+                        Name = activeCharacter,
+                        Status = characterConnection?.Character.Status ?? "online",
+                        StatusMessage = characterConnection?.Character.StatusMessage,
+                        Gender = characterConnection?.Character.Gender ?? "None"
+                    },
+                    JoinedChannels = joinedChannelDetails.Select(c => new
+                    {
+                        c.Id,
+                        c.Name,
+                        c.Title,
+                        c.UserCount,
+                        Mode = c.Mode.ToString()
+                    }).ToArray(),
+                    Message = "Reconnected to existing F-Chat session"
+                });
             }
             else
             {
-                _logger.LogInformation("User {UserId} connecting for first time, waiting for character selection", userId);
+                _logger.LogInformation("User {UserId} connecting for first time or no active character, waiting for character selection", userId);
 
                 // Fresh connection - don't initialize F-Chat automatically
                 // Let the user select a character first, then create the connection
@@ -133,6 +143,7 @@ public class BouncerHub : Hub
         await base.OnConnectedAsync();
     }
 
+    [Obsolete("Legacy single-character initialization - use character-specific connection instead")]
     private async Task InitializeFChatConnection(string userId)
     {
         try
@@ -140,15 +151,23 @@ public class BouncerHub : Hub
             var settings = await _userService.GetUserSettingsAsync(userId);
             if (settings?.FChatCredentialsEncrypted != null)
             {
-                // Decode F-Chat credentials (this is a simplified version - should use proper encryption)
-                var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-                var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-                var parts = credentials.Split(':');
-
-                if (parts.Length == 2)
+                // Decrypt F-Chat credentials using AES-256-GCM
+                try
                 {
-                    await _fChatService.ConnectUserAsync(userId, parts[0], parts[1]);
-                    _logger.LogInformation("F-Chat connection initiated for user {UserId}", userId);
+                    (string username, string password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+                    
+                    // Note: This is legacy - should use ConnectCharacterAsync with specific character name
+                    _logger.LogWarning("Using legacy InitializeFChatConnection for user {UserId} - should migrate to character-specific connection", userId);
+                    // Fallback to first available character or "default"
+                    var connections = await _fChatService.GetUserCharacterConnectionsAsync(userId);
+                    var characterName = connections.FirstOrDefault()?.Character.Name ?? "default";
+                    await _fChatService.ConnectCharacterAsync(userId, characterName, username, password);
+                    _logger.LogInformation("F-Chat connection initiated for user {UserId}, character {CharacterName}", userId, characterName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
+                    await Clients.Caller.SendAsync("CredentialDecryptionFailed", "Please re-enter your F-Chat credentials for security improvements");
                 }
             }
         }
@@ -187,26 +206,11 @@ public class BouncerHub : Hub
 
         try
         {
+            // Use the parameterless overload which will:
+            // 1. Try active character connections
+            // 2. Fall back to database connections
+            // 3. Fall back to F-List API with stored credentials (gets ticket and character list)
             var characters = await _fChatService.GetCharactersAsync(userId);
-
-            // If no characters found, try to refresh the connection and try again
-            if (characters.Count == 0)
-            {
-                _logger.LogInformation("No characters found for user {UserId}, attempting to refresh connection", userId);
-                
-                // Try to refresh the user's F-Chat connection
-                await _fChatService.RefreshUserConnectionAsync(userId);
-                
-                // Try getting characters again after refresh
-                characters = await _fChatService.GetCharactersAsync(userId);
-            }
-
-            if (characters.Count == 0)
-            {
-                _logger.LogInformation("No characters found for user {UserId} even after refresh, returning empty list", userId);
-                await Clients.Caller.SendAsync("ReceiveCharacters", new List<object>());
-                return;
-            }
 
             _logger.LogInformation("Returning {Count} characters for user {UserId}", characters.Count, userId);
             await Clients.Caller.SendAsync("ReceiveCharacters", characters.Select(c => new
@@ -224,69 +228,63 @@ public class BouncerHub : Hub
         }
     }
 
+    [Obsolete("Legacy method - migrate frontend to use SetActiveCharacter or character-specific connection methods")]
     public async Task SelectCharacter(string characterName)
     {
         var userId = Context.UserIdentifier;
         if (userId == null) return;
 
+        _logger.LogWarning("User {UserId} using legacy SelectCharacter method - should migrate to SetActiveCharacter", userId);
         _logger.LogInformation("User {UserId} selecting character {CharacterName}", userId, characterName);
 
         try
         {
-            // Check if user is already connected to F-Chat with a healthy connection
-            var isConnected = await _fChatService.IsUserConnectedAsync(userId);
-            _logger.LogInformation("User {UserId} connection check: IsUserConnectedAsync = {IsConnected}", userId, isConnected);
+            // Check if character is already connected
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            bool isConnected = false;
+            
+            if (activeCharacter == characterName)
+            {
+                isConnected = await _fChatService.IsCharacterConnectedAsync(userId, characterName);
+            }
+            
+            _logger.LogInformation("User {UserId} connection check: Active={ActiveCharacter}, Requested={RequestedCharacter}, Connected={IsConnected}", 
+                userId, activeCharacter ?? "None", characterName, isConnected);
             
             if (isConnected)
             {
-                _logger.LogInformation("User {UserId} has existing F-Chat connection, checking if character can be reused", userId);
-
-                // Get the currently selected character on the existing connection
-                var currentCharacter = await _fChatService.GetSelectedCharacterAsync(userId);
-
-                if (currentCharacter?.Name == characterName)
-                {
-                    _logger.LogInformation("User {UserId} already connected as character {CharacterName}, reusing existing connection", userId, characterName);
-                    // Character matches, we can reuse the connection as-is
-                }
-                else
-                {
-                    _logger.LogInformation("User {UserId} connected as {CurrentCharacter} but needs {NewCharacter}, creating new connection",
-                        userId, currentCharacter?.Name ?? "unknown", characterName);
-
-                    // Different character needed, must disconnect and create new connection
-                    await _fChatService.DisconnectUserAsync(userId);
-
-                    // Create new character connection using ConnectCharacterAsync
-                    // Request credentials from client for character connection
-                    _logger.LogInformation("Requesting credentials for character connection: {CharacterName}", characterName);
-                    await RequestFChatCredentials(characterName);
-                }
+                _logger.LogInformation("User {UserId} already connected as character {CharacterName}, reusing existing connection", 
+                    userId, characterName);
+                // Character matches and is connected, we can reuse as-is
             }
             else
             {
-                // No existing connection, create new character connection
-                _logger.LogInformation("No existing F-Chat connection, creating new character connection for {CharacterName}", characterName);
+                // No existing connection or different character, create new character connection
+                _logger.LogInformation("Creating new character connection for {CharacterName}", characterName);
                 
                 // Get user credentials
                 var settings = await _userService.GetUserSettingsAsync(userId);
                 if (settings?.FChatCredentialsEncrypted != null)
                 {
-                    // Decode F-Chat credentials
-                    var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-                    var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-                    var parts = credentials.Split(':');
-
-                    if (parts.Length == 2)
+                    // Decrypt F-Chat credentials using AES-256-GCM
+                    try
                     {
+                        (string username, string password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+                        
                         // Create character connection for the selected character
-                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", characterName, parts[0]);
-                        await _fChatService.ConnectCharacterAsync(userId, characterName, parts[0], parts[1]);
+                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", 
+                            characterName, username);
+                        await _fChatService.ConnectCharacterAsync(userId, characterName, username, password);
                         _logger.LogInformation("Successfully created character connection for {CharacterName}", characterName);
+                        
+                        // Set as active character
+                        await _fChatService.SetActiveCharacterAsync(userId, characterName);
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        throw new InvalidOperationException("Invalid credentials format");
+                        _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
+                        await Clients.Caller.SendAsync("CharacterError", characterName, "Failed to decrypt credentials. Please re-enter your F-Chat credentials.");
+                        return;
                     }
                 }
                 else
@@ -315,57 +313,37 @@ public class BouncerHub : Hub
         }
     }
 
+    [Obsolete("Legacy method - use SetActiveCharacter instead")]
     public async Task SetSelectedCharacter(string characterName)
     {
         var userId = Context.UserIdentifier;
         if (userId == null) return;
 
+        _logger.LogWarning("User {UserId} using legacy SetSelectedCharacter method - should use SetActiveCharacter", userId);
         _logger.LogInformation("User {UserId} setting selected character {CharacterName} (restoration)", userId, characterName);
 
         try
         {
-            // Check if the character exists in the user's available characters
-            var availableCharacters = await _fChatService.GetCharactersAsync(userId);
-            var character = availableCharacters.FirstOrDefault(c => c.Name == characterName);
-
-            if (character == null)
+            // Check if character is already connected
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            bool isConnected = false;
+            
+            if (activeCharacter == characterName)
             {
-                _logger.LogWarning("Character {CharacterName} not found for user {UserId}", characterName, userId);
-                await Clients.Caller.SendAsync("CharacterError", $"Character '{characterName}' not found");
-                return;
+                isConnected = await _fChatService.IsCharacterConnectedAsync(userId, characterName);
+                _logger.LogInformation("User {UserId} already has {CharacterName} as active character, connected={IsConnected}", 
+                    userId, characterName, isConnected);
             }
-
-            // Check if user is already connected to F-Chat with a healthy connection
-            if (await _fChatService.IsUserConnectedAsync(userId))
+            
+            if (isConnected)
             {
-                _logger.LogInformation("User {UserId} has existing F-Chat connection, checking if character can be reused", userId);
-
-                // Get the currently selected character on the existing connection
-                var currentCharacter = await _fChatService.GetSelectedCharacterAsync(userId);
-
-                if (currentCharacter?.Name == characterName)
-                {
-                    _logger.LogInformation("User {UserId} already connected as character {CharacterName}, reusing existing connection", userId, characterName);
-                    // Character matches, we can reuse the connection as-is
-                }
-                else
-                {
-                    _logger.LogInformation("User {UserId} connected as {CurrentCharacter} but needs {NewCharacter}, creating new connection",
-                        userId, currentCharacter?.Name ?? "unknown", characterName);
-
-                    // Different character needed, must disconnect and create new connection
-                    await _fChatService.DisconnectUserAsync(userId);
-
-                    // Create new character connection using ConnectCharacterAsync
-                    // Request credentials from client for character connection
-                    _logger.LogInformation("Requesting credentials for character connection: {CharacterName}", characterName);
-                    await RequestFChatCredentials(characterName);
-                }
+                _logger.LogInformation("User {UserId} already connected as character {CharacterName}, reusing existing connection", 
+                    userId, characterName);
             }
             else
             {
-                // No existing connection, use full character selection
-                await _fChatService.SelectCharacterAsync(userId, characterName);
+                // Set as active character (will connect if needed)
+                await _fChatService.SetActiveCharacterAsync(userId, characterName);
             }
 
             // Send recent messages
@@ -432,27 +410,31 @@ public class BouncerHub : Hub
         }
     }
 
+    [Obsolete("Legacy method - use JoinChannelForCharacter for each channel instead")]
     public async Task SubscribeToChannels(string[] channels)
     {
         var userId = Context.UserIdentifier;
         if (userId == null) return;
 
-        // Check if user has selected a character
-        var selectedCharacter = await _fChatService.GetSelectedCharacterAsync(userId);
-        if (selectedCharacter == null)
+        _logger.LogWarning("User {UserId} using legacy SubscribeToChannels method - should use JoinChannelForCharacter", userId);
+
+        // Get active character for multi-character model
+        var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+        if (activeCharacter == null)
         {
             await Clients.Caller.SendAsync("SubscriptionError", "Please select a character first");
             return;
         }
 
-        _logger.LogInformation("User {UserId} subscribing to channels: {Channels}", userId, string.Join(", ", channels));
+        _logger.LogInformation("User {UserId} subscribing to channels as {CharacterName}: {Channels}", 
+            userId, activeCharacter, string.Join(", ", channels));
 
         try
         {
-            // Join F-Chat channels
+            // Join F-Chat channels using multi-character method
             foreach (var channel in channels)
             {
-                await _fChatService.JoinChannelAsync(userId, channel);
+                await _fChatService.JoinChannelAsync(userId, activeCharacter, channel);
 
                 // Update database to track subscription
                 // TODO: Implement channel subscription tracking in database
@@ -468,33 +450,37 @@ public class BouncerHub : Hub
         }
     }
 
+    [Obsolete("Legacy method - use SendMessageFromCharacter instead")]
     public async Task SendMessage(string channel, string content)
     {
         var userId = Context.UserIdentifier;
         if (userId == null) return;
 
-        // Check if user has selected a character
-        var selectedCharacter = await _fChatService.GetSelectedCharacterAsync(userId);
-        if (selectedCharacter == null)
+        _logger.LogWarning("User {UserId} using legacy SendMessage method - should use SendMessageFromCharacter", userId);
+
+        // Get active character for multi-character model
+        var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+        if (activeCharacter == null)
         {
             await Clients.Caller.SendAsync("MessageError", "Please select a character first");
             return;
         }
 
-        _logger.LogInformation("User {UserId} sending message to channel {Channel} as {Character}", userId, channel, selectedCharacter.Name);
+        _logger.LogInformation("User {UserId} sending message to channel {Channel} as {Character}", userId, channel, activeCharacter);
 
-        // Check if F-Chat connection is available
-        var isConnected = await _fChatService.IsUserConnectedAsync(userId);
+        // Check if F-Chat connection is available for this character
+        var isConnected = await _fChatService.IsCharacterConnectedAsync(userId, activeCharacter);
 
         if (!isConnected)
         {
             // Queue message for later delivery
-            _logger.LogInformation("F-Chat not connected for user {UserId}, queuing message", userId);
+            _logger.LogInformation("F-Chat not connected for character {CharacterName} of user {UserId}, queuing message", 
+                activeCharacter, userId);
 
             await _messageService.QueueMessageAsync(
                 userId,
                 channel,
-                selectedCharacter.Name,
+                activeCharacter,
                 content,
                 Models.MessageType.Chat
             );
@@ -513,35 +499,35 @@ public class BouncerHub : Hub
 
         try
         {
-            if (channel[..4] == "PRI-")
+            if (channel.StartsWith("PRI-"))
             {
-                await _fChatService.SendPRIMessageAsync(userId, channel[4..], content);
+                await _fChatService.SendPRIMessageAsync(userId, activeCharacter, channel[4..], content);
             }
             else
             {
-                // Send message to F-Chat server
-                await _fChatService.SendMessageAsync(userId, channel, content);
+                // Send message to F-Chat server using multi-character method
+                await _fChatService.SendMessageAsync(userId, activeCharacter, channel, content);
             }
 
             // Store message in database using character name as sender
-                await _messageService.SaveMessageAsync(
-                    userId,
-                    channel,
-                    selectedCharacter.Name,
-                    content,
-                    Models.MessageType.Chat,
-                    selectedCharacter.Name
-                );
+            await _messageService.SaveMessageAsync(
+                userId,
+                channel,
+                activeCharacter,
+                content,
+                Models.MessageType.Chat,
+                activeCharacter
+            );
 
             // Broadcast to other connected clients of this user
             await Clients.Group($"user-{userId}").SendAsync("ReceiveMessage", new
             {
                 Channel = channel,
-                Sender = selectedCharacter.Name,
+                Sender = activeCharacter,
                 Content = content,
                 Timestamp = DateTime.UtcNow,
                 MessageType = "Chat",
-                characterName = selectedCharacter.Name, // Character that sent this message
+                characterName = activeCharacter, // Character that sent this message
                 isActiveCharacter = true // This is the active character sending the message
             });
         }
@@ -553,7 +539,7 @@ public class BouncerHub : Hub
             await _messageService.QueueMessageAsync(
                 userId,
                 channel,
-                selectedCharacter.Name,
+                activeCharacter,
                 content,
                 Models.MessageType.Chat
             );
@@ -779,19 +765,19 @@ public class BouncerHub : Hub
                 var settings = await _userService.GetUserSettingsAsync(userId);
                 if (settings?.FChatCredentialsEncrypted != null)
                 {
-                    var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-                    var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-                    var parts = credentials.Split(':');
-
-                    if (parts.Length == 2)
+                    // Decrypt F-Chat credentials using AES-256-GCM
+                    try
                     {
-                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", characterName, parts[0]);
-                        await _fChatService.ConnectCharacterAsync(userId, characterName, parts[0], parts[1]);
+                        (string username, string password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+                        
+                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", characterName, username);
+                        await _fChatService.ConnectCharacterAsync(userId, characterName, username, password);
                         _logger.LogInformation("Successfully created WebSocket connection for {CharacterName}", characterName);
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        throw new InvalidOperationException("Invalid credentials format");
+                        _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
+                        throw new InvalidOperationException("Failed to decrypt credentials. Please re-enter your F-Chat credentials.");
                     }
                 }
                 else
@@ -1300,12 +1286,87 @@ public class BouncerHub : Hub
 
     #region Private Helper Methods
 
+    private string EnsureAgentId()
+    {
+        if (Context.Items.TryGetValue(AgentIdContextKey, out var existing) &&
+            existing is string existingId &&
+            !string.IsNullOrWhiteSpace(existingId))
+        {
+            return existingId;
+        }
+
+        var httpContext = Context.GetHttpContext();
+        var provided = httpContext?.Request.Query["agentId"].FirstOrDefault();
+        var userId = Context.UserIdentifier ?? string.Empty;
+        var agentId = !string.IsNullOrWhiteSpace(provided)
+            ? provided
+            : (!string.IsNullOrWhiteSpace(userId) ? $"user-agent-{userId}" : Context.ConnectionId);
+
+        Context.Items[AgentIdContextKey] = agentId;
+        Context.Items[AgentIdGeneratedKey] = string.IsNullOrWhiteSpace(provided);
+
+        return agentId;
+    }
+
+    private static bool TryConvertToMessageDto(StreamMessage message, string fallbackChannel, out string channel, out MessageDto? dto)
+    {
+        if (message is null)
+        {
+            channel = fallbackChannel;
+            dto = null;
+            return false;
+        }
+
+        channel = fallbackChannel;
+        if (message is RoomMessage roomMessage && !string.IsNullOrWhiteSpace(roomMessage.RoomId))
+        {
+            channel = roomMessage.RoomId;
+        }
+        else if (message.Metadata.TryGetValue("channel", out var channelMeta) && !string.IsNullOrWhiteSpace(channelMeta))
+        {
+            channel = channelMeta;
+        }
+
+        var messageType = ResolveClientMessageType(message);
+
+        dto = new MessageDto(
+            channel,
+            message.SenderId,
+            message.Content,
+            message.Timestamp,
+            messageType);
+        return true;
+    }
+
+    private static string ResolveClientMessageType(StreamMessage message)
+    {
+        if (message.Metadata.TryGetValue("originalMessageType", out var original) &&
+            !string.IsNullOrWhiteSpace(original))
+        {
+            return original;
+        }
+
+        return message.MessageType switch
+        {
+            StreamMessageTypes.Roll => "Roll",
+            StreamMessageTypes.Action => "Action",
+            StreamMessageTypes.SystemNotification => "System",
+            StreamMessageTypes.Announcement => "Announcement",
+            StreamMessageTypes.Direct => "Private",
+            _ => "Chat"
+        };
+    }
+
     private async Task SendRecentMessages(string userId, string? characterName = null)
     {
         try
         {
             var activeCharacter = characterName ?? await _fChatService.GetActiveCharacterAsync(userId);
             if (activeCharacter == null) return;
+
+            var agentId = EnsureAgentId();
+
+            await DeliverMissedMessages(userId, agentId);
 
             var joinedChannels = await _fChatService.GetJoinedChannelsAsync(userId, activeCharacter);
             var since = DateTime.UtcNow.AddHours(-24); // Last 24 hours
@@ -1314,6 +1375,38 @@ public class BouncerHub : Hub
             {
                 try
                 {
+                    var queuedMessages = await _messageQueueService.GetRoomMessagesAsync(userId, agentId, channel, 200);
+
+                    if (queuedMessages.Count > 0)
+                    {
+                        var messageDtos = queuedMessages
+                            .Select(entry =>
+                            {
+                                return TryConvertToMessageDto(entry.Message, channel, out var resolvedChannel, out var dto) && dto != null
+                                    ? (resolvedChannel, dto)
+                                    : (resolvedChannel: channel, dto: (MessageDto?)null);
+                            })
+                            .Where(tuple => tuple.dto != null)
+                            .Select(tuple => tuple.dto!)
+                            .ToArray();
+
+                        foreach (var entry in queuedMessages)
+                        {
+                            await _messageQueueService.AcknowledgeMessageAsync(userId, agentId, entry.StreamKey, entry.MessageId);
+                        }
+
+                        if (messageDtos.Length > 0)
+                        {
+                            await Clients.Caller.SendAsync("ReceiveHistory", new HistoryDto(
+                                channel,
+                                messageDtos,
+                                false
+                            ));
+
+                            continue;
+                        }
+                    }
+
                     var messages = await _messageService.GetMessagesAsync(userId, channel, since, 50);
                     if (messages.Count > 0)
                     {
@@ -1334,6 +1427,63 @@ public class BouncerHub : Hub
         {
             _logger.LogError(ex, "Failed to send recent messages for user {UserId}", userId);
         }
+    }
+
+    private async Task DeliverMissedMessages(string userId, string agentId)
+    {
+        var missedEntries = await _messageQueueService.GetMissedMessagesAsync(userId, agentId, 500);
+        if (missedEntries.Count == 0)
+        {
+            return;
+        }
+
+        var grouped = new Dictionary<string, List<MessageDto>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in missedEntries.OrderBy(e => e.Message.Timestamp))
+        {
+            var fallbackChannel = ResolveFallbackChannel(entry);
+
+            if (TryConvertToMessageDto(entry.Message, fallbackChannel, out var channel, out var dto) && dto != null)
+            {
+                if (!grouped.TryGetValue(channel, out var list))
+                {
+                    list = new List<MessageDto>();
+                    grouped[channel] = list;
+                }
+
+                list.Add(dto);
+            }
+        }
+
+        foreach (var group in grouped)
+        {
+            await Clients.Caller.SendAsync("ReceiveHistory", new HistoryDto(
+                group.Key,
+                group.Value.ToArray(),
+                false
+            ));
+        }
+
+        foreach (var entry in missedEntries)
+        {
+            await _messageQueueService.AcknowledgeMessageAsync(userId, agentId, entry.StreamKey, entry.MessageId);
+        }
+    }
+
+    private static string ResolveFallbackChannel(StreamMessageEntry entry)
+    {
+        if (!string.IsNullOrEmpty(entry.StreamKey) &&
+            StreamKeys.TryParseRoomStream(entry.StreamKey, out _, out var roomId))
+        {
+            return roomId;
+        }
+
+        if (entry.Message.Metadata.TryGetValue("channel", out var channel) && !string.IsNullOrWhiteSpace(channel))
+        {
+            return channel;
+        }
+
+        return entry.Message.StreamKey ?? entry.StreamKey;
     }
 
     #endregion
@@ -1471,14 +1621,15 @@ public class BouncerHub : Hub
     }
 
     /// <summary>
-    /// Decrypts credentials sent from the client
+    /// Decrypts credentials sent from the client during credential request flow.
+    /// Note: Client-to-server transmission uses Base64 over HTTPS (acceptable for transport).
+    /// Storage uses AES-256-GCM encryption via EncryptionService.
     /// </summary>
     private FChatCredentials? DecryptCredentials(string encryptedCredentials)
     {
         try
         {
-            // For now, we'll use a simple base64 decode since we're implementing the secure flow
-            // In production, this should use proper encryption with the server's private key
+            // Base64 decode credentials sent from client over HTTPS
             var credentialBytes = Convert.FromBase64String(encryptedCredentials);
             var credentialJson = Encoding.UTF8.GetString(credentialBytes);
             var credentials = JsonSerializer.Deserialize<FChatCredentials>(credentialJson);

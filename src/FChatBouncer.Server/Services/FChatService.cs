@@ -1,5 +1,6 @@
 using FChatBouncer.Server.Models;
 using FChatBouncer.Server.Hubs;
+using FChatBouncer.Server.MessageQueue;
 using Microsoft.AspNetCore.SignalR;
 using System.Collections.Concurrent;
 using System.Text.Json;
@@ -15,6 +16,7 @@ public class FChatService : IFChatService
     private readonly ILogger<FChatService> _logger;
     private readonly IServiceProvider _serviceProvider;
     private readonly IHubContext<BouncerHub> _hubContext;
+    private readonly IEncryptionService _encryptionService;
     
     // Multi-character connection management: userId -> characterName -> FChatWebSocketClient
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, FChatWebSocketClient>> _connections = new();
@@ -27,11 +29,13 @@ public class FChatService : IFChatService
     public FChatService(
         ILogger<FChatService> logger,
         IServiceProvider serviceProvider,
-        IHubContext<BouncerHub> hubContext)
+        IHubContext<BouncerHub> hubContext,
+        IEncryptionService encryptionService)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
         _hubContext = hubContext;
+        _encryptionService = encryptionService;
         
         // Start timer to process pending character updates every 5 seconds
         _characterUpdateTimer = new Timer(async _ => await ProcessPendingCharacterUpdates(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
@@ -125,14 +129,27 @@ public class FChatService : IFChatService
                 return;
             }
 
-            // Decode credentials
-            var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-            var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-            var parts = credentials.Split(':');
-
-            if (parts.Length != 2)
+            // Decrypt credentials using AES-256-GCM
+            string username, password;
+            try
             {
-                _logger.LogError("Invalid credentials format for user {UserId}", userId);
+                (username, password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
+                
+                // Mark credentials as invalid so user is prompted to re-enter
+                await ExecuteWithDbContext(async dbContext =>
+                {
+                    var user = await dbContext.Users.FindAsync(userId);
+                    if (user != null)
+                    {
+                        user.HasFChatCredentials = false;
+                        await dbContext.SaveChangesAsync();
+                    }
+                });
+                
                 return;
             }
 
@@ -144,7 +161,7 @@ public class FChatService : IFChatService
             var loggerFactory = scope2.ServiceProvider.GetRequiredService<ILoggerFactory>();
             var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
             using var tempClient = new FChatWebSocketClient(tempLogger);
-            var connected = await tempClient.ConnectAsync(parts[0], parts[1]);
+            var connected = await tempClient.ConnectAsync(username, password);
             
             if (!connected)
             {
@@ -156,7 +173,7 @@ public class FChatService : IFChatService
             var availableCharacters = await tempClient.GetCharactersAsync();
             if (availableCharacters.Count == 0)
             {
-                _logger.LogWarning("No characters found for F-Chat account {Username} of user {UserId}", parts[0], userId);
+                _logger.LogWarning("No characters found for F-Chat account {Username} of user {UserId}", username, userId);
                 return;
             }
 
@@ -165,7 +182,7 @@ public class FChatService : IFChatService
 
             // Connect to the first available character
             var firstCharacter = availableCharacters.First();
-            await ConnectCharacterAsync(userId, firstCharacter.Name, parts[0], parts[1]);
+            await ConnectCharacterAsync(userId, firstCharacter.Name, username, password);
             
             _logger.LogInformation("Successfully refreshed F-Chat connection for user {UserId} with character {CharacterName}", 
                 userId, firstCharacter.Name);
@@ -343,19 +360,29 @@ public class FChatService : IFChatService
                 return new List<FChatCharacter>();
             }
 
-            // Decode F-Chat credentials
-            var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-            var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-            var parts = credentials.Split(':');
-
-            if (parts.Length != 2)
+            // Decrypt F-Chat credentials using AES-256-GCM
+            string username, password;
+            try
             {
-                _logger.LogError("Invalid credentials format for user {UserId}", userId);
+                (username, password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
+                
+                // Mark credentials as invalid so user is prompted to re-enter
+                await ExecuteWithDbContext(async dbContext =>
+                {
+                    var user = await dbContext.Users.FindAsync(userId);
+                    if (user != null)
+                    {
+                        user.HasFChatCredentials = false;
+                        await dbContext.SaveChangesAsync();
+                    }
+                });
+                
                 return new List<FChatCharacter>();
             }
-
-            var username = parts[0];
-            var password = parts[1];
 
             _logger.LogInformation("Fetching characters from F-List API for user {UserId} with username {Username}", userId, username);
 
@@ -607,6 +634,8 @@ public class FChatService : IFChatService
 
             client.FriendsListReceived += async (friends) =>
             {
+                _logger.LogInformation("FriendsListReceived event handler triggered with {FriendCount} friends for character {CharacterName}", 
+                    friends.Count, characterName);
                 await OnFriendsListReceived(userId, characterName, friends);
             };
 
@@ -1153,10 +1182,28 @@ public class FChatService : IFChatService
 
     private async Task ProcessPendingCharacterUpdates()
     {
-        if (_pendingCharacterUpdates.Count == 0) return;
+        List<KeyValuePair<string, CharacterUpdateInfo>> updates;
 
-        var updates = _pendingCharacterUpdates.ToList();
-        _pendingCharacterUpdates.Clear();
+        await _characterUpdateSemaphore.WaitAsync();
+        try
+        {
+            if (_pendingCharacterUpdates.Count == 0)
+            {
+                return;
+            }
+
+            updates = _pendingCharacterUpdates.ToList();
+            _pendingCharacterUpdates.Clear();
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Failed to snapshot pending character updates; retrying on next tick (Count={Count})", _pendingCharacterUpdates.Count);
+            return;
+        }
+        finally
+        {
+            _characterUpdateSemaphore.Release();
+        }
 
         _logger.LogDebug("Processing {Count} pending character updates", updates.Count);
 
@@ -1495,6 +1542,29 @@ public class FChatService : IFChatService
         return activeCharacter == characterName;
     }
 
+    private static bool IsPrivateMessage(FChatMessage message)
+    {
+        if (message is null)
+        {
+            return false;
+        }
+
+        if (message.MessageType.Equals("Private", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return message.Channel.StartsWith("PRI-", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildConversationId(string localCharacter, string remoteCharacter)
+    {
+        var participants = new[] { localCharacter, remoteCharacter };
+        Array.Sort(participants, StringComparer.OrdinalIgnoreCase);
+        return string.Join(':', participants);
+    }
+
+
     #endregion
 
     #region Event Handlers
@@ -1522,6 +1592,33 @@ public class FChatService : IFChatService
                 message.MessageType
             );
 
+            using var scope = _serviceProvider.CreateScope();
+            var scopedProvider = scope.ServiceProvider;
+            var messageService = scopedProvider.GetRequiredService<IMessageService>();
+            var messageQueueService = scopedProvider.GetRequiredService<IMessageQueueService>();
+
+            if (IsPrivateMessage(message))
+            {
+                var conversationId = BuildConversationId(characterName, message.Character);
+                await messageQueueService.PublishDirectMessageAsync(
+                    userId,
+                    conversationId,
+                    message.Character,
+                    characterName,
+                    message.Message,
+                    message.MessageType);
+            }
+            else
+            {
+                await messageQueueService.PublishRoomMessageAsync(
+                    userId,
+                    message.Channel,
+                    message.Character,
+                    characterName,
+                    message.Message,
+                    message.MessageType);
+            }
+
             // Broadcast message with character context - frontend will filter based on active character
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("ReceiveMessage", new
             {
@@ -1533,10 +1630,6 @@ public class FChatService : IFChatService
                 characterName = characterName, // Character that received this message
                 isActiveCharacter = await IsActiveCharacterAsync(userId, characterName) // Helper to indicate if this is the active character
             });
-
-            // Save message to database for persistence
-            using var scope = _serviceProvider.CreateScope();
-            var messageService = scope.ServiceProvider.GetRequiredService<IMessageService>();
 
             // Convert string message type to enum
             var messageType = message.MessageType switch

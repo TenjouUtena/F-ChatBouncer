@@ -6,23 +6,56 @@ namespace FChatBouncer.Server.Services;
 
 public interface IFChatService
 {
-    // Legacy single-character methods (for backward compatibility)
+    // Legacy single-character methods (DEPRECATED - Use multi-character versions)
+    [Obsolete("Use ConnectCharacterAsync(userId, characterName, username, password) instead")]
     Task ConnectUserAsync(string userId, string fchatUsername, string fchatPassword);
+    
+    [Obsolete("Use DisconnectAllCharactersAsync(userId) instead")]
     Task DisconnectUserAsync(string userId);
+    
+    [Obsolete("Use SendMessageAsync(userId, characterName, channel, message) instead")]
     Task SendMessageAsync(string userId, string channel, string message);
+    
+    [Obsolete("Use JoinChannelAsync(userId, characterName, channel) instead")]
     Task JoinChannelAsync(string userId, string channel);
+    
+    [Obsolete("Use LeaveChannelAsync(userId, characterName, channel) instead")]
     Task LeaveChannelAsync(string userId, string channel);
+    
+    [Obsolete("Use IsCharacterConnectedAsync(userId, characterName) or check GetActiveCharacterAsync() instead")]
     Task<bool> IsUserConnectedAsync(string userId);
+    
+    // Get available characters for a user (used before character selection)
+    // This method has fallback logic: tries active connections, then database, then F-List API
     Task<List<FChatCharacter>> GetCharactersAsync(string userId);
+    
+    [Obsolete("Use SetActiveCharacterAsync(userId, characterName) instead")]
     Task SelectCharacterAsync(string userId, string characterName);
+    
+    [Obsolete("Use SetActiveCharacterAsync(userId, characterName) instead")]
     Task SwitchCharacterAsync(string userId, string characterName);
+    
+    [Obsolete("Use GetActiveCharacterAsync(userId) instead - returns string instead of FChatCharacter")]
     Task<FChatCharacter?> GetSelectedCharacterAsync(string userId);
+    
+    [Obsolete("Use GetChannelListAsync(userId, characterName) or GetAvailableChannelsAsync(userId, characterName) instead")]
     Task<List<FChatChannel>> GetChannelListAsync(string userId);
+    
+    [Obsolete("Use GetJoinedChannelsAsync(userId, characterName) instead")]
     Task<List<string>> GetJoinedChannelsAsync(string userId);
+    
+    [Obsolete("Use GetJoinedChannelDetailsAsync(userId, characterName) instead")]
     Task<List<FChatChannel>> GetJoinedChannelDetailsAsync(string userId);
+    
+    [Obsolete("Use SendPRIMessageAsync(userId, characterName, recipient, content) instead")]
     Task SendPRIMessageAsync(string userId, string v, string content);
+    
+    [Obsolete("Use ProcessQueuedMessagesAsync(userId, characterName) instead")]
     Task ProcessQueuedMessagesAsync(string userId);
+    
+    [Obsolete("Use RequestProfileAsync(userId, characterName, requestingCharacter) instead")]
     Task RequestProfileAsync(string userId, string characterName);
+    
     Task<string?> GetTicketAsync(string userId, string characterName);
     Task<string?> GetUsernameAsync(string userId, string characterName);
     Task SendTypingNotificationAsync(string userId, string characterName, string recipient, string status);

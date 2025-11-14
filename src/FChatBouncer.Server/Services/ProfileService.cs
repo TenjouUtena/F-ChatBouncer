@@ -38,57 +38,19 @@ public class ProfileService : IProfileService
     public async Task SaveProfileAsync(string userId, string characterName, string profileData, string? rawProData = null)
     {
         using var scope = _serviceProvider.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
         var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
         
         try
         {
-            // Use CharacterService to update the character profile
+            // Use CharacterService to update the character profile (unified storage in Character table)
             await characterService.UpdateCharacterProfileAsync(characterName, profileData, rawProData);
 
-            // Also maintain legacy Profile table for backward compatibility
-            var existingProfile = await context.Profiles
-                .FirstOrDefaultAsync(p => p.UserId == userId && p.CharacterName == characterName);
-
-            if (existingProfile != null)
-            {
-                // Update existing profile
-                existingProfile.ProfileData = profileData;
-                existingProfile.RawProData = rawProData;
-                existingProfile.UpdatedAt = DateTime.UtcNow;
-                _logger.LogInformation("Updated legacy profile for character {CharacterName} (User: {UserId})", characterName, userId);
-            }
-            else
-            {
-                // Create new profile
-                var profile = new Profile
-                {
-                    UserId = userId,
-                    CharacterName = characterName,
-                    ProfileData = profileData,
-                    RawProData = rawProData,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                context.Profiles.Add(profile);
-                _logger.LogInformation("Created new legacy profile for character {CharacterName} (User: {UserId})", characterName, userId);
-            }
-
-            try
-            {
-                await context.SaveChangesAsync();
-            }
-            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-            {
-                // Handle unique constraint violation - character was created/updated by another thread
-                _logger.LogWarning("Character {CharacterName} profile was updated by another thread, skipping duplicate profile save", characterName);
-            }
+            _logger.LogInformation("Saved profile for character {CharacterName} (User: {UserId})", characterName, userId);
 
             // Log the raw PRO data for analysis
             if (!string.IsNullOrEmpty(rawProData))
             {
-                _logger.LogInformation("PRO Data received for {CharacterName}: {RawProData}", characterName, rawProData);
+                _logger.LogDebug("PRO Data received for {CharacterName}: {RawProData}", characterName, rawProData);
             }
         }
         catch (Exception ex)
@@ -98,80 +60,31 @@ public class ProfileService : IProfileService
         }
     }
 
+    [Obsolete("Profile table removed - use GetStructuredProfileAsync instead")]
     public async Task<Profile?> GetProfileAsync(string userId, string characterName)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
-        
-        return await context.Profiles
-            .FirstOrDefaultAsync(p => p.UserId == userId && p.CharacterName == characterName);
+        // Profile table has been removed - this method is deprecated
+        _logger.LogWarning("GetProfileAsync called but Profile table has been removed - use GetStructuredProfileAsync instead");
+        return null;
     }
 
+    [Obsolete("Profile table removed - use CharacterService to get character profiles")]
     public async Task<List<Profile>> GetUserProfilesAsync(string userId)
     {
-        using var scope = _serviceProvider.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
-        
-        return await context.Profiles
-            .Where(p => p.UserId == userId)
-            .OrderByDescending(p => p.UpdatedAt)
-            .ToListAsync();
+        // Profile table has been removed - this method is deprecated
+        _logger.LogWarning("GetUserProfilesAsync called but Profile table has been removed");
+        return new List<Profile>();
     }
 
     public async Task SaveStructuredProfileAsync(string userId, ProfileData profileData)
     {
         using var scope = _serviceProvider.CreateScope();
         var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
-        var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
         
         try
         {
-            // Use CharacterService to update the character profile
+            // Use CharacterService to update the character profile (unified storage in Character table)
             await characterService.UpdateCharacterProfileAsync(profileData.CharacterName, profileData);
-
-            // Also maintain legacy Profile table for backward compatibility
-            var profileJson = JsonSerializer.Serialize(profileData, new JsonSerializerOptions
-            {
-                WriteIndented = true
-            });
-
-            // Directly implement profile saving logic instead of calling SaveProfileAsync to avoid nested scopes
-            var existingProfile = await context.Profiles
-                .FirstOrDefaultAsync(p => p.UserId == userId && p.CharacterName == profileData.CharacterName);
-
-            if (existingProfile != null)
-            {
-                // Update existing profile
-                existingProfile.ProfileData = profileJson;
-                existingProfile.UpdatedAt = DateTime.UtcNow;
-                _logger.LogInformation("Updated legacy profile for character {CharacterName} (User: {UserId})", profileData.CharacterName, userId);
-            }
-            else
-            {
-                // Create new profile
-                var profile = new Profile
-                {
-                    UserId = userId,
-                    CharacterName = profileData.CharacterName,
-                    ProfileData = profileJson,
-                    RawProData = null,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-
-                context.Profiles.Add(profile);
-                _logger.LogInformation("Created new legacy profile for character {CharacterName} (User: {UserId})", profileData.CharacterName, userId);
-            }
-
-            try
-            {
-                await context.SaveChangesAsync();
-            }
-            catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-            {
-                // Handle unique constraint violation - character was created/updated by another thread
-                _logger.LogWarning("Character {CharacterName} profile was updated by another thread, skipping duplicate profile save", profileData.CharacterName);
-            }
 
             _logger.LogInformation("Saved structured profile for character {CharacterName} (User: {UserId}): {Summary}",
                 profileData.CharacterName, userId, profileData.GetSummary());
@@ -179,7 +92,7 @@ public class ProfileService : IProfileService
             // Notify the frontend that a new profile is available
             await NotifyProfileAvailableAsync(userId, profileData.CharacterName);
 
-            // Refresh memo data when profile is updated
+            // Refresh memo data when profile is updated (disabled for now)
             //_ = Task.Run(async () =>
             //{
             //    try
@@ -208,7 +121,7 @@ public class ProfileService : IProfileService
         
         try
         {
-            // First try to get from CharacterService (unified character data)
+            // Get from CharacterService (unified character data)
             var characterProfile = await characterService.GetCharacterProfileAsync(characterName);
             if (characterProfile != null)
             {
@@ -217,27 +130,7 @@ public class ProfileService : IProfileService
                 return characterProfile;
             }
 
-            // Fallback to legacy Profile table
-            var profile = await GetProfileAsync(userId, characterName);
-            if (profile == null || string.IsNullOrEmpty(profile.ProfileData))
-            {
-                return null;
-            }
-
-            // Try to deserialize the profile data back to ProfileData
-            var profileData = JsonSerializer.Deserialize<ProfileData>(profile.ProfileData);
-            if (profileData != null)
-            {
-                _logger.LogDebug("Retrieved structured profile from legacy table for character {CharacterName} (User: {UserId}): {Summary}",
-                    characterName, userId, profileData.GetSummary());
-            }
-
-            return profileData;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "Failed to deserialize profile data for character {CharacterName} (User: {UserId}). Data may be in old format.",
-                characterName, userId);
+            _logger.LogDebug("No profile found for character {CharacterName} (User: {UserId})", characterName, userId);
             return null;
         }
         catch (Exception ex)

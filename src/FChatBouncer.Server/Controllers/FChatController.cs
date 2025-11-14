@@ -1,7 +1,9 @@
 using FChatBouncer.Server.Services;
 using FChatBouncer.Server.Models;
+using FChatBouncer.Server.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Security.Claims;
 
 namespace FChatBouncer.Server.Controllers;
@@ -39,6 +41,10 @@ public class FChatController : ControllerBase
                 return Unauthorized();
             }
 
+            // Use the parameterless overload which will:
+            // 1. Try active character connections
+            // 2. Fall back to database connections
+            // 3. Fall back to F-List API with stored credentials (gets ticket and character list)
             var characters = await _fChatService.GetCharactersAsync(userId);
 
             return Ok(new CharacterListResponse
@@ -78,15 +84,11 @@ public class FChatController : ControllerBase
             var currentActiveCharacter = await _fChatService.GetActiveCharacterAsync(userId);
             _logger.LogInformation("Current active character before switch: {CurrentCharacter}", currentActiveCharacter ?? "None");
 
-            // Get available characters
-            var availableCharacters = await _fChatService.GetCharactersAsync(userId);
-            _logger.LogInformation("Available characters for user {UserId}: {Characters}", 
-                userId, string.Join(", ", availableCharacters.Select(c => c.Name)));
-
             var switchStartTime = DateTime.UtcNow;
             _logger.LogInformation("Starting character switch at: {StartTime}", switchStartTime);
 
-            await _fChatService.SelectCharacterAsync(userId, request.CharacterName);
+            // Use multi-character method
+            await _fChatService.SetActiveCharacterAsync(userId, request.CharacterName);
 
             var switchEndTime = DateTime.UtcNow;
             var switchDuration = switchEndTime - switchStartTime;
@@ -130,13 +132,20 @@ public class FChatController : ControllerBase
                 return Unauthorized();
             }
 
-            var isConnected = await _fChatService.IsUserConnectedAsync(userId);
-            var selectedCharacter = await _fChatService.GetSelectedCharacterAsync(userId);
+            // Get active character for multi-character model
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            
+            // Check if active character is connected
+            bool isConnected = false;
+            if (activeCharacter != null)
+            {
+                isConnected = await _fChatService.IsCharacterConnectedAsync(userId, activeCharacter);
+            }
 
             return Ok(new FChatStatusResponse
             {
                 IsConnected = isConnected,
-                SelectedCharacter = selectedCharacter?.Name,
+                SelectedCharacter = activeCharacter,
                 Status = isConnected ? "Connected" : "Disconnected"
             });
         }
@@ -162,6 +171,7 @@ public class FChatController : ControllerBase
                 characterName, userId, allowStale);
 
             // Try to get cached profile first
+            // NOTE: GetCachedProfileAsync will automatically queue a request if no profile is found
             var cachedProfile = await _profileService.GetCachedProfileAsync(userId, characterName, allowStale);
             if (cachedProfile != null)
             {
@@ -174,9 +184,7 @@ public class FChatController : ControllerBase
                 });
             }
 
-            // If no cached profile, trigger a fresh request
-            await _profileService.RequestProfileAsync(userId, characterName);
-
+            // No cached profile - GetCachedProfileAsync already queued the request
             return Ok(new ProfileResponse
             {
                 CharacterName = characterName,
@@ -200,6 +208,7 @@ public class FChatController : ControllerBase
     }
 
     [HttpPost("profile/request")]
+    [EnableRateLimiting(RateLimitPolicies.ProfileRequest)]
     public async Task<ActionResult> RequestProfile([FromBody] ProfileRequestDto request)
     {
         try
@@ -269,6 +278,7 @@ public class FChatController : ControllerBase
     }
 
     [HttpPost("channel/{channelId}/characters/refresh")]
+    [EnableRateLimiting(RateLimitPolicies.ChannelRefresh)]
     public async Task<ActionResult> RefreshChannelCharacters(string channelId, [FromQuery] string? characterName = null)
     {
         try
@@ -306,6 +316,7 @@ public class FChatController : ControllerBase
     }
 
     [HttpPost("status/update")]
+    [EnableRateLimiting(RateLimitPolicies.StatusUpdate)]
     public async Task<ActionResult> UpdateStatus([FromBody] UpdateStatusRequest request)
     {
         try
@@ -379,6 +390,7 @@ public class FChatController : ControllerBase
     }
 
     [HttpPost("search")]
+    [EnableRateLimiting(RateLimitPolicies.SearchRequest)]
     public async Task<ActionResult> SearchCharacters([FromBody] SearchRequest request)
     {
         try

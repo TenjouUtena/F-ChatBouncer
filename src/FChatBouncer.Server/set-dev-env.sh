@@ -5,6 +5,11 @@
 
 echo "Setting up development environment variables for FChatBouncer.Server..."
 
+# Redis Configuration (used for local development and Railway-style overrides)
+export REDIS_CONNECTION_STRING="localhost:6379"
+export REDIS_INSTANCE_NAME="FChatBouncer:Dev:"
+export REDIS_USE_SSL="false"
+
 # Database Configuration (PostgreSQL)
 export PGHOST="localhost"
 export PGPORT="5432"

@@ -29,7 +29,9 @@ public class CharacterService : ICharacterService
         _logger.LogDebug("Getting or creating character: {CharacterName}", characterName);
 
         // First try to get existing character
+        // Use AsTracking() because this character will likely be modified
         var character = await _context.Characters
+            .AsTracking()
             .FirstOrDefaultAsync(c => c.Name == characterName);
 
         if (character == null)
@@ -56,6 +58,7 @@ public class CharacterService : ICharacterService
                     // Character was successfully inserted
                     _logger.LogInformation("Successfully created character: {CharacterName}", characterName);
                     character = await _context.Characters
+                        .AsTracking()
                         .FirstOrDefaultAsync(c => c.Name == characterName);
                 }
                 else
@@ -64,6 +67,7 @@ public class CharacterService : ICharacterService
                     // This means another thread created it, so fetch the existing one
                     _logger.LogInformation("Character {CharacterName} was created by another thread, fetching existing", characterName);
                     character = await _context.Characters
+                        .AsTracking()
                         .FirstOrDefaultAsync(c => c.Name == characterName);
                 }
             }
@@ -81,6 +85,7 @@ public class CharacterService : ICharacterService
                     {
                         // Double-check if character was created by another thread
                         character = await _context.Characters
+                            .AsTracking()
                             .FirstOrDefaultAsync(c => c.Name == characterName);
                         
                         if (character != null)
@@ -118,6 +123,7 @@ public class CharacterService : ICharacterService
                         
                         // Try to get the existing character
                         character = await _context.Characters
+                            .AsTracking()
                             .FirstOrDefaultAsync(c => c.Name == characterName);
                         
                         if (character != null)
@@ -307,6 +313,7 @@ public class CharacterService : ICharacterService
 
         // Check if connection already exists
         var connection = await _context.CharacterConnections
+            .AsTracking()
             .FirstOrDefaultAsync(cc => cc.UserId == userId && cc.CharacterId == character.Id);
 
         if (connection == null)
@@ -323,10 +330,12 @@ public class CharacterService : ICharacterService
             };
 
             _context.CharacterConnections.Add(connection);
+            _logger.LogInformation("Added CharacterConnection entity to context with Id {ConnectionId} (will be generated on save)", connection.Id);
         }
         else
         {
-            _logger.LogDebug("Updating existing character connection: {UserId} -> {CharacterName}", userId, characterName);
+            _logger.LogDebug("Updating existing character connection: {UserId} -> {CharacterName}. Current state: IsActive={IsActive}, IsConnected={IsConnected}",
+                userId, characterName, connection.IsActive, connection.IsConnected);
             connection.FChatUsername = fchatUsername;
             connection.FChatPasswordEncrypted = fchatPassword; // TODO: Encrypt password
             connection.LastActivityAt = DateTime.UtcNow;
@@ -334,7 +343,9 @@ public class CharacterService : ICharacterService
 
         try
         {
-            await _context.SaveChangesAsync();
+            var affectedRows = await _context.SaveChangesAsync();
+            _logger.LogInformation("Character connection upsert saved for {UserId}/{CharacterName}. Rows affected: {AffectedRows}. New state -> Id={ConnectionId}, IsActive={IsActive}, IsConnected={IsConnected}",
+                userId, characterName, affectedRows, connection.Id, connection.IsActive, connection.IsConnected);
             return connection;
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
@@ -342,14 +353,20 @@ public class CharacterService : ICharacterService
             // Handle unique constraint violation - character was created/updated by another thread
             _logger.LogWarning("Character {CharacterName} connection was updated by another thread, skipping duplicate connection creation", characterName);
             // Return the existing connection
-            return await _context.CharacterConnections
+            var existingConnection = await _context.CharacterConnections
+                .AsTracking()
+                .Include(cc => cc.Character)
                 .FirstOrDefaultAsync(cc => cc.UserId == userId && cc.CharacterId == character.Id);
+            _logger.LogInformation("Returning existing character connection after duplicate insert attempt. State -> Id={ConnectionId}, IsActive={IsActive}, IsConnected={IsConnected}",
+                existingConnection?.Id, existingConnection?.IsActive, existingConnection?.IsConnected);
+            return existingConnection;
         }
     }
 
     public async Task<List<CharacterConnection>> GetUserCharacterConnectionsAsync(string userId)
     {
         return await _context.CharacterConnections
+            .AsNoTracking()
             .Include(cc => cc.Character)
             .Where(cc => cc.UserId == userId)
             .OrderBy(cc => cc.Character.Name)
@@ -359,6 +376,7 @@ public class CharacterService : ICharacterService
     public async Task<CharacterConnection?> GetCharacterConnectionAsync(string userId, string characterName)
     {
         return await _context.CharacterConnections
+            .AsTracking()
             .Include(cc => cc.Character)
             .FirstOrDefaultAsync(cc => cc.UserId == userId && cc.Character.Name == characterName);
     }
@@ -369,9 +387,15 @@ public class CharacterService : ICharacterService
 
         // Get all character connections for the user
         var connections = await _context.CharacterConnections
+            .AsTracking()
             .Include(cc => cc.Character)
             .Where(cc => cc.UserId == userId)
             .ToListAsync();
+
+        _logger.LogDebug("Found {ConnectionCount} character connections for user {UserId}: {ConnectionSummaries}",
+            connections.Count,
+            userId,
+            string.Join(", ", connections.Select(c => $"{c.Character?.Name ?? "<unknown>"}(Active={c.IsActive},Connected={c.IsConnected})")));
 
         // Set all connections as inactive first
         foreach (var connection in connections)
@@ -384,11 +408,12 @@ public class CharacterService : ICharacterService
         if (targetConnection != null)
         {
             targetConnection.IsActive = true;
+            targetConnection.LastActivityAt = DateTime.UtcNow;
             _logger.LogInformation("Successfully set character {CharacterName} as active for user {UserId}", characterName, userId);
         }
         else
         {
-            _logger.LogWarning("Character {CharacterName} not found for user {UserId}. Available characters: {AvailableCharacters}", 
+            _logger.LogWarning("Character {CharacterName} not found for user {UserId}. Available characters: {AvailableCharacters}",
                 characterName, userId, string.Join(", ", connections.Select(c => c.Character.Name)));
 
             // If the requested character is not found, try to use the first available character
@@ -396,14 +421,19 @@ public class CharacterService : ICharacterService
             {
                 var fallbackConnection = connections.First();
                 fallbackConnection.IsActive = true;
-                _logger.LogInformation("Using fallback character {FallbackCharacter} as active for user {UserId}", 
+                fallbackConnection.LastActivityAt = DateTime.UtcNow;
+                _logger.LogInformation("Using fallback character {FallbackCharacter} as active for user {UserId}",
                     fallbackConnection.Character.Name, userId);
             }
         }
 
         try
         {
-            await _context.SaveChangesAsync();
+            var affected = await _context.SaveChangesAsync();
+            _logger.LogInformation("SetActiveCharacterAsync saved changes for user {UserId}. Rows affected: {Affected}. Active connections now: {ActiveList}",
+                userId,
+                affected,
+                string.Join(", ", connections.Where(c => c.IsActive).Select(c => c.Character.Name)));
         }
         catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
         {
@@ -414,9 +444,29 @@ public class CharacterService : ICharacterService
 
     public async Task<Character?> GetActiveCharacterAsync(string userId)
     {
+        _logger.LogDebug("Getting active character for user {UserId}", userId);
+        
+        // Get all connections for this user for debugging
+        var allConnections = await _context.CharacterConnections
+            .Include(cc => cc.Character)
+            .Where(cc => cc.UserId == userId)
+            .ToListAsync();
+            
+        _logger.LogInformation("User {UserId} has {ConnectionCount} total connections. Active connections: {ActiveConnections}", 
+            userId, allConnections.Count, string.Join(", ", allConnections.Where(c => c.IsActive).Select(c => c.Character?.Name ?? "null")));
+        
         var activeConnection = await _context.CharacterConnections
             .Include(cc => cc.Character)
             .FirstOrDefaultAsync(cc => cc.UserId == userId && cc.IsActive);
+
+        if (activeConnection != null)
+        {
+            _logger.LogDebug("Found active character {CharacterName} for user {UserId}", activeConnection.Character?.Name, userId);
+        }
+        else
+        {
+            _logger.LogWarning("No active character found for user {UserId}", userId);
+        }
 
         return activeConnection?.Character;
     }

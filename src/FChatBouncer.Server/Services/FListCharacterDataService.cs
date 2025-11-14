@@ -363,11 +363,11 @@ public class FListCharacterDataService : IFListCharacterDataService
                 if (!string.IsNullOrEmpty(mappedValueById))
                 {
                     mappedValue = mappedValueById;
-                    _logger.LogInformation("Mapped infotag value {InfotagId} -> {InfotagName}: {OriginalValue} -> {MappedValue}", key, humanReadableName, value, mappedValue);
+                    _logger.LogTrace("Mapped infotag value {InfotagId} -> {InfotagName}: {OriginalValue} -> {MappedValue}", key, humanReadableName, value, mappedValue);
                 }
                 else
                 {
-                    _logger.LogInformation("No value mapping found for infotag {InfotagId} -> {InfotagName}, value: {Value}", key, humanReadableName, value);
+                    _logger.LogTrace("No value mapping found for infotag {InfotagId} -> {InfotagName}, value: {Value}", key, humanReadableName, value);
                 }
             }
             
@@ -375,11 +375,11 @@ public class FListCharacterDataService : IFListCharacterDataService
             
             if (infotag == null)
             {
-                _logger.LogInformation("No mapping found for infotag ID: {InfotagId}, using raw key", key);
+                _logger.LogTrace("No mapping found for infotag ID: {InfotagId}, using raw key", key);
             }
             else
             {
-                _logger.LogInformation("Mapped infotag {InfotagId} -> {InfotagName}", key, humanReadableName);
+                _logger.LogTrace("Mapped infotag {InfotagId} -> {InfotagName}", key, humanReadableName);
             }
         }
 
@@ -392,11 +392,11 @@ public class FListCharacterDataService : IFListCharacterDataService
             
             if (kink == null)
             {
-                _logger.LogInformation("No mapping found for kink ID: {KinkId}, using raw key", key);
+                _logger.LogTrace("No mapping found for kink ID: {KinkId}, using raw key", key);
             }
             else
             {
-                _logger.LogInformation("Mapped kink {KinkId} -> {KinkName}", key, humanReadableName);
+                _logger.LogTrace("Mapped kink {KinkId} -> {KinkName}", key, humanReadableName);
             }
         }
 

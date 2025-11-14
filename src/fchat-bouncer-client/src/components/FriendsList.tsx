@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import { Friend } from '@/types';
-import { ChevronDownIcon, ChevronRightIcon, UserIcon, BookmarkIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon, ChevronRightIcon, UserIcon, BookmarkIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import Character, { CharacterData, getCharacterStatusColor, getCharacterStatusIcon } from './Character';
 import { getCharacterColor } from '@/lib/genderColors';
 import { bbcodeToHtml } from '@/lib/bbcode';
@@ -21,7 +21,7 @@ interface FriendsListProps {
 
 const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) => {
   const { friends, bookmarks, bookmarksWithStatus, isCollapsed, toggleCollapsed, isLoading, deduplicateFriends, addBookmark, removeBookmark } = useFriendsStore();
-  const { token } = useAuthStore();
+  const { token, setFriendsAndBookmarks } = useAuthStore();
   const { getProfile } = useChatStore();
   const { getCharacter } = useLightweightCharacterStore();
   const [hoveredFriend, setHoveredFriend] = useState<string | null>(null);
@@ -32,6 +32,7 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
   } | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [selectedProfileCharacter, setSelectedProfileCharacter] = useState<string>('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   // Deduplicate friends by name to prevent React key conflicts
@@ -170,6 +171,37 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
     setUserContextMenu(null);
   };
 
+  const handleRefreshFriends = async () => {
+    if (!token) {
+      console.error('No authentication token available');
+      return;
+    }
+
+    setIsRefreshing(true);
+    try {
+      console.log('Refreshing friends list...');
+      const friendsResponse = await api.getFriends(token);
+      console.log('Friends API response:', friendsResponse);
+
+      // Convert friends data to Friend objects
+      const friends = friendsResponse.friends.map((friend: any) => ({
+        name: friend.Name || friend.name,
+        status: friend.Status || friend.status as any,
+        statusMessage: friend.StatusMessage || friend.statusMessage,
+        isOnline: friend.IsOnline || friend.isOnline,
+        lastSeen: friend.LastSeen || friend.lastSeen,
+        gender: friend.Gender || friend.gender
+      }));
+
+      await setFriendsAndBookmarks(friends, friendsResponse.bookmarks, friendsResponse.bookmarksWithStatus);
+      console.log('Friends list refreshed successfully:', friends.length, 'friends,', friendsResponse.bookmarks.length, 'bookmarks');
+    } catch (error) {
+      console.error('Failed to refresh friends list:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className={`bg-gray-800 rounded-lg p-2 ${className}`}>
@@ -188,10 +220,12 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
     >
       {/* Header */}
       <div 
-        className="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-700 rounded-t-lg transition-colors"
-        onClick={toggleCollapsed}
+        className="flex items-center justify-between p-2 hover:bg-gray-700 rounded-t-lg transition-colors"
       >
-        <div className="flex items-center space-x-2">
+        <div 
+          className="flex items-center space-x-2 flex-1 cursor-pointer"
+          onClick={toggleCollapsed}
+        >
           {isCollapsed ? (
             <ChevronRightIcon className="w-4 h-4 text-gray-400" />
           ) : (
@@ -200,6 +234,19 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
           <h3 className="text-sm font-semibold text-white">Friends</h3>
           <span className="text-xs text-gray-400">({onlineFriends.length})</span>
         </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleRefreshFriends();
+          }}
+          disabled={isRefreshing}
+          className="p-1 hover:bg-gray-600 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Refresh friends list"
+        >
+          <ArrowPathIcon 
+            className={`w-4 h-4 text-gray-400 hover:text-white transition-colors ${isRefreshing ? 'animate-spin' : ''}`}
+          />
+        </button>
       </div>
 
       {/* Friends List */}

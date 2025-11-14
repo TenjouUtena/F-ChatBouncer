@@ -30,7 +30,7 @@ public class BouncerUser : IdentityUser
     public virtual ICollection<Message> Messages { get; set; } = new List<Message>();
     public virtual ICollection<Channel> Channels { get; set; } = new List<Channel>();
     public virtual ICollection<QueuedMessage> QueuedMessages { get; set; } = new List<QueuedMessage>();
-    public virtual ICollection<Profile> Profiles { get; set; } = new List<Profile>();
+    // Profiles navigation property removed - data migrated to Character model
     public virtual ICollection<CharacterConnection> CharacterConnections { get; set; } = new List<CharacterConnection>();
     public virtual ICollection<CharacterChannel> CharacterChannels { get; set; } = new List<CharacterChannel>();
 }
