@@ -1,8 +1,8 @@
 {
-  "version": "0.1.20",
-  "buildId": "46c2ffe",
+  "version": "0.1.21",
+  "buildId": "899bcba",
   "branch": "main",
-  "buildDate": "2025-11-14T22:16:16Z",
-  "fullVersion": "0.1.20+46c2ffe",
-  "dockerTag": "0.1.20-46c2ffe"
+  "buildDate": "2025-11-14T22:16:32Z",
+  "fullVersion": "0.1.21+899bcba",
+  "dockerTag": "0.1.21-899bcba"
 }
