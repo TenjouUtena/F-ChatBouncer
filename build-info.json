@@ -1,8 +1,8 @@
 {
-  "version": "0.1.26",
-  "buildId": "cedcc82",
+  "version": "0.1.27",
+  "buildId": "e8679f7",
   "branch": "main",
-  "buildDate": "2025-11-15T11:47:01Z",
-  "fullVersion": "0.1.26+cedcc82",
-  "dockerTag": "0.1.26-cedcc82"
+  "buildDate": "2025-11-15T13:10:24Z",
+  "fullVersion": "0.1.27+e8679f7",
+  "dockerTag": "0.1.27-e8679f7"
 }
