@@ -696,7 +696,7 @@ this.onSearchResultsReceived = callback;
       // Get active character from store
       try {
         const { useCharacterIndexedDBStore } = await import('@/stores/characterIndexedDBStore');
-        targetCharacter = useCharacterIndexedDBStore.getState().activeCharacter;
+        targetCharacter = useCharacterIndexedDBStore.getState().activeCharacter || '';
       } catch (error) {
         console.error('Failed to get active character:', error);
       }
@@ -726,7 +726,7 @@ this.onSearchResultsReceived = callback;
       // Get active character from store
       try {
         const { useCharacterIndexedDBStore } = await import('@/stores/characterIndexedDBStore');
-        targetCharacter = useCharacterIndexedDBStore.getState().activeCharacter;
+        targetCharacter = useCharacterIndexedDBStore.getState().activeCharacter || '';
       } catch (error) {
         console.error('Failed to get active character:', error);
       }
