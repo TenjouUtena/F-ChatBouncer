@@ -43,7 +43,9 @@ export async function checkIndexedDBSupport(): Promise<IndexedDBCapabilities> {
       
       request.onsuccess = () => {
         const db = request.result;
-        db.close();
+        setTimeout(() => {
+          db.close();
+        }, 1000);
         
         // Clean up test database
         const deleteRequest = indexedDB.deleteDatabase(testDbName);
@@ -63,7 +65,9 @@ export async function checkIndexedDBSupport(): Promise<IndexedDBCapabilities> {
       request.onupgradeneeded = () => {
         // Test database created successfully
         const db = request.result;
-        db.close();
+        setTimeout(() => {
+          db.close();
+        }, 1000);
         
         // Clean up test database
         const deleteRequest = indexedDB.deleteDatabase(testDbName);

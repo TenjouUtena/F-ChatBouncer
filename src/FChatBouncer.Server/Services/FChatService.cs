@@ -1589,7 +1589,8 @@ public class FChatService : IFChatService
                 message.Character,
                 message.Message,
                 message.Timestamp,
-                message.MessageType
+                message.MessageType,
+                characterName
             );
 
             using var scope = _serviceProvider.CreateScope();
@@ -1606,7 +1607,8 @@ public class FChatService : IFChatService
                     message.Character,
                     characterName,
                     message.Message,
-                    message.MessageType);
+                    message.MessageType,
+                    message.Channel);
             }
             else
             {

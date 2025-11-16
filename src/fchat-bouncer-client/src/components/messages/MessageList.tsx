@@ -8,12 +8,10 @@ import { getMessageTheme, messageStates } from '@/lib/messages/messageThemes';
 import MessageComponent from './MessageComponent';
 import UserContextMenu from '../UserContextMenu';
 import ProfileModal from '../ProfileModal';
-import { useLazyMessages } from '@/hooks/useLazyMessages';
-import { useBackscrollService } from '@/hooks/useBackscrollService';
+import { useChannelMessages } from '@/hooks/useChannelMessages';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
-import { useChatStore } from '@/stores/chatStore';
 import { api } from '@/lib/api';
 
 interface MessageListRef {
@@ -33,8 +31,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   virtualized = false,
   showTimestamps = true,
   showAvatars = false,
-  groupConsecutive = true,
-  enableLazyLoading = true
+  groupConsecutive = true
 }, ref) => {
   const [currentUser] = useState('currentUser'); // This would come from auth context
   const [hoveredMessage, setHoveredMessage] = useState<string | null>(null);
@@ -48,56 +45,29 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   const { activeCharacter } = useCharacterIndexedDBStore();
   const { bookmarks, addBookmark, removeBookmark } = useFriendsStore();
   const { token } = useAuthStore();
-  const { getProfile } = useChatStore();
   
-  // Create fallback ref for when lazy loading is not used
   const fallbackRef = useRef<HTMLDivElement | null>(null);
-  
-  // Always call the hook, but conditionally use its results
-  const lazyMessages = useLazyMessages({
-    characterName: activeCharacter || '',
-    channelId: selectedChannel || '',
-    initialLimit: 20,
-    loadMoreThreshold: 100
+  const channelMessages = useChannelMessages({
+    characterName: activeCharacter || undefined,
+    channelId: selectedChannel || undefined,
+    limit: 50
   });
+  const usingStoreMessages = Boolean(activeCharacter && selectedChannel);
+  const containerRef = usingStoreMessages ? channelMessages.containerRef : fallbackRef;
 
-  // Initialize backscroll service
-  const backscrollService = useBackscrollService({
-    characterName: activeCharacter || '',
-    channelId: selectedChannel || '',
-    batchSize: 20
-  });
-
-  // Use lazy loading if enabled and we have a selected channel and active character
-  const shouldUseLazyLoading = enableLazyLoading && selectedChannel && activeCharacter;
-  
-  // Ensure lazyMessages is always defined
-  const safeLazyMessages = lazyMessages || {
-    messages: [],
-    isLoading: false,
-    hasMore: false,
-    loadMore: () => Promise.resolve(),
-    scrollToBottom: () => {},
-    isNearTop: () => false,
-    containerRef: fallbackRef
-  };
-  
-   const containerRef = shouldUseLazyLoading ? safeLazyMessages.containerRef : fallbackRef;
-
-  // Get messages to display - use lazy loading if enabled, otherwise filter normally
-  const filteredMessages = useMemo(() => {
+  const displayedMessages = useMemo(() => {
     try {
-      if (shouldUseLazyLoading) {
-        return safeLazyMessages.messages || [];
+      if (usingStoreMessages) {
+        return channelMessages.messages || [];
       }
       
       if (!selectedChannel) return messages || [];
       return filterMessagesByChannel(messages || [], selectedChannel);
     } catch (error) {
-      console.error('Error in filteredMessages useMemo:', error);
+      console.error('Error building displayedMessages useMemo:', error);
       return [];
     }
-  }, [shouldUseLazyLoading, safeLazyMessages.messages, messages, selectedChannel]);
+  }, [usingStoreMessages, channelMessages.messages, messages, selectedChannel]);
 
   // Get theme
   const messageTheme = useMemo(() => {
@@ -195,40 +165,41 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
     }
   }, [token, removeBookmark]);
 
-  // Scroll functions
+  // Scroll functions exposed via ref
   React.useImperativeHandle(ref, () => ({
     scrollToBottom: () => {
-      if (shouldUseLazyLoading) {
-        safeLazyMessages.scrollToBottom();
-      } else {
-        // This would scroll to the bottom of the message list
-        const element = document.getElementById('message-list-end');
-        element?.scrollIntoView({ behavior: 'smooth' });
+      if (usingStoreMessages) {
+        channelMessages.scrollToBottom('smooth');
+        return;
       }
+      const element = containerRef.current;
+      element?.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
     },
     scrollToBottomFast: () => {
-      if (shouldUseLazyLoading) {
-        safeLazyMessages.scrollToBottom();
-      } else {
-        const element = document.getElementById('message-list-end');
-        element?.scrollIntoView({ behavior: 'auto' });
+      if (usingStoreMessages) {
+        channelMessages.scrollToBottom('auto');
+        return;
       }
+      const element = containerRef.current;
+      element?.scrollTo({ top: element.scrollHeight, behavior: 'auto' });
     },
     isNearBottom: (thresholdPx: number = 120) => {
+      if (usingStoreMessages) {
+        return channelMessages.isNearBottom(thresholdPx);
+      }
       const el = containerRef.current;
       if (!el) return true;
       const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
       return distanceFromBottom <= thresholdPx;
     },
     scrollToMessage: (messageId: string) => {
-      // This would scroll to a specific message
       const element = document.getElementById(`message-${messageId}`);
       element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }));
 
   // Render empty state
-  if (filteredMessages.length === 0) {
+  if (displayedMessages.length === 0) {
     return (
       <div className="h-full flex items-center justify-center text-gray-400">
         <div className="text-center">
@@ -240,42 +211,6 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
               : 'Select a channel to view messages.'
             }
           </div>
-          
-          {/* Backscroll Button - Show only when there should be messages */}
-          {shouldUseLazyLoading && selectedChannel && activeCharacter && (
-            <button
-              onClick={() => backscrollService.actions.loadMore()}
-              disabled={backscrollService.state.isLoading}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 
-                         text-white text-sm rounded-md transition-colors duration-200
-                         flex items-center space-x-2 mx-auto"
-            >
-              {backscrollService.state.isLoading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  <span>Loading...</span>
-                </>
-              ) : (
-                <>
-                  <span>🔙</span>
-                  <span>Load Backscroll</span>
-                </>
-              )}
-            </button>
-          )}
-          
-          {/* Error Display */}
-          {backscrollService.state.error && (
-            <div className="mt-4 p-3 bg-red-900/50 border border-red-600 rounded-md">
-              <div className="text-red-300 text-sm">{backscrollService.state.error}</div>
-              <button
-                onClick={() => backscrollService.actions.clearError()}
-                className="text-red-400 hover:text-red-300 text-xs mt-1"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
         </div>
       </div>
     );
@@ -285,109 +220,8 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   if (!virtualized) {
     return (
       <div ref={containerRef} className="h-full overflow-y-auto px-4 py-2 space-y-1">
-        {/* Enhanced debug info for scrollback */}
-        {shouldUseLazyLoading && (
-          <div className="text-xs text-gray-500 mb-2 p-2 bg-gray-800 rounded">
-            <div className="font-semibold">Enhanced Scrollback Debug:</div>
-            <div>• Character: {activeCharacter}</div>
-            <div>• Channel: {selectedChannel}</div>
-            <div>• Messages: {safeLazyMessages.messages.length}</div>
-            <div>• Loading: {safeLazyMessages.isLoading ? 'Yes' : 'No'}</div>
-            <div>• Has More: {safeLazyMessages.hasMore ? 'Yes' : 'No'}</div>
-            <div>• Scroll Top: {containerRef.current?.scrollTop ?? 'N/A'}</div>
-            <div>• Scroll Height: {containerRef.current?.scrollHeight ?? 'N/A'}</div>
-            <div>• Client Height: {containerRef.current?.clientHeight ?? 'N/A'}</div>
-            <div>• Distance from Bottom: {containerRef.current ? 
-              (containerRef.current.scrollHeight - containerRef.current.scrollTop - containerRef.current.clientHeight) : 'N/A'}</div>
-            <div>• Distance from Top: {containerRef.current?.scrollTop ?? 'N/A'}</div>
-            <div>• Near Bottom: {containerRef.current ? 
-              ((containerRef.current.scrollHeight - containerRef.current.scrollTop - containerRef.current.clientHeight) <= 50) : 'N/A'}</div>
-            <div>• Near Top: {containerRef.current ? 
-              (containerRef.current.scrollTop <= 100) : 'N/A'}</div>
-          </div>
-        )}
-        {/* Loading indicator for lazy loading */}
-        {shouldUseLazyLoading && safeLazyMessages.isLoading && safeLazyMessages.hasMore && (
-          <div className="flex justify-center py-4">
-            <div className="flex items-center space-x-2 text-gray-400">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-400"></div>
-              <span className="text-sm">Loading more backscroll...</span>
-            </div>
-          </div>
-        )}
-
-        {/* Load more button if there are more messages but not loading */}
-        {shouldUseLazyLoading && !safeLazyMessages.isLoading && safeLazyMessages.hasMore && (
-          <div className="flex justify-center py-2">
-            <button
-              onClick={safeLazyMessages.loadMore}
-              className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 border border-gray-600 rounded-md hover:border-gray-500 transition-colors"
-            >
-              Load more backscroll
-            </button>
-          </div>
-        )}
-        
-        {/* Central Backscroll Button */}
-        {shouldUseLazyLoading && (backscrollService.state.hasMoreLocal || backscrollService.state.hasMoreServer) && (
-          <div className="flex justify-center py-4">
-            <button
-              onClick={() => backscrollService.actions.loadMore()}
-              disabled={backscrollService.state.isLoading}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 
-                         text-white text-sm rounded-lg transition-colors duration-200
-                         flex items-center space-x-3 shadow-lg hover:shadow-xl
-                         disabled:cursor-not-allowed"
-            >
-              {backscrollService.state.isLoading ? (
-                <>
-                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                  <span>Loading backscroll...</span>
-                </>
-              ) : (
-                <>
-                  <span className="text-lg">🔙</span>
-                  <div className="text-left">
-                    <div className="font-medium">Load Backscroll</div>
-                    <div className="text-xs opacity-75">
-                      {backscrollService.loadedCount} of {backscrollService.totalCount} messages
-                    </div>
-                  </div>
-                </>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* Server-only backscroll button */}
-        {shouldUseLazyLoading && !backscrollService.state.hasMoreLocal && backscrollService.state.hasMoreServer && (
-          <div className="flex justify-center py-2">
-            <button
-              onClick={() => backscrollService.actions.requestFromServer()}
-              disabled={backscrollService.state.isLoading}
-              className="px-4 py-2 text-gray-500 hover:text-gray-300 border border-gray-600 rounded-md 
-                         hover:border-gray-500 transition-colors duration-200 text-xs"
-            >
-              Load from Server
-            </button>
-          </div>
-        )}
-
-        {/* Error Display */}
-        {backscrollService.state.error && (
-          <div className="mx-4 mb-4 p-3 bg-red-900/50 border border-red-600 rounded-md">
-            <div className="text-red-300 text-sm">{backscrollService.state.error}</div>
-            <button
-              onClick={() => backscrollService.actions.clearError()}
-              className="text-red-400 hover:text-red-300 text-xs mt-1"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {filteredMessages.map((message, index) => {
-          const previousMessage = index > 0 ? filteredMessages[index - 1] : null;
+        {displayedMessages.map((message, index) => {
+          const previousMessage = index > 0 ? displayedMessages[index - 1] : null;
           const isSelected = selectedMessages.includes(message.id);
           const isGrouped = groupConsecutive && index > 0 &&
             message.sender === previousMessage?.sender &&

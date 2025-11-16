@@ -159,8 +159,8 @@ export function getMessagePreview(message: Message, maxLength = 100): string {
 /**
  * Generate a unique message ID
  */
-export function generateMessageId(): string {
-  return `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+export function generateMessageId(message: Message): string {
+  return `msg_${message.timestamp}`;
 }
 
 /**

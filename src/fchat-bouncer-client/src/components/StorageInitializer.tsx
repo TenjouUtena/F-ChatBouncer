@@ -8,6 +8,7 @@ import { useLightweightCharacterIndexedDBStore } from '@/stores/lightweightChara
 import { useChatStore } from '@/stores/chatStore';
 import { messageIndexedDBService } from '@/lib/messageIndexedDB';
 import { checkIndexedDBSupport, logIndexedDBStatus, isPrivateMode } from '@/lib/indexeddb-utils';
+import { markIndexedDBReady, markIndexedDBFailed } from '@/lib/indexeddbReady';
 
 export default function StorageInitializer() {
   const initializedRef = useRef(false);
@@ -45,6 +46,7 @@ export default function StorageInitializer() {
         const profileStore = useProfileStore.getState();
         const characterStore = useCharacterIndexedDBStore.getState();
         const lightweightStore = useLightweightCharacterIndexedDBStore.getState();
+        const chatStore = useChatStore.getState();
         
         // Initialize all IndexedDB stores in parallel
         await Promise.all([
@@ -55,6 +57,8 @@ export default function StorageInitializer() {
         ]);
         
         console.log('All IndexedDB stores initialized successfully');
+        markIndexedDBReady();
+        chatStore.handleIndexedDBReady();
         
         // Test IndexedDB functionality
         try {
@@ -82,8 +86,6 @@ export default function StorageInitializer() {
         cleanupOldStorageEntries();
         
         // Load limited messages from IndexedDB into memory for open channels only
-        const chatStore = useChatStore.getState();
-        
         // Get characters with selected channels (open channels)
         const characterSelectedChannels = chatStore.characterSelectedChannels || {};
         
@@ -92,7 +94,7 @@ export default function StorageInitializer() {
           if (openChannels.length > 0) {
             try {
               // Load 100 messages per channel (configurable limit)
-              await chatStore.loadLimitedMessagesFromIndexedDB(characterName, openChannels, 100);
+              await chatStore.loadLimitedMessagesFromIndexedDB(characterName, openChannels);
             } catch (error) {
               console.error(`Failed to load limited messages for ${characterName}:`, error);
             }
@@ -103,6 +105,9 @@ export default function StorageInitializer() {
         
       } catch (error) {
         console.error('Failed to initialize IndexedDB stores:', error);
+        markIndexedDBFailed(error);
+        const chatStore = useChatStore.getState();
+        chatStore.handleIndexedDBFailure(error);
         console.warn('Application will continue with limited storage functionality');
         
         // Still try to run migration and cleanup even if IndexedDB failed

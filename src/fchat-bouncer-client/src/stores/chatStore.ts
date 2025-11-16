@@ -8,7 +8,21 @@ import { useLightweightCharacterStore } from './lightweightCharacterStore';
 import { useProfileStore } from './profileStore';
 import { messageIndexedDBService } from '@/lib/messageIndexedDB';
 
+type PendingRecentBatch = {
+  messages: Message[];
+  characterName?: string;
+};
+
+type PendingHistoryBatch = {
+  messages: Message[];
+  characterName?: string;
+};
+
 interface ChatStore extends ChatState {
+  __debug?: boolean;
+  enableDebug: () => void;
+  disableDebug: () => void;
+  logState: (label?: string) => void;
   // Character-scoped data
   characterMessages: Record<string, Message[]>; // characterName -> messages
   characterSelectedChannels: Record<string, string[]>; // characterName -> channels
@@ -20,16 +34,12 @@ interface ChatStore extends ChatState {
   characterUnreadCounts: Record<string, Record<string, number>>; // characterName -> channelId -> unread count
   characterFocusedChannel: Record<string, string>; // characterName -> currently focused channel
   
-  // Lazy loading state
-  characterLazyLoadingState: Record<string, Record<string, {
-    hasMore: boolean;
-    isLoading: boolean;
-    oldestMessageTime: Date | null;
-    loadedMessageCount: number;
-  }>>; // characterName -> channelId -> lazy loading state
-  
   // Global data (shared across characters)
   knownCharacters: Set<string>;
+  indexedDBReady: boolean;
+  indexedDBFailed: boolean;
+  pendingRecentMessageBatches: PendingRecentBatch[];
+  pendingHistoryBatches: PendingHistoryBatch[];
   
   // Typing indicators state (character-scoped)
   characterTypingStates: Record<string, Record<string, TypingState>>; // characterName -> channelId -> typing state
@@ -45,7 +55,7 @@ interface ChatStore extends ChatState {
 
   // Character-scoped methods
   addMessage: (message: Message, characterName?: string) => void;
-  addMessages: (messages: Message[], characterName?: string) => void;
+  addMessages: (messages: Message[], characterName: string) => void;
   setConnectionStatus: (status: ConnectionStatus, characterName?: string) => void;
   setConnected: (connected: boolean, characterName?: string) => void;
   setSelectedChannels: (channels: string[], characterName?: string) => void;
@@ -65,30 +75,13 @@ interface ChatStore extends ChatState {
   mergeHistoryMessages: (messages: Message[], characterName?: string) => void;
   getLastMessageTime: (channel?: string, characterName?: string) => Date | null;
   
-  // Lazy loading methods
   getMessagesForChannel: (characterName: string, channelId: string, limit?: number) => Message[];
-  getDisplayMessagesForChannel: (characterName: string, channelId: string, displayLimit?: number) => Message[];
-  loadMoreMessages: (characterName: string, channelId: string) => Promise<void>;
-  checkAndLoadMissingMessages: (characterName: string, channelId: string) => Promise<void>;
-  getLazyLoadingState: (characterName: string, channelId: string) => {
-    hasMore: boolean;
-    isLoading: boolean;
-    oldestMessageTime: Date | null;
-    loadedMessageCount: number;
-  };
-  setLazyLoadingState: (characterName: string, channelId: string, state: {
-    hasMore?: boolean;
-    isLoading?: boolean;
-    oldestMessageTime?: Date | null;
-    loadedMessageCount?: number;
-  }) => void;
-  initializeLazyLoading: (characterName: string, channelId: string, initialMessages: Message[]) => void;
-  
-  // Enhanced scrollback methods
-  trimChannelMessages: (characterName: string, channelId: string, maxMessages?: number) => void;
-  getLocalMessagesForChannel: (characterName: string, channelId: string, beforeTime?: Date, limit?: number) => Message[];
-  hasMoreLocalMessages: (characterName: string, channelId: string, beforeTime?: Date) => boolean;
-  clearLazyLoadingState: (characterName: string, channelId: string) => void;
+  getRecentMessagesForChannel: (characterName: string, channelId: string, limit?: number) => Message[];
+  ingestRecentMessages: (messages: Message[], characterNameHint?: string) => void;
+  ingestHistoryMessages: (messages: Message[], characterNameHint?: string) => void;
+  flushPendingIndexedDBMessages: () => void;
+  handleIndexedDBReady: () => void;
+  handleIndexedDBFailure: (error?: unknown) => void;
   
   // Profile management (global) - now delegated to profileStore
   addProfile: (characterName: string, profileData: ProfileData) => Promise<void>;
@@ -150,6 +143,7 @@ interface ChatStore extends ChatState {
   loadAllMessagesFromIndexedDB: () => Promise<void>;
   loadLimitedMessagesFromIndexedDB: (characterName: string, openChannels: string[], limitPerChannel?: number) => Promise<void>;
   loadRecentMessagesForChannel: (characterName: string, channelId: string, limit?: number) => Promise<Message[]>;
+  initializeLazyLoading: (characterName: string, channelId: string, messages: Message[]) => void;
   
   // Deduplication management
   getDeduplicationPreview: (characterName?: string) => Promise<any>;
@@ -223,9 +217,47 @@ function safeSetItem(key: string, value: string): boolean {
   }
 }
 
+function ensureMessageHasId(message: Message): Message {
+  if (message.id) {
+    return message;
+  }
+
+  return {
+    ...message,
+    id: generateMessageId(message)
+  };
+}
+
+function persistMessagesToIndexedDB(messages: Message[], characterName: string): void {
+  messages.forEach((message) => {
+    if (!message.channel) {
+      return;
+    }
+
+    const messageWithId = ensureMessageHasId(message);
+    messageIndexedDBService.storeMessage(characterName, message.channel, messageWithId).catch(error => {
+      console.error('Failed to store message in IndexedDB:', error);
+    });
+  });
+}
+
 export const useChatStore = create<ChatStore>()(
   persist(
     (set, get) => ({
+      __debug: false,
+      enableDebug: () => set({ __debug: true }),
+      disableDebug: () => set({ __debug: false }),
+      logState: (label?: string) => {
+        const state = get();
+        if (!state.__debug) {
+          return;
+        }
+        console.log(`[ChatStore] ${label ?? 'state'}`, {
+          characters: Object.keys(state.characterMessages),
+          selectedChannels: state.characterSelectedChannels,
+          pendingUnknownChannels: Array.from(state.unknownChannels),
+        });
+      },
       // Character-scoped data
       characterMessages: {},
       characterSelectedChannels: {},
@@ -236,10 +268,12 @@ export const useChatStore = create<ChatStore>()(
       characterUnknownChannelCounts: {},
       characterUnreadCounts: {},
       characterFocusedChannel: {},
-      characterLazyLoadingState: {},
-      
       // Global data
       knownCharacters: new Set<string>(),
+      indexedDBReady: false,
+      indexedDBFailed: false,
+      pendingRecentMessageBatches: [],
+      pendingHistoryBatches: [],
       
       // Typing indicators state
       characterTypingStates: {},
@@ -258,14 +292,74 @@ export const useChatStore = create<ChatStore>()(
       channelMetadata: {},
 
       // Character-scoped methods
+      handleIndexedDBReady: () => {
+        if (get().indexedDBReady) {
+          return;
+        }
+
+        set({
+          indexedDBReady: true,
+          indexedDBFailed: false
+        });
+
+        get().flushPendingIndexedDBMessages();
+      },
+
+      handleIndexedDBFailure: () => {
+        if (get().indexedDBFailed) {
+          return;
+        }
+
+        set({
+          indexedDBFailed: true
+        });
+
+        get().flushPendingIndexedDBMessages();
+      },
+
+      flushPendingIndexedDBMessages: () => {
+        const state = get();
+        if (!state.indexedDBReady && !state.indexedDBFailed) {
+          return;
+        }
+
+        if (state.pendingRecentMessageBatches.length === 0 && state.pendingHistoryBatches.length === 0) {
+          return;
+        }
+
+        const recentBatches = state.pendingRecentMessageBatches;
+        const historyBatches = state.pendingHistoryBatches;
+
+        set({
+          pendingRecentMessageBatches: [],
+          pendingHistoryBatches: []
+        });
+
+        recentBatches.forEach((batch) => {
+          if (!batch.characterName) {
+            console.warn('Skipping buffered recent messages without character context');
+            return;
+          }
+          get().addMessages(batch.messages, batch.characterName);
+        });
+
+        historyBatches.forEach((batch) => {
+          if (!batch.characterName) {
+            console.warn('Skipping buffered history messages without character context');
+            return;
+          }
+          get().mergeHistoryMessages(batch.messages, batch.characterName);
+        });
+      },
+
       addMessage: (message: Message, characterName?: string) => {
         const messageWithId = {
           ...message,
-          id: message.id || generateMessageId()
+          id: message.id || generateMessageId(message)
         };
 
         // Store message in IndexedDB if character is specified
-        if (characterName && message.channel) {
+        if (characterName && message.channel && !get().indexedDBFailed) {
           messageIndexedDBService.storeMessage(characterName, message.channel, messageWithId).catch(error => {
             console.error('Failed to store message in IndexedDB:', error);
           });
@@ -310,27 +404,6 @@ export const useChatStore = create<ChatStore>()(
           const newState: Partial<ChatStore> = {
             characterMessages: cleanedMessages
           };
-
-          // Update lazy loading state to expand loaded messages by 1 (capped at 100)
-          if (message.channel) {
-            const currentLazyState = state.characterLazyLoadingState[characterName]?.[message.channel];
-            if (currentLazyState) {
-              const newLoadedCount = Math.min(currentLazyState.loadedMessageCount + 1, 100);
-              
-              //console.log(`Expanding loaded messages for ${characterName}:${message.channel} from ${currentLazyState.loadedMessageCount} to ${newLoadedCount}`);
-              
-              newState.characterLazyLoadingState = {
-                ...state.characterLazyLoadingState,
-                [characterName]: {
-                  ...state.characterLazyLoadingState[characterName],
-                  [message.channel]: {
-                    ...currentLazyState,
-                    loadedMessageCount: newLoadedCount
-                  }
-                }
-              };
-            }
-          }
 
           // Handle unread counts for messages
           const isPM = message.channel && message.channel.startsWith('PRI-');
@@ -415,24 +488,11 @@ export const useChatStore = create<ChatStore>()(
         });
       },
 
-      addMessages: (messages: Message[], characterName?: string) => {
+      addMessages: (messages: Message[], characterName: string) => {
+        console.log('Adding messages to character:', characterName);
         // Store messages in IndexedDB if character is specified
-        if (characterName) {
-          messages.forEach(message => {
-            if (message.channel) {
-              messageIndexedDBService.storeMessage(characterName, message.channel, message).catch(error => {
-                console.error('Failed to store message in IndexedDB:', error);
-              });
-            }
-          });
-        }
-
-        if (!characterName) {
-          // Legacy behavior
-          set((state) => ({
-            messages: [...state.messages, ...messages]
-          }));
-          return;
+        if (!get().indexedDBFailed) {
+          persistMessagesToIndexedDB(messages, characterName);
         }
 
         set((state) => {
@@ -446,41 +506,12 @@ export const useChatStore = create<ChatStore>()(
                existingMsg.channel === newMsg.channel)
             )
           );
-
           const newState: Partial<ChatStore> = {
             characterMessages: {
               ...state.characterMessages,
               [characterName]: [...existingMessages, ...newMessages]
             }
           };
-
-          // Update lazy loading state for each unique channel that received new messages
-          const channelsWithNewMessages = new Set(newMessages.map(msg => msg.channel).filter(Boolean));
-          if (channelsWithNewMessages.size > 0) {
-            newState.characterLazyLoadingState = { ...state.characterLazyLoadingState };
-            
-            channelsWithNewMessages.forEach(channel => {
-              if (channel && newState.characterLazyLoadingState) {
-                const currentLazyState = state.characterLazyLoadingState[characterName]?.[channel];
-                if (currentLazyState) {
-                  const newMessagesInChannel = newMessages.filter(msg => msg.channel === channel);
-                  const newLoadedCount = Math.min(currentLazyState.loadedMessageCount + newMessagesInChannel.length, 100);
-                  
-                  console.log(`Expanding loaded messages for ${characterName}:${channel} from ${currentLazyState.loadedMessageCount} to ${newLoadedCount} (${newMessagesInChannel.length} new messages)`);
-                  
-                  if (!newState.characterLazyLoadingState[characterName]) {
-                    newState.characterLazyLoadingState[characterName] = {};
-                  }
-                  
-                  newState.characterLazyLoadingState[characterName][channel] = {
-                    ...currentLazyState,
-                    loadedMessageCount: newLoadedCount
-                  };
-                }
-              }
-            });
-          }
-
           return newState;
         });
       },
@@ -826,9 +857,12 @@ export const useChatStore = create<ChatStore>()(
           return;
         }
 
+        const messagesWithIds = messages; //.map(ensureMessageHasId);
+        let uniqueMessages: Message[] = [];
+
         set((state) => {
           const existingMessages = state.characterMessages[characterName] || [];
-          const newMessages = messages.filter(newMsg => 
+          uniqueMessages = messagesWithIds.filter(newMsg => 
             !existingMessages.some(existingMsg => 
               existingMsg.id === newMsg.id ||
               (existingMsg.timestamp === newMsg.timestamp &&
@@ -837,14 +871,22 @@ export const useChatStore = create<ChatStore>()(
                existingMsg.channel === newMsg.channel)
             )
           );
+
+          if (uniqueMessages.length === 0) {
+            return state;
+          }
           
           return {
             characterMessages: {
               ...state.characterMessages,
-              [characterName]: [...newMessages, ...existingMessages]
+              [characterName]: [...uniqueMessages, ...existingMessages]
             }
           };
         });
+
+        if (uniqueMessages.length > 0 && !get().indexedDBFailed) {
+          persistMessagesToIndexedDB(uniqueMessages, characterName);
+        }
       },
 
       getLastMessageTime: (channel?: string, characterName?: string) => {
@@ -1294,7 +1336,6 @@ export const useChatStore = create<ChatStore>()(
         set(() => ({
           messages: [],
           characterMessages: {},
-          characterLazyLoadingState: {},
           profiles: {},
           profileRequestStatus: {},
           profileLastRequested: {},
@@ -1302,434 +1343,83 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
 
-      // Lazy loading methods
-      getMessagesForChannel: (characterName: string, channelId: string) => {
+      getMessagesForChannel: (characterName: string, channelId: string, limit?: number) => {
         const state = get();
         const allMessages = state.characterMessages[characterName] || [];
         const channelMessages = allMessages.filter(m => m.channel === channelId);
-        
-        // Return ALL stored messages (no limit) - used for scrollback logic
+        if (typeof limit === 'number') {
+          return channelMessages.slice(-limit);
+        }
         return channelMessages;
       },
 
-      getDisplayMessagesForChannel: (characterName: string, channelId: string, displayLimit?: number) => {
-        const state = get();
-        const allMessages = state.characterMessages[characterName] || [];
-        const channelMessages = allMessages.filter(m => m.channel === channelId);
-        
-        // Return only the most recent messages for display (configurable limit)
-        // If no limit provided, return all messages
-        return displayLimit ? channelMessages.slice(-displayLimit) : channelMessages;
+      getRecentMessagesForChannel: (characterName: string, channelId: string, limit: number = 50) => {
+        const messages = get().getMessagesForChannel(characterName, channelId);
+        return messages.slice(-limit);
       },
 
-      loadMoreMessages: async (characterName: string, channelId: string) => {
-        const state = get();
-        const lazyState = state.characterLazyLoadingState[characterName]?.[channelId];
-        
-        if (!lazyState || lazyState.isLoading || !lazyState.hasMore) {
-          console.log('loadMoreMessages: Skipping - conditions not met', {
-            hasLazyState: !!lazyState,
-            isLoading: lazyState?.isLoading,
-            hasMore: lazyState?.hasMore
-          });
+      ingestRecentMessages: (messages: Message[], characterNameHint?: string) => {
+        if (!messages || messages.length === 0) {
           return;
         }
 
-        console.log('loadMoreMessages: Starting load for', { characterName, channelId, oldestMessageTime: lazyState.oldestMessageTime });
-
-        // Set loading state
-        get().setLazyLoadingState(characterName, channelId, { isLoading: true });
-
-        try {
-          // Import signalr connection
-          const { signalRService } = await import('@/lib/signalr');
-          
-          if (!signalRService.isConnected) {
-            throw new Error('SignalR connection not available');
-          }
-
-          // Request more messages from the server
-          // Use the oldest message time as the 'since' parameter to get older messages
-          const since = lazyState.oldestMessageTime || new Date(Date.now() - 24 * 60 * 60 * 1000); // Default to 24 hours ago
-          const limit = 20; // Load 20 messages at a time
-          
-          // Ensure since is a Date object
-          const sinceDate = since instanceof Date ? since : new Date(since);
-          
-          console.log('loadMoreMessages: Requesting history', { channelId, since: sinceDate, limit });
-          await signalRService.requestHistory(channelId, sinceDate, limit);
-          
-        } catch (error) {
-          console.error('Failed to load more messages:', error);
-          get().setLazyLoadingState(characterName, channelId, { isLoading: false });
-        }
-      },
-
-      checkAndLoadMissingMessages: async (characterName: string, channelId: string) => {
         const state = get();
-        const storedMessages = state.characterMessages[characterName] || [];
-        const channelMessages = storedMessages.filter(m => m.channel === channelId);
-        
-        console.log(`checkAndLoadMissingMessages: ${channelMessages.length} messages stored locally for ${characterName}:${channelId}`);
-        
-        try {
-          // Import signalr connection
-          const { signalRService } = await import('@/lib/signalr');
-          
-          if (!signalRService.isConnected) {
-            console.log('SignalR not connected, skipping backend fetch');
-            return;
-          }
+        const normalizedCharacter = characterNameHint || messages[0]?.characterName;
+        const normalizedMessages = messages.map((msg) => ({
+          ...msg,
+          characterName: msg.characterName || normalizedCharacter
+        }));
 
-          // Case 1: No messages locally - request the latest 100 messages
-          if (channelMessages.length === 0) {
-            console.log(`No messages for ${channelId}, requesting latest 100 messages from backend`);
-            
-            // Request messages before 'now' to get the most recent ones
-            const now = new Date();
-            const limit = 100;
-            
-            console.log('Requesting latest messages from backend:', { channelId, since: now, limit });
-            await signalRService.requestHistory(channelId, now, limit);
-            
-          } 
-          // Case 2: Very few messages locally - request more history
-          else if (channelMessages.length < 50) {
-            console.log(`Only ${channelMessages.length} messages stored locally for ${channelId}, attempting to load more from backend`);
-            
-            // Sort messages to find the oldest one
-            const sortedMessages = [...channelMessages].sort((a, b) => 
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-            );
-            const oldestMessage = sortedMessages[0];
-            
-            // Request messages before the oldest message we have
-            const since = new Date(oldestMessage.timestamp);
-            const limit = 100;
-            
-            console.log('Requesting older messages from backend:', { channelId, since, limit });
-            await signalRService.requestHistory(channelId, since, limit);
-          }
-          // Case 3: We have enough messages, no need to load more automatically
-          else {
-            console.log(`${channelMessages.length} messages available for ${channelId}, no automatic load needed`);
-          }
-          
-        } catch (error) {
-          console.error('Failed to load missing messages from backend:', error);
-        }
-      },
-
-      getLazyLoadingState: (characterName: string, channelId: string) => {
-        const state = get();
-        const existingState = state.characterLazyLoadingState[characterName]?.[channelId];
-        
-        // If we have an existing state, validate it before returning
-        if (existingState) {
-          const allMessages = state.characterMessages[characterName] || [];
-          const channelMessages = allMessages.filter(m => m.channel === channelId);
-          
-          // Sanity check: if loadedMessageCount is greater than actual messages, it's corrupted
-          if (existingState.loadedMessageCount > channelMessages.length) {
-            console.log('Detected corrupted lazy loading state - loadedMessageCount > actual messages. Recalculating...');
-            // Recalculate the state instead of returning the corrupted one
-            const sortedMessages = [...channelMessages].sort((a, b) => 
-              new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-            );
-            
-            const initialDisplayCount = Math.min(channelMessages.length, 20);
-            const displayedMessages = sortedMessages.slice(-initialDisplayCount);
-            const oldestDisplayedMessage = displayedMessages[0];
-            
-            const correctedState = {
-              hasMore: channelMessages.length > 20,
-              isLoading: false,
-              oldestMessageTime: oldestDisplayedMessage ? new Date(oldestDisplayedMessage.timestamp) : null,
-              loadedMessageCount: initialDisplayCount
-            };
-            
-            // Update the state with the corrected values
-            get().setLazyLoadingState(characterName, channelId, correctedState);
-            return correctedState;
-          }
-          
-          return existingState;
-        }
-        
-        // If no existing state, calculate it based on current messages
-        const allMessages = state.characterMessages[characterName] || [];
-        const channelMessages = allMessages.filter(m => m.channel === channelId);
-        
-        if (channelMessages.length === 0) {
-          return {
-            hasMore: false,
-            isLoading: false,
-            oldestMessageTime: null,
-            loadedMessageCount: 0
-          };
-        }
-        
-        const sortedMessages = [...channelMessages].sort((a, b) => 
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-        
-        const initialDisplayCount = Math.min(channelMessages.length, 20);
-        const displayedMessages = sortedMessages.slice(-initialDisplayCount); // Get the last N messages (most recent)
-        const oldestDisplayedMessage = displayedMessages[0]; // Oldest of the displayed messages
-        
-        // For initial state, assume there might be more messages on the server
-        // This will be updated when we actually try to load more
-        const hasMore = true;
-        
-        console.log('Calculating initial lazy loading state:', {
-          totalMessages: channelMessages.length,
-          initialDisplayCount,
-          hasMore,
-          oldestDisplayedMessageTime: oldestDisplayedMessage?.timestamp
-        });
-        
-        return {
-          hasMore,
-          isLoading: false,
-          oldestMessageTime: oldestDisplayedMessage ? new Date(oldestDisplayedMessage.timestamp) : null,
-          loadedMessageCount: initialDisplayCount
-        };
-      },
-
-      setLazyLoadingState: (characterName: string, channelId: string, newState: {
-        hasMore?: boolean;
-        isLoading?: boolean;
-        oldestMessageTime?: Date | null;
-        loadedMessageCount?: number;
-      }) => {
-        console.log('setLazyLoadingState called:', { characterName, channelId, newState });
-        
-        set((state) => {
-          const currentState = state.characterLazyLoadingState[characterName]?.[channelId] || {
-            hasMore: true,
-            isLoading: false,
-            oldestMessageTime: null,
-            loadedMessageCount: 0
-          };
-
-          const updatedState = {
-            ...currentState,
-            ...newState
-          };
-
-          console.log('setLazyLoadingState: Updating state from', currentState, 'to', updatedState);
-
-          return {
-            characterLazyLoadingState: {
-              ...state.characterLazyLoadingState,
-              [characterName]: {
-                ...state.characterLazyLoadingState[characterName],
-                [channelId]: updatedState
+        if (!state.indexedDBReady && !state.indexedDBFailed) {
+          set((store) => ({
+            pendingRecentMessageBatches: [
+              ...store.pendingRecentMessageBatches,
+              {
+                messages: normalizedMessages,
+                characterName: normalizedCharacter
               }
-            }
-          };
-        });
-      },
-
-      initializeLazyLoading: (characterName: string, channelId: string, initialMessages: Message[]) => {
-        const state = get();
-        const existingState = state.characterLazyLoadingState[characterName]?.[channelId];
-        
-        // Only initialize if not already initialized
-        if (existingState) {
-          console.log('Lazy loading already initialized for', { characterName, channelId });
+            ]
+          }));
           return;
         }
 
-        const sortedMessages = [...initialMessages].sort((a, b) => 
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-
-        const oldestMessage = sortedMessages[0];
-        const newestMessage = sortedMessages[sortedMessages.length - 1];
-
-        // Always start with hasMore = true to allow lazy loading to work
-        // The server will tell us if there are no more messages when we try to load
-        const hasMore = true;
-
-        console.log('Initializing lazy loading:', {
-          characterName,
-          channelId,
-          messageCount: initialMessages.length,
-          hasMore,
-          oldestMessageTime: oldestMessage?.timestamp
-        });
-
-        // Calculate how many messages we should initially display (20, not all)
-        const initialDisplayCount = Math.min(initialMessages.length, 20);
-        
-        // If we have more messages than we're displaying, we have more to load
-        const actuallyHasMore = initialMessages.length > initialDisplayCount;
-        
-        console.log('Setting up lazy loading state:', {
-          totalMessages: initialMessages.length,
-          initialDisplayCount,
-          actuallyHasMore
-        });
-
-        get().setLazyLoadingState(characterName, channelId, {
-          hasMore: actuallyHasMore,
-          isLoading: false,
-          oldestMessageTime: oldestMessage ? new Date(oldestMessage.timestamp) : null,
-          loadedMessageCount: initialDisplayCount
-        });
+        if (normalizedCharacter) {
+          get().addMessages(normalizedMessages, normalizedCharacter);
+        } else {
+          console.warn('Dropping recent messages without character context');
+        }
       },
 
-      // Enhanced scrollback methods
-      trimChannelMessages: (characterName: string, channelId: string, maxMessages: number = 100) => {
-        set((state) => {
-          // Skip trimming for PM channels (they start with PRI-)
-          if (channelId.startsWith('PRI-')) {
-            console.log(`Skipping trim for PM channel: ${channelId}`);
-            return state;
-          }
-          
-          const characterMessages = state.characterMessages[characterName] || [];
-          const channelMessages = characterMessages.filter(msg => msg.channel === channelId);
-          
-          if (channelMessages.length <= maxMessages) {
-            return state; // No trimming needed
-          }
+      ingestHistoryMessages: (messages: Message[], characterNameHint?: string) => {
+        if (!messages || messages.length === 0) {
+          return;
+        }
 
-          // Sort messages by timestamp (oldest first)
-          const sortedMessages = [...channelMessages].sort((a, b) => 
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-          );
-
-          // Keep only the most recent messages
-          const trimmedMessages = sortedMessages.slice(-maxMessages);
-          const trimmedIds = new Set(trimmedMessages.map(msg => msg.id));
-
-          // Update character messages, removing trimmed ones
-          const updatedCharacterMessages = characterMessages.filter(msg => 
-            msg.channel !== channelId || trimmedIds.has(msg.id)
-          );
-
-          // Update lazy loading state to reflect the new message count
-          const lazyState = state.characterLazyLoadingState[characterName]?.[channelId];
-          if (lazyState) {
-            const newLoadedCount = Math.min(lazyState.loadedMessageCount, trimmedMessages.length);
-            
-            console.log(`Trimmed channel ${channelId} from ${channelMessages.length} to ${trimmedMessages.length} messages, updating loadedMessageCount from ${lazyState.loadedMessageCount} to ${newLoadedCount}`);
-            
-            // Update the lazy loading state to reflect the trimmed count
-            return {
-              ...state,
-              characterMessages: {
-                ...state.characterMessages,
-                [characterName]: updatedCharacterMessages
-              },
-              characterLazyLoadingState: {
-                ...state.characterLazyLoadingState,
-                [characterName]: {
-                  ...state.characterLazyLoadingState[characterName],
-                  [channelId]: {
-                    ...lazyState,
-                    loadedMessageCount: newLoadedCount
-                  }
-                }
-              }
-            };
-          }
-
-          console.log(`Trimmed channel ${channelId} from ${channelMessages.length} to ${trimmedMessages.length} messages`);
-
-          return {
-            ...state,
-            characterMessages: {
-              ...state.characterMessages,
-              [characterName]: updatedCharacterMessages
-            }
-          };
-        });
-      },
-
-      getLocalMessagesForChannel: (characterName: string, channelId: string, beforeTime?: Date, limit: number = 20) => {
         const state = get();
-        const characterMessages = state.characterMessages[characterName] || [];
-        let channelMessages = characterMessages.filter(msg => msg.channel === channelId);
+        const normalizedCharacter = characterNameHint || messages[0]?.characterName;
+        const normalizedMessages = messages.map((msg) => ({
+          ...msg,
+          characterName: msg.characterName || normalizedCharacter
+        }));
 
-        // Sort by timestamp (oldest first)
-        const sortedMessages = [...channelMessages].sort((a, b) => 
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-
-        // Filter by time if provided (get messages older than beforeTime)
-        if (beforeTime) {
-          const olderMessages = sortedMessages.filter(msg => 
-            new Date(msg.timestamp) < beforeTime
-          );
-          // Return the most recent of the older messages (last N messages before beforeTime)
-          return olderMessages.slice(-limit);
-        }
-
-        // If no beforeTime, return the oldest messages (first N messages)
-        return sortedMessages.slice(0, limit);
-      },
-
-      hasMoreLocalMessages: (characterName: string, channelId: string, beforeTime?: Date) => {
-        const state = get();
-        const characterMessages = state.characterMessages[characterName] || [];
-        let channelMessages = characterMessages.filter(msg => msg.channel === channelId);
-
-        // Sort by timestamp (oldest first)
-        const sortedMessages = [...channelMessages].sort((a, b) => 
-          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-
-        // Get the current lazy loading state
-        const lazyState = state.characterLazyLoadingState[characterName]?.[channelId];
-        
-        // If we have more messages stored than we're currently displaying, we have more to show
-        if (lazyState && channelMessages.length > lazyState.loadedMessageCount) {
-          return true;
-        }
-
-        // Check if there are older messages available locally
-        if (beforeTime) {
-          const olderMessages = sortedMessages.filter(msg => 
-            new Date(msg.timestamp) < beforeTime
-          );
-          return olderMessages.length > 0;
-        }
-
-        // If no beforeTime, check if we have messages older than the oldest displayed
-        if (lazyState?.oldestMessageTime) {
-          const olderMessages = sortedMessages.filter(msg => 
-            new Date(msg.timestamp) < lazyState.oldestMessageTime!
-          );
-          console.log(`Checking for older messages without beforeTime: ${olderMessages.length} messages older than ${lazyState.oldestMessageTime.toISOString()}`);
-          return olderMessages.length > 0;
-        }
-
-        // If no beforeTime and no lazy state, assume no more local messages
-        return false;
-      },
-
-      clearLazyLoadingState: (characterName: string, channelId: string) => {
-        set((state) => {
-          const characterState = state.characterLazyLoadingState[characterName];
-          if (characterState && characterState[channelId]) {
-            const newCharacterState = { ...characterState };
-            delete newCharacterState[channelId];
-            
-            console.log(`Cleared lazy loading state for ${characterName}:${channelId}`);
-            
-            return {
-              ...state,
-              characterLazyLoadingState: {
-                ...state.characterLazyLoadingState,
-                [characterName]: newCharacterState
+        if (!state.indexedDBReady && !state.indexedDBFailed) {
+          set((store) => ({
+            pendingHistoryBatches: [
+              ...store.pendingHistoryBatches,
+              {
+                messages: normalizedMessages,
+                characterName: normalizedCharacter
               }
-            };
-          }
-          return state;
-        });
+            ]
+          }));
+          return;
+        }
+
+        if (normalizedCharacter) {
+          get().mergeHistoryMessages(normalizedMessages, normalizedCharacter);
+        } else {
+          console.warn('Dropping history messages without character context');
+        }
       },
 
       // Storage management methods
@@ -1767,7 +1457,6 @@ export const useChatStore = create<ChatStore>()(
             ),
             characterUnknownChannelCounts: currentState.characterUnknownChannelCounts,
             characterUnreadCounts: currentState.characterUnreadCounts,
-            characterLazyLoadingState: currentState.characterLazyLoadingState,
             messages: currentState.messages,
             selectedChannels: currentState.selectedChannels,
             channelMetadata: currentState.channelMetadata
@@ -1802,7 +1491,6 @@ export const useChatStore = create<ChatStore>()(
           
           // Load messages for characters that have connections
           const characterNames = Object.keys(state.characterSelectedChannels);
-          
           for (const characterName of characterNames) {
             try {
               const messages = await messageIndexedDBService.getMessages(characterName);
@@ -1818,7 +1506,6 @@ export const useChatStore = create<ChatStore>()(
                      m.channel === message.channel)
                   ) === index;
                 });
-                
                 set(currentState => ({
                   characterMessages: {
                     ...currentState.characterMessages,
@@ -1838,7 +1525,7 @@ export const useChatStore = create<ChatStore>()(
         }
       },
 
-      loadLimitedMessagesFromIndexedDB: async (characterName: string, openChannels: string[], limitPerChannel: number = 100) => {
+      loadLimitedMessagesFromIndexedDB: async (characterName: string, openChannels: string[], limitPerChannel: number = 10000) => {
         try {
           console.log(`Loading limited messages from IndexedDB for ${characterName} (${limitPerChannel} per channel)...`);
           
@@ -1912,6 +1599,10 @@ export const useChatStore = create<ChatStore>()(
           console.error(`Failed to load recent messages for ${characterName} in ${channelId}:`, error);
           return [];
         }
+      },
+
+      initializeLazyLoading: (_characterName: string, _channelId: string, _messages: Message[]) => {
+        // Placeholder for future lazy loading logic
       },
 
       getDeduplicationPreview: async (characterName?: string) => {
@@ -2056,7 +1747,6 @@ export const useChatStore = create<ChatStore>()(
         characterUnknownChannelCounts: state.characterUnknownChannelCounts,
         characterUnreadCounts: state.characterUnreadCounts,
         characterFocusedChannel: state.characterFocusedChannel,
-        characterLazyLoadingState: state.characterLazyLoadingState,
         // Legacy fields for backward compatibility (excluding messages)
         selectedChannels: state.selectedChannels,
         channelMetadata: state.channelMetadata
@@ -2072,22 +1762,6 @@ export const useChatStore = create<ChatStore>()(
               Object.entries(state.characterUnknownChannels).map(([key, value]) => [key, new Set(value)])
             );
           }
-          
-          // Convert Date strings back to Date objects in lazy loading state
-          if (state.characterLazyLoadingState) {
-            Object.keys(state.characterLazyLoadingState).forEach(characterName => {
-              const characterState = state.characterLazyLoadingState[characterName];
-              if (characterState) {
-                Object.keys(characterState).forEach(channelId => {
-                  const channelState = characterState[channelId];
-                  if (channelState && channelState.oldestMessageTime && typeof channelState.oldestMessageTime === 'string') {
-                    channelState.oldestMessageTime = new Date(channelState.oldestMessageTime);
-                  }
-                });
-              }
-            });
-          }
-          
           // Initialize profile store after rehydration
           const profileStore = useProfileStore.getState();
           profileStore.initialize().catch(error => {
@@ -2106,6 +1780,10 @@ export const useChatStore = create<ChatStore>()(
     }
   )
 );
+
+if (typeof window !== 'undefined') {
+  (window as any).__CHAT_STORE__ = useChatStore;
+}
 
 // Set up token refresh callback
 setTokenRefreshCallback(() => useAuthStore.getState().refreshAccessToken());

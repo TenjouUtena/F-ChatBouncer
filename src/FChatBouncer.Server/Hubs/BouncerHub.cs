@@ -578,6 +578,27 @@ public class BouncerHub : Hub
         }
     }
 
+    public Task GetHistory(string channel, DateTime since, int limit = 100)
+    {
+        return RequestHistory(channel, since, limit);
+    }
+
+    public async Task GetRecentMessages(string? characterName = null)
+    {
+        var userId = Context.UserIdentifier;
+        if (userId == null) return;
+
+        _logger.LogInformation("User {UserId} requesting recent messages for {Character}", userId, characterName ?? "all characters");
+
+        if (string.IsNullOrWhiteSpace(characterName))
+        {
+            await SendRecentMessages(userId);
+            return;
+        }
+
+        await SendRecentMessages(userId, characterName);
+    }
+
     public async Task ClearAllHistory()
     {
         var userId = Context.UserIdentifier;
@@ -1334,7 +1355,8 @@ public class BouncerHub : Hub
             message.SenderId,
             message.Content,
             message.Timestamp,
-            messageType);
+            messageType,
+            ResolveMessageCharacterName(message));
         return true;
     }
 
@@ -1355,6 +1377,29 @@ public class BouncerHub : Hub
             StreamMessageTypes.Direct => "Private",
             _ => "Chat"
         };
+    }
+
+    private static string? ResolveMessageCharacterName(StreamMessage message)
+    {
+        if (message.Metadata.TryGetValue("characterName", out var characterName) &&
+            !string.IsNullOrWhiteSpace(characterName))
+        {
+            return characterName;
+        }
+
+        if (message.Metadata.TryGetValue("senderCharacter", out var senderCharacter) &&
+            !string.IsNullOrWhiteSpace(senderCharacter))
+        {
+            return senderCharacter;
+        }
+
+        if (message.Metadata.TryGetValue("recipientId", out var recipientId) &&
+            !string.IsNullOrWhiteSpace(recipientId))
+        {
+            return recipientId;
+        }
+
+        return null;
     }
 
     private async Task SendRecentMessages(string userId, string? characterName = null)
@@ -1407,7 +1452,7 @@ public class BouncerHub : Hub
                         }
                     }
 
-                    var messages = await _messageService.GetMessagesAsync(userId, channel, since, 50);
+                    var messages = await _messageService.GetChannelMessagesSinceAsync(userId, channel, since, 50);
                     if (messages.Count > 0)
                     {
                         await Clients.Caller.SendAsync("ReceiveHistory", new HistoryDto(
@@ -1674,7 +1719,8 @@ public record MessageDto(
     string Sender,
     string Content,
     DateTime Timestamp,
-    string MessageType
+    string MessageType,
+    string? CharacterName = null
 );
 
 public record HistoryDto(

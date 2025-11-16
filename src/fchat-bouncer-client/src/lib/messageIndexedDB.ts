@@ -17,6 +17,7 @@ class MessageIndexedDBService {
   private dbVersion = 1;
   private storeName = 'messages';
   private db: IDBDatabase | null = null;
+  private initializingPromise: Promise<void> | null = null;
 
   async initialize(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -28,8 +29,6 @@ class MessageIndexedDBService {
         return;
       }
 
-      console.log('Opening Message IndexedDB:', this.dbName, 'version:', this.dbVersion);
-      
       const request = indexedDB.open(this.dbName, this.dbVersion);
 
       request.onerror = () => {
@@ -45,11 +44,6 @@ class MessageIndexedDBService {
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('Message IndexedDB initialized successfully:', {
-          dbName: this.dbName,
-          version: this.dbVersion,
-          objectStoreNames: Array.from(this.db.objectStoreNames)
-        });
         resolve();
       };
 
@@ -69,9 +63,24 @@ class MessageIndexedDBService {
   }
 
   private async ensureInitialized(): Promise<void> {
-    if (!this.db) {
-      await this.initialize();
+    if (this.db) {
+      return;
     }
+
+    if (!this.initializingPromise) {
+      this.initializingPromise = this.initialize()
+        .catch((error) => {
+          // Reset the promise if initialization failed so future attempts can retry
+          this.initializingPromise = null;
+          throw error;
+        })
+        .then(() => {
+          // Clear the promise once initialization succeeds
+          this.initializingPromise = null;
+        });
+    }
+
+    await this.initializingPromise;
   }
 
   private generateKey(characterName: string, channelId: string, messageId: string): string {
@@ -175,7 +184,7 @@ class MessageIndexedDBService {
     });
   }
 
-  async getRecentMessagesForChannel(characterName: string, channelId: string, limit: number = 100): Promise<any[]> {
+  async getRecentMessagesForChannel(characterName: string, channelId: string, limit: number = 10000): Promise<any[]> {
     await this.ensureInitialized();
     
     return new Promise((resolve, reject) => {

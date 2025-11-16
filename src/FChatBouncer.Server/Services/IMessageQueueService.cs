@@ -20,6 +20,7 @@ public interface IMessageQueueService
         string recipientId,
         string content,
         string messageType,
+        string? channelName = null,
         CancellationToken cancellationToken = default);
 
     Task<string> PublishSystemEventAsync(

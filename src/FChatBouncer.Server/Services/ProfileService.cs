@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Collections.Concurrent;
 using Npgsql;
 using Microsoft.AspNetCore.SignalR;
+using System.Security.Cryptography;
 
 namespace FChatBouncer.Server.Services;
 
@@ -17,6 +18,7 @@ public class ProfileService : IProfileService
     private readonly IProfileRateLimiter _rateLimiter;
     private readonly IHubContext<BouncerHub> _hubContext;
     private readonly IProfileQueueService _profileQueueService;
+    private readonly IEncryptionService _encryptionService;
     private readonly ConcurrentDictionary<string, Task> _pendingRequests = new();
 
     public ProfileService(
@@ -25,7 +27,8 @@ public class ProfileService : IProfileService
         ILogger<ProfileService> logger,
         IProfileRateLimiter rateLimiter,
         IHubContext<BouncerHub> hubContext,
-        IProfileQueueService profileQueueService)
+        IProfileQueueService profileQueueService,
+        IEncryptionService encryptionService)
     {
         _serviceProvider = serviceProvider;
         _fChatService = fChatService;
@@ -33,6 +36,7 @@ public class ProfileService : IProfileService
         _rateLimiter = rateLimiter;
         _hubContext = hubContext;
         _profileQueueService = profileQueueService;
+        _encryptionService = encryptionService;
     }
 
     public async Task SaveProfileAsync(string userId, string characterName, string profileData, string? rawProData = null)
@@ -363,20 +367,14 @@ public class ProfileService : IProfileService
                     return;
                 }
 
-                // Decode credentials
-                var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-                var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-                var parts = credentials.Split(':');
+                string account, password;
 
-                if (parts.Length != 2)
-                {
-                    _logger.LogError("Invalid credentials format for user {UserId}", userId);
-                    await _fChatService.RequestProfileAsync(userId, characterName);
+                try {
+                    (account, password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+                } catch (CryptographicException ex) {
+                    _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}", userId);
                     return;
                 }
-
-                var account = parts[0];
-                var password = parts[1];
                 
                 // Use the new method with automatic ticket renewal
                 var characterData = await characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
@@ -522,19 +520,7 @@ public class ProfileService : IProfileService
                 return null;
             }
 
-            // Decode credentials
-            var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-            var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-            var parts = credentials.Split(':');
-
-            if (parts.Length != 2)
-            {
-                _logger.LogError("Invalid credentials format for user {UserId}", userId);
-                return null;
-            }
-
-            var account = parts[0];
-            var password = parts[1];
+            var (account, password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
 
             // Check rate limiting
             if (!await _rateLimiter.IsRequestAllowedAsync(userId, characterName))

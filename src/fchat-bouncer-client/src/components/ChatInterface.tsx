@@ -36,7 +36,54 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterIndexedDBStore();
-  const { messages, addMessage, addMessages, mergeHistoryMessages, clearAllHistory, setConnected, isConnected, selectedChannels, unknownChannels, unknownChannelCounts, addToSelectedChannels, clearUnknownChannel, getChannelDisplayName, addProfile, getProfile, getCharacterGender, getCharacterSpecies, hasCharacterData, isProfileStale, requestProfileForCharacter, refreshProfile, getMessagesForCharacter, getSelectedChannelsForCharacter, isCharacterKnown, getProfileRequestStatus, markCharacterKnown, openPMChannel, getUnknownChannelsForCharacter, getUnknownChannelCountsForCharacter, hasUnreadActivityOnOtherCharacters, getTotalUnreadCountOnOtherCharacters, getUnreadCount, getTotalUnreadCountForCharacter, getUnreadCountsForCharacter, clearUnreadCountForChannel, getHighUrgencyUnreadCountForCharacter, getRegularUnreadCountForCharacter, updateTypingState, clearTypingState, getTypingState, characterTypingStates, clearAllUnreadCountsForCharacter, setFocusedChannel, checkAndLoadMissingMessages } = useChatStore();
+  const {
+    messages,
+    addMessage,
+    clearAllHistory,
+    setConnected,
+    isConnected,
+    selectedChannels,
+    unknownChannels,
+    unknownChannelCounts,
+    addToSelectedChannels,
+    clearUnknownChannel,
+    getChannelDisplayName,
+    addProfile,
+    getProfile,
+    getCharacterGender,
+    getCharacterSpecies,
+    hasCharacterData,
+    isProfileStale,
+    requestProfileForCharacter,
+    refreshProfile,
+    getMessagesForCharacter,
+    getSelectedChannelsForCharacter,
+    isCharacterKnown,
+    getProfileRequestStatus,
+    markCharacterKnown,
+    openPMChannel,
+    getUnknownChannelsForCharacter,
+    getUnknownChannelCountsForCharacter,
+    hasUnreadActivityOnOtherCharacters,
+    getTotalUnreadCountOnOtherCharacters,
+    getUnreadCount,
+    getTotalUnreadCountForCharacter,
+    getUnreadCountsForCharacter,
+    clearUnreadCountForChannel,
+    getHighUrgencyUnreadCountForCharacter,
+    getRegularUnreadCountForCharacter,
+    updateTypingState,
+    clearTypingState,
+    getTypingState,
+    characterTypingStates,
+    clearAllUnreadCountsForCharacter,
+    setFocusedChannel,
+    ingestRecentMessages,
+    ingestHistoryMessages,
+    indexedDBReady,
+    characterSelectedChannels,
+    getLastMessageTime
+  } = useChatStore();
   
   // Initialize notifications
   const { 
@@ -62,6 +109,9 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   const [typingToast, setTypingToast] = useState<{ fromCharacter: string; status: 'typing' | 'paused' | 'clear'; isPM: boolean } | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const messageListRef = useRef<{ scrollToBottom: () => void; scrollToBottomFast: () => void; isNearBottom: (thresholdPx?: number) => boolean; scrollToMessage: (messageId: string) => void }>(null);
+  const pendingRecentMessagesRef = useRef<Record<string, Message[]>>({});
+  const requestedRecentCharactersRef = useRef<Record<string, boolean>>({});
+  const requestedChannelHistoryRef = useRef<Record<string, boolean>>({});
 
   // Determine if current channel is a PM and get the PM character name
   const isPMChannel = selectedChannel.startsWith('PRI-');
@@ -192,15 +242,122 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     }
    }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, selectedChannels, notificationChannel, hasCharacterData, getCharacterGender, getProfileRequestStatus, markCharacterKnown, requestProfileForCharacter, refreshProfile, isNotificationReady, showPMNotification, openPMChannel, setSelectedChannel]);
 
+  const flushPendingRecentMessages = useCallback((characterName?: string) => {
+    const targetCharacter = characterName || activeCharacter;
+    if (!targetCharacter) {
+      return;
+    }
+
+    const isCharacterConnected = connections.some(
+      (conn) => conn.characterName === targetCharacter && conn.isConnected
+    );
+
+    if (!isCharacterConnected) {
+      return;
+    }
+
+    const pending = pendingRecentMessagesRef.current[targetCharacter];
+    if (pending && pending.length > 0) {
+      ingestRecentMessages(pending, targetCharacter);
+      delete pendingRecentMessagesRef.current[targetCharacter];
+    }
+
+    const unassigned = pendingRecentMessagesRef.current.__unassigned__;
+    if (unassigned && unassigned.length > 0) {
+      ingestRecentMessages(unassigned, targetCharacter);
+      delete pendingRecentMessagesRef.current.__unassigned__;
+    }
+  }, [activeCharacter, ingestRecentMessages, connections]);
+
   const handleReceiveRecentMessages = useCallback((recentMessages: Message[]) => {
-    addMessages(recentMessages, activeCharacter || undefined);
-  }, [addMessages, activeCharacter]);
+    if (!recentMessages || recentMessages.length === 0) {
+      console.error("No recent messages received");
+      return;
+    }
+
+    const payloadCharacter = recentMessages[0]?.characterName;
+    const targetCharacter = payloadCharacter || activeCharacter;
+
+    if (targetCharacter) {
+      const normalizedMessages: Message[] = recentMessages.map((msg) => ({
+        ...msg,
+        characterName: msg.characterName || targetCharacter,
+      }));
+
+      const isCharacterConnected = connections.some(
+        (conn) => conn.characterName === targetCharacter && conn.isConnected
+      );
+
+      console.log('Persisting recent messages for character:', targetCharacter, 'isCharacterConnected', isCharacterConnected);
+      ingestRecentMessages(normalizedMessages, targetCharacter);
+      return;
+    }
+
+    const normalizedQueuedMessages = recentMessages.map((msg) => ({
+      ...msg,
+      characterName: msg.characterName || payloadCharacter || undefined,
+    }));
+    const bucketKey = payloadCharacter || '__unassigned__';
+    const existing = pendingRecentMessagesRef.current[bucketKey] || [];
+    pendingRecentMessagesRef.current[bucketKey] = [...existing, ...normalizedQueuedMessages];
+  }, [ingestRecentMessages, activeCharacter, connections]);
+
+  useEffect(() => {
+    flushPendingRecentMessages();
+  }, [flushPendingRecentMessages]);
+
+  useEffect(() => {
+    connections
+      .filter((conn) => conn.isConnected && pendingRecentMessagesRef.current[conn.characterName]?.length)
+      .forEach((conn) => flushPendingRecentMessages(conn.characterName));
+  }, [connections, flushPendingRecentMessages]);
+
+  useEffect(() => {
+    if (!indexedDBReady) {
+      return;
+    }
+
+    const requestBackfill = async () => {
+      for (const connection of connections) {
+        if (!connection.isConnected || !connection.characterName) {
+          continue;
+        }
+
+        const characterName = connection.characterName;
+
+        if (!requestedRecentCharactersRef.current[characterName]) {
+          requestedRecentCharactersRef.current[characterName] = true;
+          try {
+            await signalRService.getRecentMessages(characterName);
+          } catch (error) {
+            console.error(`Failed to request recent messages for ${characterName}:`, error);
+          }
+        }
+
+        const openChannels = characterSelectedChannels[characterName] || [];
+        for (const channelId of openChannels) {
+          const historyKey = `${characterName}:${channelId}`;
+          if (requestedChannelHistoryRef.current[historyKey]) {
+            continue;
+          }
+          requestedChannelHistoryRef.current[historyKey] = true;
+          const lastMessageTime = getLastMessageTime(channelId, characterName);
+          const since = lastMessageTime ?? new Date();
+          try {
+            await signalRService.getHistory(channelId, since, 200);
+          } catch (error) {
+            console.error(`Failed to request history for ${channelId} (${characterName}):`, error);
+          }
+        }
+      }
+    };
+
+    requestBackfill();
+  }, [indexedDBReady, connections, characterSelectedChannels, getLastMessageTime]);
 
   const handleReceiveHistory = useCallback((data: any) => {
-    // Use mergeHistoryMessages to intelligently merge without duplicates
-    // Pass the active character name so messages are stored per character
-    mergeHistoryMessages(data.messages, activeCharacter || undefined);
-  }, [mergeHistoryMessages, activeCharacter]);
+    ingestHistoryMessages(data.messages, activeCharacter || undefined);
+  }, [ingestHistoryMessages, activeCharacter]);
 
   const handleChannelsSubscribed = useCallback((channels: string[]) => {
     console.log('Successfully subscribed to channels:', channels);
@@ -373,15 +530,15 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     return () => {
       // Cleanup listeners when component unmounts or effect re-runs
       console.log('Cleaning up SignalR listeners');
-      signalRService.removeListener('ReceiveMessage');
-      signalRService.removeListener('ReceiveRecentMessages');
-      signalRService.removeListener('ReceiveHistory');
+      signalRService.removeListener('ReceiveMessage', handleReceiveMessage);
+      signalRService.removeListener('ReceiveRecentMessages', handleReceiveRecentMessages);
+      signalRService.removeListener('ReceiveHistory', handleReceiveHistory);
       signalRService.removeListener('MessageQueued');
       signalRService.removeListener('QueuedMessagesProcessed');
       signalRService.removeListener('ProfileRequested');
       signalRService.removeListener('ProfileError');
       signalRService.removeListener('ProfileReceived');
-      signalRService.removeListener('ChannelsSubscribed');
+      signalRService.removeListener('ChannelsSubscribed', handleChannelsSubscribed);
     };
   }, [handleReceiveMessage, handleReceiveRecentMessages, handleReceiveHistory, handleChannelsSubscribed, addProfile, setConnected, isNotificationReady, showTypingNotification, signalRService.connectionState, signalRService.connection?.connectionId]); // Re-run when callbacks change or SignalR connection changes
 
@@ -391,18 +548,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       setSelectedChannel(currentSelectedChannels[0]);
     }
   }, [selectedChannel, currentSelectedChannels]);
-
-  // Effect to load messages when switching to a new channel
-  useEffect(() => {
-    if (selectedChannel && activeCharacter) {
-      console.log(`Channel selected: ${selectedChannel} for character: ${activeCharacter}`);
-      
-      // Check and load missing messages for this channel
-      checkAndLoadMissingMessages(activeCharacter, selectedChannel).catch(error => {
-        console.error(`Failed to check/load messages for ${selectedChannel}:`, error);
-      });
-    }
-  }, [selectedChannel, activeCharacter, checkAndLoadMissingMessages]);
 
   // Separate effect for ActiveCharacterSwitched listener (only runs once)
   useEffect(() => {
@@ -1018,7 +1163,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                 showTimestamps={true}
                 showAvatars={false}
                 groupConsecutive={true}
-                enableLazyLoading={true}
               />
             </div>
 

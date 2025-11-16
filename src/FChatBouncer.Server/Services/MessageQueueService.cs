@@ -45,6 +45,7 @@ public class MessageQueueService : IMessageQueueService
             {
                 ["roomId"] = roomId,
                 ["senderCharacter"] = senderCharacterId,
+                ["characterName"] = senderCharacterId,
                 ["originalMessageType"] = messageType,
                 ["channel"] = roomId
             }
@@ -61,12 +62,16 @@ public class MessageQueueService : IMessageQueueService
         string recipientId,
         string content,
         string messageType,
+        string? channelName = null,
         CancellationToken cancellationToken = default)
     {
         var normalizedType = NormalizeMessageType(messageType);
 
         // Ensure deterministic conversation id ordering
         var normalizedConversationId = NormalizeConversationId(conversationId);
+        var displayChannel = string.IsNullOrWhiteSpace(channelName)
+            ? normalizedConversationId
+            : channelName;
 
         var message = new DirectMessage
         {
@@ -82,8 +87,9 @@ public class MessageQueueService : IMessageQueueService
             {
                 ["conversationId"] = normalizedConversationId,
                 ["recipientId"] = recipientId,
+                ["characterName"] = recipientId,
                 ["originalMessageType"] = messageType,
-                ["channel"] = normalizedConversationId
+                ["channel"] = displayChannel
             }
         };
 
@@ -169,11 +175,11 @@ public class MessageQueueService : IMessageQueueService
             .Select(v => (string)v!)
             .ToHashSet(StringComparer.Ordinal);
 
-        if (trackedStreams.Count == 0)
+        foreach (var streamKey in StreamKeys.ScanAllUserStreams(_redisConnectionFactory, userId))
         {
-            foreach (var streamKey in StreamKeys.ScanAllUserStreams(_redisConnectionFactory, userId))
+            if (trackedStreams.Add(streamKey))
             {
-                trackedStreams.Add(streamKey);
+                await TrackAgentStreamAsync(userId, userAgentId, streamKey, cancellationToken).ConfigureAwait(false);
             }
         }
 

@@ -49,5 +49,4 @@ export interface MessageListProps {
   showTimestamps?: boolean;
   showAvatars?: boolean;
   groupConsecutive?: boolean;
-  enableLazyLoading?: boolean;
 }

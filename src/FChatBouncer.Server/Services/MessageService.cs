@@ -27,7 +27,8 @@ public class MessageService : IMessageService
                 m.Sender,
                 m.Content,
                 m.Timestamp,
-                m.MessageType.ToString()
+                m.MessageType.ToString(),
+                m.CharacterName
             ))
             .ToListAsync();
 
@@ -60,7 +61,29 @@ public class MessageService : IMessageService
                 m.Sender,
                 m.Content,
                 m.Timestamp,
-                m.MessageType.ToString()
+                m.MessageType.ToString(),
+                m.CharacterName
+            ))
+            .ToListAsync();
+
+        return messages;
+    }
+
+    public async Task<List<MessageDto>> GetChannelMessagesSinceAsync(string userId, string channel, DateTime since, int limit = 100)
+    {
+        var messages = await _context.Messages
+            .Where(m => m.UserId == userId &&
+                        m.ChannelName == channel &&
+                        m.Timestamp >= since)
+            .OrderBy(m => m.Timestamp)
+            .Take(limit)
+            .Select(m => new MessageDto(
+                m.ChannelName,
+                m.Sender,
+                m.Content,
+                m.Timestamp,
+                m.MessageType.ToString(),
+                m.CharacterName
             ))
             .ToListAsync();
 

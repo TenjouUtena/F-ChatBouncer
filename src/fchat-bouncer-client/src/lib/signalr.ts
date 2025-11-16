@@ -335,10 +335,12 @@ this.onSearchResultsReceived = callback;
 
     this.connection.on('ReceiveHistory', (data: { channel: string; messages: Message[]; hasMore: boolean }) => {
       console.log('Received history:', data);
+      this.handleOrQueueEvent('ReceiveHistory', [data]);
     });
 
     this.connection.on('ReceiveRecentMessages', (messages: Message[]) => {
       console.log('Received recent messages:', messages);
+      this.handleOrQueueEvent('ReceiveRecentMessages', [messages]);
     });
 
     this.connection.on('NotifyConnectionStatus', (status: ConnectionStatus) => {
@@ -482,7 +484,18 @@ this.onSearchResultsReceived = callback;
   }
 
   // Store callbacks to prevent duplicates
-  private callbacks = new Map<string, Function[]>();
+  private callbacks = new Map<string, Set<Function>>();
+  private eventHandlers = new Map<string, (...args: any[]) => void>();
+  private pendingEvents = new Map<string, any[][]>();
+  
+  private handleOrQueueEvent(eventName: string, args: any[]): void {
+    const handlers = this.callbacks.get(eventName);
+    if (!handlers || handlers.size === 0) {
+      const queue = this.pendingEvents.get(eventName) ?? [];
+      queue.push(args);
+      this.pendingEvents.set(eventName, queue);
+    }
+  }
 
   // Method to add custom listeners with deduplication
   onReceiveMessage(callback: (message: Message) => void): void {
@@ -646,19 +659,49 @@ this.onSearchResultsReceived = callback;
   private addUniqueListener(eventName: string, callback: Function): void {
     if (!this.connection) return;
 
-    // Remove existing listener first to prevent duplicates
-    if (this.callbacks.has(eventName)) {
-      const existingCallbacks = this.callbacks.get(eventName)!;
-      existingCallbacks.forEach(cb => {
-        this.connection!.off(eventName, cb as any);
-      });
+    if (!this.callbacks.has(eventName)) {
+      this.callbacks.set(eventName, new Set());
     }
 
-    // Add new listener
-    this.connection.on(eventName, callback as any);
+    const callbackSet = this.callbacks.get(eventName)!;
 
-    // Store the callback for future cleanup
-    this.callbacks.set(eventName, [callback]);
+    if (!callbackSet.has(callback)) {
+      callbackSet.add(callback);
+    }
+
+    const pending = this.pendingEvents.get(eventName);
+    if (pending && pending.length > 0) {
+      pending.forEach((queuedArgs) => {
+        callbackSet.forEach(cb => {
+          try {
+            (cb as any)(...queuedArgs);
+          } catch (error) {
+            console.error(`Error executing pending SignalR callback for ${eventName}:`, error);
+          }
+        });
+      });
+      this.pendingEvents.delete(eventName);
+    }
+
+    if (!this.eventHandlers.has(eventName)) {
+      const handler = (...args: any[]) => {
+        const handlers = this.callbacks.get(eventName);
+        if (!handlers || handlers.size === 0) {
+          return;
+        }
+
+        handlers.forEach(cb => {
+          try {
+            (cb as any)(...args);
+          } catch (error) {
+            console.error(`Error executing SignalR callback for ${eventName}:`, error);
+          }
+        });
+      };
+
+      this.connection.on(eventName, handler as any);
+      this.eventHandlers.set(eventName, handler);
+    }
   }
 
   offCharacterListeners(): void {
@@ -668,16 +711,36 @@ this.onSearchResultsReceived = callback;
     this.removeListener('CharacterError');
   }
 
-  removeListener(eventName: string): void {
+  removeListener(eventName: string, callback?: Function): void {
     if (!this.connection) return;
 
-    if (this.callbacks.has(eventName)) {
-      const callbacks = this.callbacks.get(eventName)!;
-      callbacks.forEach(callback => {
-        this.connection!.off(eventName, callback as any);
-      });
-      this.callbacks.delete(eventName);
+    const callbackSet = this.callbacks.get(eventName);
+    if (!callbackSet) {
+      return;
     }
+
+    if (callback) {
+      callbackSet.delete(callback);
+
+      if (callbackSet.size === 0) {
+        const handler = this.eventHandlers.get(eventName);
+        if (handler) {
+          this.connection.off(eventName, handler as any);
+          this.eventHandlers.delete(eventName);
+        }
+        this.callbacks.delete(eventName);
+      }
+
+      return;
+    }
+
+    const handler = this.eventHandlers.get(eventName);
+    if (handler) {
+      this.connection.off(eventName, handler as any);
+      this.eventHandlers.delete(eventName);
+    }
+
+    this.callbacks.delete(eventName);
   }
 
   /**
@@ -740,13 +803,26 @@ this.onSearchResultsReceived = callback;
     await this.sendMessageFromCharacter(targetCharacter, channel, content);
   }
 
-  async requestHistory(channel: string, since: Date, limit: number = 100): Promise<void> {
-    if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
-      console.log('SignalR: Requesting history for channel:', channel, 'since:', since, 'limit:', limit);
-      await this.connection.invoke('RequestHistory', channel, since.toISOString(), limit);
-    } else {
+  async getRecentMessages(characterName?: string): Promise<void> {
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
+      throw new Error('SignalR connection not available for recent messages request');
+    }
+
+    console.log('SignalR: Requesting recent messages', characterName ? `for ${characterName}` : '');
+    await this.connection.invoke('GetRecentMessages', characterName ?? null);
+  }
+
+  async getHistory(channel: string, since: Date, limit: number = 100): Promise<void> {
+    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
       throw new Error('SignalR connection not available for history request');
     }
+
+    console.log('SignalR: Requesting history for channel:', channel, 'since:', since, 'limit:', limit);
+    await this.connection.invoke('GetHistory', channel, since.toISOString(), limit);
+  }
+
+  async requestHistory(channel: string, since: Date, limit: number = 100): Promise<void> {
+    await this.getHistory(channel, since, limit);
   }
 
   async requestFullSessionRestore(): Promise<void> {
