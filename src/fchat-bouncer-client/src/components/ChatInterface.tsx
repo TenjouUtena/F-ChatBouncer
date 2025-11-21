@@ -813,6 +813,28 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     };
   }, [activeCharacter, selectedChannel, addToJoinedChannels, addToSelectedChannels, getSelectedChannelsForCharacter, setSelectedChannel, loadMessagesForNewChannel]);
 
+  // Handle SignalR reconnection events
+  useEffect(() => {
+    const handleReconnecting = () => {
+      console.log('SignalR is reconnecting...');
+      // Could show a toast/banner: "Connection lost, reconnecting..."
+    };
+    
+    const handleReconnected = () => {
+      console.log('SignalR reconnected successfully');
+      // Could show a toast: "Connection restored"
+      // Refresh any stale data if needed
+    };
+    
+    window.addEventListener('signalr:reconnecting', handleReconnecting);
+    window.addEventListener('signalr:reconnected', handleReconnected as EventListener);
+    
+    return () => {
+      window.removeEventListener('signalr:reconnecting', handleReconnecting);
+      window.removeEventListener('signalr:reconnected', handleReconnected as EventListener);
+    };
+  }, []);
+
   useEffect(() => {
     // Smart autoscroll: only scroll to bottom if user is already near the bottom
     const nearBottom = messageListRef.current?.isNearBottom?.(220);

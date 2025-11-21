@@ -91,6 +91,11 @@ class SignalRService {
       try {
         // Clean up all event listeners
         this.cleanupAllListeners();
+        
+        // Clean up reconnection handlers
+        this.connection.onreconnecting(() => {});
+        this.connection.onreconnected(() => {});
+        
         await this.connection.stop();
       } catch (error) {
         console.error('Error stopping SignalR connection:', error);
@@ -312,6 +317,29 @@ this.onSearchResultsReceived = callback;
 
   private setupEventHandlers(): void {
     if (!this.connection || this.eventListenersSetup) return;
+
+    // Add reconnection lifecycle handlers FIRST
+    this.connection.onreconnecting((error) => {
+      console.log('SignalR reconnecting...', error);
+      // Notify UI that reconnection is in progress
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('signalr:reconnecting'));
+      }
+    });
+
+    this.connection.onreconnected((connectionId) => {
+      console.log('SignalR reconnected with connection ID:', connectionId);
+      
+      // Re-establish all event handlers
+      this.reestablishEventHandlers();
+      
+      // Notify UI that reconnection is complete
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('signalr:reconnected', {
+          detail: { connectionId }
+        }));
+      }
+    });
 
     // Handle connection close events (including failed reconnection attempts)
     this.connection.onclose(async (error) => {
@@ -655,6 +683,21 @@ this.onSearchResultsReceived = callback;
     this.addUniqueListener('UserOffline', callback);
   }
 
+
+  private reestablishEventHandlers(): void {
+    if (!this.connection) return;
+    
+    console.log('Re-establishing SignalR event handlers after reconnection...');
+    
+    // Re-register all event handlers from the eventHandlers map
+    this.eventHandlers.forEach((handler, eventName) => {
+      console.log(`Re-registering handler for: ${eventName}`);
+      this.connection!.off(eventName, handler as any); // Remove first to avoid duplicates
+      this.connection!.on(eventName, handler as any);
+    });
+    
+    console.log(`Re-established ${this.eventHandlers.size} event handlers`);
+  }
 
   private addUniqueListener(eventName: string, callback: Function): void {
     if (!this.connection) return;

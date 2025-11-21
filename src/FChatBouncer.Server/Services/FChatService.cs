@@ -2517,4 +2517,84 @@ public class FChatService : IFChatService
     }
 
     #endregion
+
+    #region Status Methods
+
+    public async Task<DetailedConnectionStatusDto> GetDetailedConnectionStatusAsync(string userId)
+    {
+        _logger.LogDebug("Getting detailed connection status for user {UserId}", userId);
+        
+        var status = new DetailedConnectionStatusDto
+        {
+            Timestamp = DateTime.UtcNow
+        };
+
+        try
+        {
+            // Check if user has F-Chat credentials
+            using var scope = _serviceProvider.CreateScope();
+            var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+            var settings = await userService.GetUserSettingsAsync(userId);
+            
+            status.HasCredentials = !string.IsNullOrEmpty(settings?.FChatCredentialsEncrypted);
+
+            if (!status.HasCredentials)
+            {
+                _logger.LogDebug("User {UserId} has no F-Chat credentials", userId);
+                status.BackendStatus = BackendConnectionStatus.NeedsCredentials;
+                status.StatusMessage = "No F-Chat credentials configured";
+                return status;
+            }
+
+            // Check if user has an active character
+            var activeCharacter = await GetActiveCharacterAsync(userId);
+            
+            if (string.IsNullOrEmpty(activeCharacter))
+            {
+                _logger.LogDebug("User {UserId} has no active character", userId);
+                status.BackendStatus = BackendConnectionStatus.WaitingForCharacter;
+                status.StatusMessage = "No character selected";
+                return status;
+            }
+
+            status.CharacterName = activeCharacter;
+
+            // Check if character is connected to F-Chat
+            var isConnected = await IsCharacterConnectedAsync(userId, activeCharacter);
+            var hasWebSocket = await HasWebSocketConnectionAsync(userId, activeCharacter);
+
+            if (isConnected && hasWebSocket)
+            {
+                _logger.LogDebug("Character {CharacterName} of user {UserId} is connected", activeCharacter, userId);
+                status.BackendStatus = BackendConnectionStatus.Connected;
+                status.IsConnectedToFChat = true;
+                status.StatusMessage = $"Connected as {activeCharacter}";
+
+                // Get last activity time
+                var connection = await GetCharacterConnectionAsync(userId, activeCharacter);
+                if (connection != null)
+                {
+                    status.LastActivity = connection.LastActivityAt;
+                }
+            }
+            else
+            {
+                _logger.LogDebug("Character {CharacterName} of user {UserId} is not connected", activeCharacter, userId);
+                status.BackendStatus = BackendConnectionStatus.NotConnected;
+                status.IsConnectedToFChat = false;
+                status.StatusMessage = $"Character {activeCharacter} not connected";
+            }
+
+            return status;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting detailed connection status for user {UserId}", userId);
+            status.BackendStatus = BackendConnectionStatus.NotConnected;
+            status.StatusMessage = "Error determining status";
+            return status;
+        }
+    }
+
+    #endregion
 }

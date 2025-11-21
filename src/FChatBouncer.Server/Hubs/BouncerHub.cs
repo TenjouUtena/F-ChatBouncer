@@ -1748,6 +1748,54 @@ public class BouncerHub : Hub
     }
 
     #endregion
+
+    #region Status Methods
+
+    /// <summary>
+    /// Gets the detailed connection status for the current user
+    /// </summary>
+    public async Task<DetailedConnectionStatusDto> GetDetailedConnectionStatus()
+    {
+        var userId = Context.UserIdentifier;
+        if (userId == null)
+        {
+            return new DetailedConnectionStatusDto
+            {
+                BackendStatus = BackendConnectionStatus.NeedsCredentials,
+                StatusMessage = "Not authenticated",
+                HasCredentials = false,
+                IsConnectedToFChat = false
+            };
+        }
+
+        try
+        {
+            var status = await _fChatService.GetDetailedConnectionStatusAsync(userId);
+            _logger.LogInformation("User {UserId} requested detailed status: {Status}", userId, status.BackendStatus);
+            return status;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get detailed connection status for user {UserId}", userId);
+            return new DetailedConnectionStatusDto
+            {
+                BackendStatus = BackendConnectionStatus.NotConnected,
+                StatusMessage = "Error retrieving status",
+                HasCredentials = false,
+                IsConnectedToFChat = false
+            };
+        }
+    }
+
+    /// <summary>
+    /// Broadcasts a detailed status update to the user
+    /// </summary>
+    public async Task BroadcastDetailedStatus(string userId, DetailedConnectionStatusDto status)
+    {
+        await Clients.Group($"user-{userId}").SendAsync("DetailedStatusUpdate", status);
+    }
+
+    #endregion
 }
 
 // DTOs for SignalR communication

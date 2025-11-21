@@ -98,4 +98,7 @@ public interface IFChatService
     
     // Search methods
     Task SearchCharactersAsync(string userId, string characterName, Dictionary<string, object> searchCriteria);
+    
+    // Status methods
+    Task<DetailedConnectionStatusDto> GetDetailedConnectionStatusAsync(string userId);
 }
