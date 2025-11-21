@@ -172,6 +172,8 @@ class MessageIndexedDBService {
         
         // Extract just the message objects
         const messages = results.map((item: { message: any; }) => item.message);
+
+        // TODO: Check why messages are being retrieved multiple times.
         
         console.log(`Retrieved ${messages.length} messages for ${characterName}${channelId ? ` in ${channelId}` : ''}`);
         resolve(messages);
@@ -184,7 +186,7 @@ class MessageIndexedDBService {
     });
   }
 
-  async getRecentMessagesForChannel(characterName: string, channelId: string, limit: number = 10000): Promise<any[]> {
+  async getRecentMessagesForChannel(characterName: string, channelId: string, limit: number = 100): Promise<any[]> {
     await this.ensureInitialized();
     
     return new Promise((resolve, reject) => {

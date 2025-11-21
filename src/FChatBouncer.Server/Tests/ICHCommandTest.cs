@@ -18,32 +18,39 @@ public class ICHCommandTest
         var sampleICHData = """
         {
             "users": [
-                {"identity": "Shadlor"}, 
-                {"identity": "Bunnie Patcher"}, 
-                {"identity": "DemonNeko"}, 
-                {"identity": "Desbreko"}, 
-                {"identity": "Robert Bell"}, 
-                {"identity": "Jayson"}, 
-                {"identity": "Valoriel Talonheart"}, 
-                {"identity": "Jordan Costa"}, 
-                {"identity": "Skip Weber"}, 
-                {"identity": "Niruka"}, 
-                {"identity": "Jake Brian Purplecat"}, 
+                {"identity": "Shadlor"},
+                {"identity": "Bunnie Patcher"},
+                {"identity": "DemonNeko"},
+                {"identity": "Desbreko"},
+                {"identity": "Robert Bell"},
+                {"identity": "Jayson"},
+                {"identity": "Valoriel Talonheart"},
+                {"identity": "Jordan Costa"},
+                {"identity": "Skip Weber"},
+                {"identity": "Niruka"},
+                {"identity": "Jake Brian Purplecat"},
                 {"identity": "Hexxy"}
-            ], 
-            "channel": "Frontpage", 
+            ],
+            "channel": "Frontpage",
             "mode": "chat"
         }
         """;
 
         var jsonElement = JsonSerializer.Deserialize<JsonElement>(sampleICHData);
-        
+
         // Create a mock logger for testing
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
         var logger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-        
+
+        // Create mock TicketManager for testing
+        var ticketManagerLogger = loggerFactory.CreateLogger<TicketManager>();
+        var mockConfiguration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { { "CREDENTIAL_ENCRYPTION_KEY", "test-key-for-unit-tests-only" } })
+            .Build();
+        var ticketManager = new TicketManager(ticketManagerLogger, mockConfiguration);
+
         // Create WebSocket client instance for testing
-        var client = new FChatWebSocketClient(logger);
+        var client = new FChatWebSocketClient(logger, ticketManager);
         
         // Use reflection to access the private HandleInitialChannelData method
         var method = typeof(FChatWebSocketClient).GetMethod("HandleInitialChannelData", 
@@ -108,22 +115,29 @@ public class ICHCommandTest
         var sampleICHData = """
         {
             "users": [
-                {"identity": "TestUser1"}, 
+                {"identity": "TestUser1"},
                 {"identity": "TestUser2"}
-            ], 
-            "channel": "TestChannel", 
+            ],
+            "channel": "TestChannel",
             "mode": "both"
         }
         """;
 
         var jsonElement = JsonSerializer.Deserialize<JsonElement>(sampleICHData);
-        
+
         // Create a mock logger for testing
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
         var logger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-        
+
+        // Create mock TicketManager for testing
+        var ticketManagerLogger = loggerFactory.CreateLogger<TicketManager>();
+        var mockConfiguration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { { "CREDENTIAL_ENCRYPTION_KEY", "test-key-for-unit-tests-only" } })
+            .Build();
+        var ticketManager = new TicketManager(ticketManagerLogger, mockConfiguration);
+
         // Create WebSocket client instance for testing
-        var client = new FChatWebSocketClient(logger);
+        var client = new FChatWebSocketClient(logger, ticketManager);
         
         // Use reflection to access the private HandleInitialChannelData method
         var method = typeof(FChatWebSocketClient).GetMethod("HandleInitialChannelData", 
@@ -180,20 +194,27 @@ public class ICHCommandTest
         {
             "users": [
                 {"identity": "AdUser1"}
-            ], 
-            "channel": "AdsChannel", 
+            ],
+            "channel": "AdsChannel",
             "mode": "ads"
         }
         """;
 
         var jsonElement = JsonSerializer.Deserialize<JsonElement>(sampleICHData);
-        
+
         // Create a mock logger for testing
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
         var logger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-        
+
+        // Create mock TicketManager for testing
+        var ticketManagerLogger = loggerFactory.CreateLogger<TicketManager>();
+        var mockConfiguration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { { "CREDENTIAL_ENCRYPTION_KEY", "test-key-for-unit-tests-only" } })
+            .Build();
+        var ticketManager = new TicketManager(ticketManagerLogger, mockConfiguration);
+
         // Create WebSocket client instance for testing
-        var client = new FChatWebSocketClient(logger);
+        var client = new FChatWebSocketClient(logger, ticketManager);
         
         // Use reflection to access the private HandleInitialChannelData method
         var method = typeof(FChatWebSocketClient).GetMethod("HandleInitialChannelData", 

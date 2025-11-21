@@ -35,8 +35,8 @@ export function htmlToBBCode(html: string): string {
  * Convert F-Chat BBCode to HTML for display
  * Enhanced to support advanced BBCode tags like URLs
  */
-export function bbcodeToHtml(bbcode: string): string {
-  const result = parseBBCodeToHtml(bbcode);
+export function bbcodeToHtml(bbcode: string, context?: { inlines?: Record<string, { hash: string; extension: string; nsfw: boolean }> }): string {
+  const result = parseBBCodeToHtml(bbcode, context);
 
   if (!result.success && result.errors) {
     //console.log('BBCode parsing errors:', result.errors);

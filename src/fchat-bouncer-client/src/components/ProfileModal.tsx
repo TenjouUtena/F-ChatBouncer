@@ -77,13 +77,13 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
 
   const handleRefreshProfile = async () => {
     if (profileData) {
-      console.log(`Refreshing profile for ${characterName}`);
+      console.debug(`Refreshing profile for ${characterName}`);
       const refreshedData = await refreshProfile(characterName);
       if (refreshedData) {
         setProfileData(refreshedData);
       }
     } else {
-      console.log(`Requesting profile for ${characterName}`);
+      console.debug(`Requesting profile for ${characterName}`);
       requestProfileForCharacter(characterName);
     }
   };
@@ -96,7 +96,7 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
           const data = await getProfile(characterName);
           setProfileData(data);
         } catch (error) {
-          console.error('Failed to load profile:', error);
+          console.debug('Failed to load profile:', error);
           setProfileData(null);
         }
       }
@@ -177,7 +177,9 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
     }
 
     try {
-      const htmlDescription = bbcodeToHtml(description);
+      // Pass inlines context to bbcodeToHtml for img tag lookups
+      const inlinesContext = profileData.inlines ? { inlines: profileData.inlines } : undefined;
+      const htmlDescription = bbcodeToHtml(description, inlinesContext);
       return (
         <div 
           className="text-gray-300 text-sm break-words leading-relaxed"

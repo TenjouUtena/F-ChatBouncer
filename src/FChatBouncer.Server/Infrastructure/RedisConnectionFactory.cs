@@ -199,7 +199,16 @@ public class RedisConnectionFactory : IRedisConnectionFactory, IDisposable
 
         connection.ErrorMessage += (sender, args) =>
         {
-            _logger.LogError("Redis error: {Message} on {EndPoint}", args.Message, args.EndPoint);
+            // BUSYGROUP errors are expected when consumer groups already exist and are handled
+            // in the application code. Log at Debug level to avoid log noise.
+            if (args.Message.Contains("BUSYGROUP", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("Redis consumer group already exists (expected): {Message} on {EndPoint}", args.Message, args.EndPoint);
+            }
+            else
+            {
+                _logger.LogError("Redis error: {Message} on {EndPoint}", args.Message, args.EndPoint);
+            }
         };
 
         connection.InternalError += (sender, args) =>

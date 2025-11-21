@@ -8,29 +8,35 @@ namespace FChatBouncer.Server.Services;
 public class MessageService : IMessageService
 {
     private readonly BouncerDbContext _context;
-
-    public MessageService(BouncerDbContext context)
+    private readonly ILogger<MessageService> _logger;
+    public MessageService(BouncerDbContext context, ILogger<MessageService> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     public async Task<List<MessageDto>> GetMessagesAsync(string userId, string channel, DateTime since, int limit = 100)
     {
-        var messages = await _context.Messages
+        var dbMessages = await _context.Messages
             .Where(m => m.UserId == userId &&
                        m.ChannelName == channel &&
                        m.Timestamp < since) // Get older messages than 'since'
             .OrderByDescending(m => m.Timestamp) // Get most recent older messages first
             .Take(limit)
+            .ToListAsync();
+
+        // Map to DTOs with database Id as fallback when FChatMessageId is null
+        var messages = dbMessages
             .Select(m => new MessageDto(
                 m.ChannelName,
                 m.Sender,
                 m.Content,
                 m.Timestamp,
                 m.MessageType.ToString(),
-                m.CharacterName
+                m.CharacterName,
+                m.FChatMessageId ?? m.Id.ToString() // Use database Id as fallback
             ))
-            .ToListAsync();
+            .ToList();
 
         // Reverse the order so we return messages in chronological order (oldest first)
         messages.Reverse();
@@ -53,44 +59,54 @@ public class MessageService : IMessageService
 
     public async Task<List<MessageDto>> GetRecentMessagesAsync(string userId, DateTime since)
     {
-        var messages = await _context.Messages
+        var dbMessages = await _context.Messages
             .Where(m => m.UserId == userId && m.Timestamp >= since)
             .OrderBy(m => m.Timestamp)
+            .ToListAsync();
+
+        // Map to DTOs with database Id as fallback when FChatMessageId is null
+        var messages = dbMessages
             .Select(m => new MessageDto(
                 m.ChannelName,
                 m.Sender,
                 m.Content,
                 m.Timestamp,
                 m.MessageType.ToString(),
-                m.CharacterName
+                m.CharacterName,
+                m.FChatMessageId ?? m.Id.ToString() // Use database Id as fallback
             ))
-            .ToListAsync();
+            .ToList();
 
         return messages;
     }
 
     public async Task<List<MessageDto>> GetChannelMessagesSinceAsync(string userId, string channel, DateTime since, int limit = 100)
     {
-        var messages = await _context.Messages
+        var dbMessages = await _context.Messages
             .Where(m => m.UserId == userId &&
                         m.ChannelName == channel &&
                         m.Timestamp >= since)
             .OrderBy(m => m.Timestamp)
             .Take(limit)
+            .ToListAsync();
+
+        // Map to DTOs with database Id as fallback when FChatMessageId is null
+        var messages = dbMessages
             .Select(m => new MessageDto(
                 m.ChannelName,
                 m.Sender,
                 m.Content,
                 m.Timestamp,
                 m.MessageType.ToString(),
-                m.CharacterName
+                m.CharacterName,
+                m.FChatMessageId ?? m.Id.ToString() // Use database Id as fallback
             ))
-            .ToListAsync();
+            .ToList();
 
         return messages;
     }
 
-    public async Task SaveMessageAsync(string userId, string channel, string sender, string content, MessageType messageType, string characterName = "")
+    public async Task SaveMessageAsync(string userId, string channel, string sender, string content, MessageType messageType, string characterName = "", string? messageId = null)
     {
         var message = new Message
         {
@@ -100,7 +116,8 @@ public class MessageService : IMessageService
             Sender = sender,
             Content = content,
             MessageType = messageType,
-            Timestamp = DateTime.UtcNow
+            Timestamp = DateTime.UtcNow,
+            FChatMessageId = messageId
         };
 
         _context.Messages.Add(message);

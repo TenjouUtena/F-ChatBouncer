@@ -157,10 +157,13 @@ export function getMessagePreview(message: Message, maxLength = 100): string {
 }
 
 /**
- * Generate a unique message ID
+ * Generate a unique message ID (fallback for messages without backend-provided IDs)
  */
 export function generateMessageId(message: Message): string {
-  return `msg_${message.timestamp}`;
+  // Use timestamp + random component for better uniqueness
+  const random = Math.random().toString(36).substring(2, 15);
+  const timestamp = new Date(message.timestamp).getTime();
+  return `msg_${timestamp}_${random}`;
 }
 
 /**

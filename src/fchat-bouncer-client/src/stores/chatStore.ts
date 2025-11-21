@@ -61,6 +61,7 @@ interface ChatStore extends ChatState {
   setSelectedChannels: (channels: string[], characterName?: string) => void;
   addToSelectedChannels: (channels: string[], characterName?: string) => void;
   removeFromSelectedChannels: (channels: string[], characterName?: string) => void;
+  reorderChannelsForCharacter: (characterName: string, startIndex: number, endIndex: number) => void;
   setJoinedChannels: (channels: string[], characterName: string) => void;
   addToJoinedChannels: (channels: string[], characterName: string) => void;
   removeFromJoinedChannels: (channels: string[], characterName: string) => void;
@@ -368,13 +369,15 @@ export const useChatStore = create<ChatStore>()(
         set((state) => {
           // If no character specified, use legacy behavior
           if (!characterName) {
-            const isDuplicate = state.messages.some(existingMsg =>
-              existingMsg.id === messageWithId.id ||
-              (existingMsg.timestamp === messageWithId.timestamp &&
-               existingMsg.sender === messageWithId.sender &&
-               existingMsg.content === messageWithId.content &&
-               existingMsg.channel === messageWithId.channel)
-            );
+            // Prioritize ID-based deduplication for efficiency
+            const isDuplicate = messageWithId.id
+              ? state.messages.some(existingMsg => existingMsg.id === messageWithId.id)
+              : state.messages.some(existingMsg =>
+                  existingMsg.timestamp === messageWithId.timestamp &&
+                  existingMsg.sender === messageWithId.sender &&
+                  existingMsg.content === messageWithId.content &&
+                  existingMsg.channel === messageWithId.channel
+                );
 
             if (isDuplicate) return state;
 
@@ -385,13 +388,15 @@ export const useChatStore = create<ChatStore>()(
 
           // Character-scoped behavior
           const characterMessages = state.characterMessages[characterName] || [];
-          const isDuplicate = characterMessages.some(existingMsg =>
-            existingMsg.id === messageWithId.id ||
-            (existingMsg.timestamp === messageWithId.timestamp &&
-             existingMsg.sender === messageWithId.sender &&
-             existingMsg.content === messageWithId.content &&
-             existingMsg.channel === messageWithId.channel)
-          );
+          // Prioritize ID-based deduplication for efficiency
+          const isDuplicate = messageWithId.id
+            ? characterMessages.some(existingMsg => existingMsg.id === messageWithId.id)
+            : characterMessages.some(existingMsg =>
+                existingMsg.timestamp === messageWithId.timestamp &&
+                existingMsg.sender === messageWithId.sender &&
+                existingMsg.content === messageWithId.content &&
+                existingMsg.channel === messageWithId.channel
+              );
 
           if (isDuplicate) return state;
 
@@ -490,21 +495,19 @@ export const useChatStore = create<ChatStore>()(
 
       addMessages: (messages: Message[], characterName: string) => {
         console.log('Adding messages to character:', characterName);
+        // Ensure all messages have IDs
+        const messagesWithIds = messages.map(ensureMessageHasId);
+        
         // Store messages in IndexedDB if character is specified
         if (!get().indexedDBFailed) {
-          persistMessagesToIndexedDB(messages, characterName);
+          persistMessagesToIndexedDB(messagesWithIds, characterName);
         }
 
         set((state) => {
           const existingMessages = state.characterMessages[characterName] || [];
-          const newMessages = messages.filter(newMsg => 
-            !existingMessages.some(existingMsg => 
-              existingMsg.id === newMsg.id ||
-              (existingMsg.timestamp === newMsg.timestamp &&
-               existingMsg.sender === newMsg.sender &&
-               existingMsg.content === newMsg.content &&
-               existingMsg.channel === newMsg.channel)
-            )
+          // ID-only deduplication - messages should be unique by ID
+          const newMessages = messagesWithIds.filter(newMsg => 
+            !existingMessages.some(existingMsg => existingMsg.id === newMsg.id)
           );
           const newState: Partial<ChatStore> = {
             characterMessages: {
@@ -644,6 +647,30 @@ export const useChatStore = create<ChatStore>()(
         set((state) => {
           const currentChannels = state.characterSelectedChannels[characterName] || [];
           const newChannels = currentChannels.filter(channel => !channels.includes(channel));
+          
+          return {
+            characterSelectedChannels: {
+              ...state.characterSelectedChannels,
+              [characterName]: newChannels
+            }
+          };
+        });
+      },
+
+      reorderChannelsForCharacter: (characterName: string, startIndex: number, endIndex: number) => {
+        set((state) => {
+          const currentChannels = state.characterSelectedChannels[characterName] || [];
+          
+          // Validate indices
+          if (startIndex < 0 || startIndex >= currentChannels.length ||
+              endIndex < 0 || endIndex >= currentChannels.length) {
+            return state;
+          }
+          
+          // Create a new array with reordered channels
+          const newChannels = [...currentChannels];
+          const [removed] = newChannels.splice(startIndex, 1);
+          newChannels.splice(endIndex, 0, removed);
           
           return {
             characterSelectedChannels: {
@@ -836,40 +863,21 @@ export const useChatStore = create<ChatStore>()(
       },
 
       mergeHistoryMessages: (messages: Message[], characterName?: string) => {
+        // Ensure all messages have IDs
+        const messagesWithIds = messages.map(ensureMessageHasId);
+
         if (!characterName) {
-          console.log("using legacy behavior for mergeHistoryMessages");
-          // Legacy behavior
-          set((state) => {
-            const existingMessages = state.messages;
-            const newMessages = messages.filter(newMsg => 
-              !existingMessages.some(existingMsg => 
-                existingMsg.id === newMsg.id ||
-                (existingMsg.timestamp === newMsg.timestamp &&
-                 existingMsg.sender === newMsg.sender &&
-                 existingMsg.content === newMsg.content &&
-                 existingMsg.channel === newMsg.channel)
-              )
-            );
-            return {
-              messages: [...newMessages, ...state.messages]
-            };
-          });
+          console.warn('Skipping mergeHistoryMessages without character context');
           return;
         }
-
-        const messagesWithIds = messages; //.map(ensureMessageHasId);
+        
         let uniqueMessages: Message[] = [];
 
         set((state) => {
           const existingMessages = state.characterMessages[characterName] || [];
+          // ID-only deduplication - messages should be unique by ID
           uniqueMessages = messagesWithIds.filter(newMsg => 
-            !existingMessages.some(existingMsg => 
-              existingMsg.id === newMsg.id ||
-              (existingMsg.timestamp === newMsg.timestamp &&
-               existingMsg.sender === newMsg.sender &&
-               existingMsg.content === newMsg.content &&
-               existingMsg.channel === newMsg.channel)
-            )
+            !existingMessages.some(existingMsg => existingMsg.id === newMsg.id)
           );
 
           if (uniqueMessages.length === 0) {
@@ -1002,7 +1010,7 @@ export const useChatStore = create<ChatStore>()(
             profileStore.setProfileRequestStatus(characterName, 'idle');
           }
         } catch (error) {
-          console.error(`Failed to request profile for character: ${characterName}`, error);
+          console.debug(`Failed to request profile for character: ${characterName}`, error);
           profileStore.setProfileRequestStatus(characterName, 'failed');
         }
       },
@@ -1011,7 +1019,7 @@ export const useChatStore = create<ChatStore>()(
         const profileStore = useProfileStore.getState();
         
         if (profileStore.getProfileRequestStatus(characterName) === 'requesting') {
-          console.log(`Profile request already in-flight for ${characterName}`);
+          console.debug(`Profile request already in-flight for ${characterName}`);
           return null;
         }
 
@@ -1028,7 +1036,7 @@ export const useChatStore = create<ChatStore>()(
             return null;
           }
         } catch (error) {
-          console.error(`Failed to refresh profile for character: ${characterName}`, error);
+          console.debug(`Failed to refresh profile for character: ${characterName}`, error);
           profileStore.setProfileRequestStatus(characterName, 'failed');
           return null;
         }
@@ -1403,6 +1411,7 @@ export const useChatStore = create<ChatStore>()(
         }));
 
         if (!state.indexedDBReady && !state.indexedDBFailed) {
+          console.log('ingestHistoryMessages: Adding to pending history batches ', normalizedMessages.length);
           set((store) => ({
             pendingHistoryBatches: [
               ...store.pendingHistoryBatches,
@@ -1416,6 +1425,7 @@ export const useChatStore = create<ChatStore>()(
         }
 
         if (normalizedCharacter) {
+          console.log('ingestHistoryMessages: Merging history messages for character:', normalizedCharacter);
           get().mergeHistoryMessages(normalizedMessages, normalizedCharacter);
         } else {
           console.warn('Dropping history messages without character context');
@@ -1439,7 +1449,7 @@ export const useChatStore = create<ChatStore>()(
         const profileStore = useProfileStore.getState();
         const deletedCount = await profileStore.cleanupOldProfiles();
         
-        console.log(`Storage cleanup completed. Deleted ${deletedCount} old profiles from IndexedDB`);
+        console.debug(`Storage cleanup completed. Deleted ${deletedCount} old profiles from IndexedDB`);
       },
 
       getStorageSize: () => {
@@ -1495,16 +1505,12 @@ export const useChatStore = create<ChatStore>()(
             try {
               const messages = await messageIndexedDBService.getMessages(characterName);
               if (messages.length > 0) {
-                // Deduplicate messages from IndexedDB
-                const deduplicatedMessages = messages.filter((message, index, arr) => {
-                  // Remove duplicates based on ID or content/timestamp/sender/channel
-                  return arr.findIndex(m => 
-                    m.id === message.id ||
-                    (m.timestamp === message.timestamp &&
-                     m.sender === message.sender &&
-                     m.content === message.content &&
-                     m.channel === message.channel)
-                  ) === index;
+                // Ensure all messages have IDs
+                const messagesWithIds = messages.map(ensureMessageHasId);
+                // Deduplicate messages from IndexedDB - ID-only deduplication
+                const deduplicatedMessages = messagesWithIds.filter((message, index, arr) => {
+                  // Remove duplicates based on ID only
+                  return arr.findIndex(m => m.id === message.id) === index;
                 });
                 set(currentState => ({
                   characterMessages: {
@@ -1512,7 +1518,6 @@ export const useChatStore = create<ChatStore>()(
                     [characterName]: deduplicatedMessages
                   }
                 }));
-                //console.log(`Loaded ${deduplicatedMessages.length} messages for ${characterName} from IndexedDB (${messages.length - deduplicatedMessages.length} duplicates removed)`);
               }
             } catch (error) {
               console.error(`Failed to load messages for ${characterName}:`, error);
@@ -1525,7 +1530,7 @@ export const useChatStore = create<ChatStore>()(
         }
       },
 
-      loadLimitedMessagesFromIndexedDB: async (characterName: string, openChannels: string[], limitPerChannel: number = 10000) => {
+      loadLimitedMessagesFromIndexedDB: async (characterName: string, openChannels: string[], limitPerChannel: number = 100) => {
         try {
           console.log(`Loading limited messages from IndexedDB for ${characterName} (${limitPerChannel} per channel)...`);
           
@@ -1541,19 +1546,16 @@ export const useChatStore = create<ChatStore>()(
             allMessages.push(...messages);
           });
 
+          // Ensure all messages have IDs
+          const messagesWithIds = allMessages.map(ensureMessageHasId);
+          
           // Sort all messages by timestamp
-          allMessages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          messagesWithIds.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-          // Deduplicate messages from IndexedDB
-          const deduplicatedMessages = allMessages.filter((message, index, arr) => {
-            // Remove duplicates based on ID or content/timestamp/sender/channel
-            return arr.findIndex(m => 
-              m.id === message.id ||
-              (m.timestamp === message.timestamp &&
-               m.sender === message.sender &&
-               m.content === message.content &&
-               m.channel === message.channel)
-            ) === index;
+          // Deduplicate messages from IndexedDB - ID-only deduplication
+          const deduplicatedMessages = messagesWithIds.filter((message, index, arr) => {
+            // Remove duplicates based on ID only
+            return arr.findIndex(m => m.id === message.id) === index;
           });
 
           set(currentState => ({
@@ -1765,7 +1767,7 @@ export const useChatStore = create<ChatStore>()(
           // Initialize profile store after rehydration
           const profileStore = useProfileStore.getState();
           profileStore.initialize().catch(error => {
-            console.error('Failed to initialize profile store after rehydration:', error);
+            console.debug('Failed to initialize profile store after rehydration:', error);
           });
 
           // Load messages from IndexedDB after rehydration

@@ -28,7 +28,6 @@ public class FListImageService
     {
         try
         {
-            _logger.LogInformation("Fetching image metadata for character ID: {CharacterId}", characterId);
 
             var formData = new List<KeyValuePair<string, string>>
             {
@@ -47,7 +46,6 @@ public class FListImageService
             }
 
             var jsonContent = await response.Content.ReadAsStringAsync();
-            _logger.LogInformation("IMAGETROUBLESHOOT: Image API response: {jsonContent}", jsonContent);
             var imageResponse = JsonSerializer.Deserialize<ImageResponse>(jsonContent);
 
             if (imageResponse == null || !string.IsNullOrEmpty(imageResponse.Error))
@@ -56,9 +54,6 @@ public class FListImageService
                     characterId, imageResponse?.Error ?? "Unknown error");
                 return new List<CharacterImage>();
             }
-
-            _logger.LogInformation("Successfully fetched {ImageCount} images for character ID {CharacterId}", 
-                imageResponse.Images.Count, characterId);
 
             return imageResponse.Images;
         }

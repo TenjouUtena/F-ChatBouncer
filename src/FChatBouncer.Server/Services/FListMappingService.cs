@@ -46,10 +46,6 @@ public class FListMappingService : IFListMappingService
     {
         try
         {
-            _logger.LogInformation("Fetching mapping data from F-List API");
-
-            // F-List mapping endpoint (this is a placeholder - we need to find the actual endpoint)
-            // Based on F-List API documentation, this should be the mapping endpoint
             var response = await _httpClient.GetAsync("https://www.f-list.net/json/api/mapping-list.php");
 
             if (!response.IsSuccessStatusCode)
@@ -82,11 +78,8 @@ public class FListMappingService : IFListMappingService
             _cachedMapping = new CachedMappingData
             {
                 Data = mappingResponse,
-                CachedAt = DateTime.UtcNow
+                CachedAt = DateTime.UtcNow,
             };
-
-            _logger.LogInformation("Successfully cached mapping data. Infotags: {InfotagCount}, Kinks: {KinkCount}, KinkGroups: {KinkGroupCount}, InfotagGroups: {InfotagGroupCount}, ListItems: {ListItemCount}",
-                mappingResponse.Infotags.Count, mappingResponse.Kinks.Count, mappingResponse.KinkGroups.Count, mappingResponse.InfotagGroups.Count, mappingResponse.ListItems.Count);
 
             return mappingResponse;
         }

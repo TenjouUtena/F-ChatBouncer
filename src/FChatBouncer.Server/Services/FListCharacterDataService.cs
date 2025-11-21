@@ -311,19 +311,18 @@ public class FListCharacterDataService : IFListCharacterDataService
                     ImageExt = image.Extension,
                     ImageDescription = image.Description
                 });
-                _logger.LogInformation("Added image {ImageId}.{Extension} to ProfileData for {CharacterName}", 
-                    image.ImageId, image.Extension, characterData.Name);
             }
-            _logger.LogInformation("Added {ImageCount} images to ProfileData for {CharacterName}", profileData.Images.Count, characterData.Name);
         }
-        else
-        {
-            _logger.LogInformation("No images found for {CharacterName}", characterData.Name);
-        }
-
         // Add inlines
         if (characterData.Inlines.Any())
         {
+            // Populate the Inlines dictionary directly
+            foreach (var inlineEntry in characterData.Inlines)
+            {
+                profileData.Inlines[inlineEntry.Key] = inlineEntry.Value;
+            }
+            
+            // Also keep the hashes in Info for backward compatibility
             var inlineHashes = string.Join(", ", characterData.Inlines.Select(inline => inline.Value.Hash));
             profileData.Info["Inlines"] = inlineHashes;
         }

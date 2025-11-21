@@ -1,5 +1,6 @@
 using FChatBouncer.Server.Services;
 using FChatBouncer.Server.MessageQueue;
+using FChatBouncer.Server.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using System.Security.Claims;
@@ -509,6 +510,9 @@ public class BouncerHub : Hub
                 await _fChatService.SendMessageAsync(userId, activeCharacter, channel, content);
             }
 
+            // Generate message ID for sent message
+            var messageId = Guid.NewGuid().ToString();
+
             // Store message in database using character name as sender
             await _messageService.SaveMessageAsync(
                 userId,
@@ -516,7 +520,8 @@ public class BouncerHub : Hub
                 activeCharacter,
                 content,
                 Models.MessageType.Chat,
-                activeCharacter
+                activeCharacter,
+                messageId
             );
 
             // Broadcast to other connected clients of this user
@@ -528,7 +533,8 @@ public class BouncerHub : Hub
                 Timestamp = DateTime.UtcNow,
                 MessageType = "Chat",
                 characterName = activeCharacter, // Character that sent this message
-                isActiveCharacter = true // This is the active character sending the message
+                isActiveCharacter = true, // This is the active character sending the message
+                id = messageId
             });
         }
         catch (Exception ex)
@@ -890,19 +896,19 @@ public class BouncerHub : Hub
                 var settings = await _userService.GetUserSettingsAsync(userId);
                 if (settings?.FChatCredentialsEncrypted != null)
                 {
-                    var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-                    var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-                    var parts = credentials.Split(':');
-
-                    if (parts.Length == 2)
+                    // Decrypt F-Chat credentials using AES-256-GCM
+                    try
                     {
-                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", characterName, parts[0]);
-                        await _fChatService.ConnectCharacterAsync(userId, characterName, parts[0], parts[1]);
+                        (string username, string password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+                        
+                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", characterName, username);
+                        await _fChatService.ConnectCharacterAsync(userId, characterName, username, password);
                         _logger.LogInformation("Successfully created WebSocket connection for {CharacterName}", characterName);
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        throw new InvalidOperationException("Invalid credentials format");
+                        _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
+                        throw new InvalidOperationException("Failed to decrypt credentials. Please re-enter your F-Chat credentials.");
                     }
                 }
                 else
@@ -1124,6 +1130,9 @@ public class BouncerHub : Hub
                 await _fChatService.SendMessageAsync(userId, characterName, channel, content);
             }
 
+            // Generate message ID for sent message
+            var messageId = Guid.NewGuid().ToString();
+
             // Store message in database using character name as sender
             await _messageService.SaveMessageAsync(
                 userId,
@@ -1131,7 +1140,8 @@ public class BouncerHub : Hub
                 characterName,
                 content,
                 Models.MessageType.Chat,
-                characterName
+                characterName,
+                messageId
             );
 
             // Broadcast to other connected clients of this user
@@ -1141,6 +1151,7 @@ public class BouncerHub : Hub
                 Sender = characterName,
                 Content = content,
                 Timestamp = DateTime.UtcNow,
+                id = messageId,
                 MessageType = "Chat",
                 characterName = characterName, // Character that sent this message
                 isActiveCharacter = true // This is the active character sending the message
@@ -1350,13 +1361,19 @@ public class BouncerHub : Hub
 
         var messageType = ResolveClientMessageType(message);
 
+        // Use FChatMessageId from metadata if available, otherwise use message.Id (Redis stream ID)
+        var messageId = message.Metadata.TryGetValue("fchatMessageId", out var fchatId) && !string.IsNullOrWhiteSpace(fchatId)
+            ? fchatId
+            : message.Id ?? Guid.NewGuid().ToString();
+
         dto = new MessageDto(
             channel,
             message.SenderId,
             message.Content,
             message.Timestamp,
             messageType,
-            ResolveMessageCharacterName(message));
+            ResolveMessageCharacterName(message),
+            messageId);
         return true;
     }
 
@@ -1480,6 +1497,12 @@ public class BouncerHub : Hub
         if (missedEntries.Count == 0)
         {
             return;
+        }
+
+        _logger.LogInformation("Delivering {Count} missed messages for user {UserId}", missedEntries.Count, userId);
+        foreach (var entry in missedEntries)
+        {
+            _logger.LogInformation("Missed message: {From} {Message}", entry.Message.SenderId, entry.Message.Content);
         }
 
         var grouped = new Dictionary<string, List<MessageDto>>(StringComparer.OrdinalIgnoreCase);
@@ -1626,22 +1649,35 @@ public class BouncerHub : Hub
 
         try
         {
-            // Decrypt credentials
-            var credentials = DecryptCredentials(encryptedCredentials);
+            // Decode credentials from client (Base64-encoded JSON, not stored credentials)
+            var credentials = DecodeClientCredentials(encryptedCredentials);
             if (credentials == null)
             {
-                _logger.LogError("Failed to decrypt credentials for request {RequestId}", requestId);
-                await Clients.Caller.SendAsync("FChatConnectionFailed", "Failed to decrypt credentials");
+                _logger.LogError("Failed to decode credentials for request {RequestId}", requestId);
+                await Clients.Caller.SendAsync("FChatConnectionFailed", "Failed to decode credentials");
                 return;
             }
 
-            _logger.LogInformation("Successfully decrypted credentials for user {UserId}, character {CharacterName}", 
+            _logger.LogInformation("Successfully decoded credentials for user {UserId}, character {CharacterName}", 
                 userId, request.CharacterName);
 
             // Use credentials to connect to FChat
             try
             {
                 await _fChatService.ConnectCharacterAsync(userId, request.CharacterName, credentials.Username, credentials.Password);
+                
+                // Save credentials to UserSettings using proper AES-256-GCM encryption
+                // This ensures credentials are persisted for future connections
+                try
+                {
+                    var settings = await _userService.GetUserSettingsAsync(userId) ?? new UserSettings { UserId = userId };
+                    settings.FChatCredentialsEncrypted = _encryptionService.EncryptCredentials(credentials.Username, credentials.Password);
+                    await _userService.UpdateUserSettingsAsync(userId, settings);
+                }
+                catch (Exception saveEx)
+                {
+                    _logger.LogError(saveEx, "Failed to save credentials to UserSettings for user {UserId}, but connection succeeded", userId);
+                }
                 
                 await Clients.Caller.SendAsync("FChatConnectionEstablished", request.CharacterName);
                 _logger.LogInformation("FChat connection established for user {UserId}, character {CharacterName}", 
@@ -1666,11 +1702,12 @@ public class BouncerHub : Hub
     }
 
     /// <summary>
-    /// Decrypts credentials sent from the client during credential request flow.
-    /// Note: Client-to-server transmission uses Base64 over HTTPS (acceptable for transport).
+    /// Decodes credentials sent from the client during credential request flow.
+    /// Note: Client-to-server transmission uses Base64-encoded JSON over HTTPS (acceptable for transport).
+    /// This is NOT for decrypting stored credentials - use EncryptionService.DecryptCredentials() for that.
     /// Storage uses AES-256-GCM encryption via EncryptionService.
     /// </summary>
-    private FChatCredentials? DecryptCredentials(string encryptedCredentials)
+    private FChatCredentials? DecodeClientCredentials(string encryptedCredentials)
     {
         try
         {
@@ -1683,7 +1720,7 @@ public class BouncerHub : Hub
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to decrypt FChat credentials");
+            _logger.LogError(ex, "Failed to decode FChat credentials from client");
             return null;
         }
     }
@@ -1720,7 +1757,8 @@ public record MessageDto(
     string Content,
     DateTime Timestamp,
     string MessageType,
-    string? CharacterName = null
+    string? CharacterName = null,
+    string? Id = null
 );
 
 public record HistoryDto(

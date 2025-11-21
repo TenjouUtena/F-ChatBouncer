@@ -28,13 +28,20 @@ public class LISCommandTest
         """;
 
         var jsonElement = JsonSerializer.Deserialize<JsonElement>(sampleLISData);
-        
+
         // Create a mock logger for testing
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
         var logger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-        
+
+        // Create mock TicketManager for testing
+        var ticketManagerLogger = loggerFactory.CreateLogger<TicketManager>();
+        var mockConfiguration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { { "CREDENTIAL_ENCRYPTION_KEY", "test-key-for-unit-tests-only" } })
+            .Build();
+        var ticketManager = new TicketManager(ticketManagerLogger, mockConfiguration);
+
         // Create WebSocket client instance for testing
-        var client = new FChatWebSocketClient(logger);
+        var client = new FChatWebSocketClient(logger, ticketManager);
         
         // Use reflection to access the private HandleOnlineCharactersList method
         var method = typeof(FChatWebSocketClient).GetMethod("HandleOnlineCharactersList", 
@@ -101,13 +108,20 @@ public class LISCommandTest
         """;
 
         var jsonElement = JsonSerializer.Deserialize<JsonElement>(sampleLISData);
-        
+
         // Create a mock logger for testing
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
         var logger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-        
+
+        // Create mock TicketManager for testing
+        var ticketManagerLogger = loggerFactory.CreateLogger<TicketManager>();
+        var mockConfiguration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { { "CREDENTIAL_ENCRYPTION_KEY", "test-key-for-unit-tests-only" } })
+            .Build();
+        var ticketManager = new TicketManager(ticketManagerLogger, mockConfiguration);
+
         // Create WebSocket client instance for testing
-        var client = new FChatWebSocketClient(logger);
+        var client = new FChatWebSocketClient(logger, ticketManager);
         
         // Use reflection to access the private HandleOnlineCharactersList method
         var method = typeof(FChatWebSocketClient).GetMethod("HandleOnlineCharactersList", 
@@ -168,13 +182,20 @@ public class LISCommandTest
         """;
 
         var jsonElement = JsonSerializer.Deserialize<JsonElement>(sampleLISData);
-        
+
         // Create a mock logger for testing
         using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
         var logger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-        
+
+        // Create mock TicketManager for testing
+        var ticketManagerLogger = loggerFactory.CreateLogger<TicketManager>();
+        var mockConfiguration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { { "CREDENTIAL_ENCRYPTION_KEY", "test-key-for-unit-tests-only" } })
+            .Build();
+        var ticketManager = new TicketManager(ticketManagerLogger, mockConfiguration);
+
         // Create WebSocket client instance for testing
-        var client = new FChatWebSocketClient(logger);
+        var client = new FChatWebSocketClient(logger, ticketManager);
         
         // Use reflection to access the private HandleOnlineCharactersList method
         var method = typeof(FChatWebSocketClient).GetMethod("HandleOnlineCharactersList", 

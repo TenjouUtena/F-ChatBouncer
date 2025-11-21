@@ -406,23 +406,23 @@ export default function Home() {
         
         // Validate that we have a character name
         if (!data?.characterName) {
-          console.error('Profile available notification received without CharacterName:', data);
+          console.debug('Profile available notification received without CharacterName:', data);
           return;
         }
         
         try {
           // Fetch the profile via REST API
           const profileResponse = await api.getProfile(token!, data.characterName, true);
-          console.log('Successfully fetched profile after notification:', profileResponse);
+          console.debug('Successfully fetched profile after notification:', profileResponse);
           
           // Update the profile in the chat store
           const { addProfile } = useChatStore.getState();
           if (profileResponse.profileData) {
             addProfile(data.characterName, profileResponse.profileData);
-            console.log(`Added profile for ${data.characterName} to chat store`);
+            console.debug(`Added profile for ${data.characterName} to chat store`);
           }
         } catch (error) {
-          console.error('Failed to fetch profile after notification:', error);
+          console.debug('Failed to fetch profile after notification:', error);
         }
       });
 

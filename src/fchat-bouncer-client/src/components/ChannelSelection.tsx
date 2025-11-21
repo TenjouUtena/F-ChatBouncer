@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
@@ -43,19 +43,40 @@ export default function ChannelSelection({
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  const handleGetChannels = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      if (!signalRService.isConnected) {
+        throw new Error('SignalR is not connected. Please wait and try again.');
+      }
+
+      await signalRService.getChannelList();
+    } catch (err) {
+      console.error('Error getting channels:', err);
+      setError(err instanceof Error ? err.message : 'Failed to get channels');
+      setIsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    // Set up SignalR listeners for channel data
-    signalRService.onReceiveChannelList((channels: Channel[]) => {
+    // Store callback references for proper cleanup
+    const channelListCallback = (channels: Channel[]) => {
+      console.log('ChannelSelection: Received channel list from SignalR:', channels);
       setAvailableChannels(channels);
       setChannelMetadata(channels);
       setIsLoading(false);
-    });
+    };
 
-    signalRService.onChannelListError((errorMessage: string) => {
+    const channelListErrorCallback = (errorMessage: string) => {
       console.error('Channel list error from SignalR:', errorMessage);
       setError(errorMessage);
       setIsLoading(false);
-    });
+    };
+
+    // Set up SignalR listeners for channel data
+    signalRService.onReceiveChannelList(channelListCallback);
+    signalRService.onChannelListError(channelListErrorCallback);
 
     // Request channel list when component mounts, but wait for SignalR to be ready AND active character to be set
     const requestChannelsWhenReady = async () => {
@@ -86,32 +107,14 @@ export default function ChannelSelection({
     
     requestChannelsWhenReady();
 
-    // Cleanup listeners on unmount
+    // Cleanup: Remove only our specific callbacks, not the entire SignalR handlers
+    // The SignalR service manages the actual connection handlers
     return () => {
-      // Remove channel-specific listeners
-      if (signalRService.connection) {
-        signalRService.connection.off('ReceiveChannelList');
-        signalRService.connection.off('ChannelListError');
-      }
+      // Note: We don't remove the SignalR handlers here because addUniqueListener manages them
+      // and other components might be using the same handlers. The callbacks will be garbage collected.
+      // If we need to explicitly remove callbacks, we'd need a removeListener method that takes callbacks.
     };
-  }, [signalRService.connectionState, signalRService.connection?.connectionId, activeCharacter]);
-
-  const handleGetChannels = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-
-      if (!signalRService.isConnected) {
-        throw new Error('SignalR is not connected. Please wait and try again.');
-      }
-
-      await signalRService.getChannelList();
-    } catch (err) {
-      console.error('Error getting channels:', err);
-      setError(err instanceof Error ? err.message : 'Failed to get channels');
-      setIsLoading(false);
-    }
-  };
+  }, [signalRService.connectionState, signalRService.connection?.connectionId, activeCharacter, handleGetChannels]);
 
   const handleChannelToggle = (channelId: string) => {
     setLocalSelectedChannels(prev => {
@@ -301,10 +304,10 @@ export default function ChannelSelection({
               {filteredChannels.map((channel) => {
                 const isSelected = selectedChannels.includes(channel.id);
                 const cardClass = mode === 'initial' ?
-                  `p-4 border rounded-lg cursor-pointer transition-colors ${
+                  `p-2 border rounded-lg cursor-pointer transition-colors ${
                     isSelected ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-600 hover:border-gray-500 bg-gray-800'
                   }` :
-                  `flex items-center p-3 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 ${
+                  `flex items-center p-2 hover:bg-gray-700 cursor-pointer border-b border-gray-700 last:border-b-0 ${
                     isSelected ? 'bg-indigo-600 bg-opacity-20' : ''
                   }`;
 

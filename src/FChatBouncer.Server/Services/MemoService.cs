@@ -12,19 +12,22 @@ public class MemoService : IMemoService
     private readonly ICharacterService _characterService;
     private readonly ILogger<MemoService> _logger;
     private readonly HttpClient _httpClient;
+    private readonly IEncryptionService _encryptionService;
 
     public MemoService(
         BouncerDbContext context,
         IUserService userService,
         ICharacterService characterService,
         ILogger<MemoService> logger,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        IEncryptionService encryptionService)
     {
         _context = context;
         _userService = userService;
         _characterService = characterService;
         _logger = logger;
         _httpClient = httpClient;
+        _encryptionService = encryptionService;
     }
 
     public async Task<MemoData?> GetMemoAsync(string userId, string characterName)
@@ -41,19 +44,17 @@ public class MemoService : IMemoService
                 return null;
             }
 
-            // Decode credentials
-            var credentialsBytes = Convert.FromBase64String(settings.FChatCredentialsEncrypted);
-            var credentials = System.Text.Encoding.UTF8.GetString(credentialsBytes);
-            var parts = credentials.Split(':');
-
-            if (parts.Length != 2)
+            // Decrypt F-Chat credentials using AES-256-GCM
+            string username, password;
+            try
             {
-                _logger.LogError("Invalid credentials format for user {UserId}", userId);
+                (username, password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format.", userId);
                 return null;
             }
-
-            var username = parts[0];
-            var password = parts[1];
 
             // Create HTTP request to F-List memo API
             var request = new HttpRequestMessage(HttpMethod.Get, 

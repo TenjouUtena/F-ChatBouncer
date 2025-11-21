@@ -17,10 +17,11 @@ public class FChatService : IFChatService
     private readonly IServiceProvider _serviceProvider;
     private readonly IHubContext<BouncerHub> _hubContext;
     private readonly IEncryptionService _encryptionService;
-    
+    private readonly TicketManager _ticketManager;
+
     // Multi-character connection management: userId -> characterName -> FChatWebSocketClient
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, FChatWebSocketClient>> _connections = new();
-    
+
     // Channel caching: cacheKey -> (channels, cachedAt)
     private readonly ConcurrentDictionary<string, (List<FChatChannel> Channels, DateTime CachedAt)> _channelCache = new();
     private readonly SemaphoreSlim _channelCacheSemaphore = new(1, 1);
@@ -30,12 +31,14 @@ public class FChatService : IFChatService
         ILogger<FChatService> logger,
         IServiceProvider serviceProvider,
         IHubContext<BouncerHub> hubContext,
-        IEncryptionService encryptionService)
+        IEncryptionService encryptionService,
+        TicketManager ticketManager)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
         _hubContext = hubContext;
         _encryptionService = encryptionService;
+        _ticketManager = ticketManager;
         
         // Start timer to process pending character updates every 5 seconds
         _characterUpdateTimer = new Timer(async _ => await ProcessPendingCharacterUpdates(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
@@ -160,7 +163,7 @@ public class FChatService : IFChatService
             using var scope2 = _serviceProvider.CreateScope();
             var loggerFactory = scope2.ServiceProvider.GetRequiredService<ILoggerFactory>();
             var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-            using var tempClient = new FChatWebSocketClient(tempLogger);
+            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager);
             var connected = await tempClient.ConnectAsync(username, password);
             
             if (!connected)
@@ -389,7 +392,7 @@ public class FChatService : IFChatService
             // Create a temporary client to get the ticket and extract characters
             using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
             var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-            using var tempClient = new FChatWebSocketClient(tempLogger);
+            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager);
             var success = await tempClient.ConnectAsync(username, password);
             
             if (!success)
@@ -582,7 +585,7 @@ public class FChatService : IFChatService
 
             // Create a new F-Chat WebSocket client
             var logger = _serviceProvider.GetRequiredService<ILogger<FChatWebSocketClient>>();
-            var client = new FChatWebSocketClient(logger);
+            var client = new FChatWebSocketClient(logger, _ticketManager);
 
             // Set up event handlers with character context
             client.MessageReceived += async (message) =>
@@ -1006,6 +1009,9 @@ public class FChatService : IFChatService
                             await SendMessageAsync(userId, characterName, queuedMessage.ChannelName, queuedMessage.Content);
                         }
 
+                        // Generate message ID for queued message
+                        var queuedMessageId = Guid.NewGuid().ToString();
+
                         // Store in message history
                         await messageService.SaveMessageAsync(
                             userId,
@@ -1013,7 +1019,8 @@ public class FChatService : IFChatService
                             queuedMessage.SenderCharacter,
                             queuedMessage.Content,
                             queuedMessage.MessageType,
-                            characterName
+                            characterName,
+                            queuedMessageId
                         );
 
                         // Broadcast to connected clients
@@ -1025,7 +1032,8 @@ public class FChatService : IFChatService
                             Timestamp = DateTime.UtcNow,
                             MessageType = queuedMessage.MessageType.ToString(),
                             characterName = characterName, // Character that received this message
-                            isActiveCharacter = await IsActiveCharacterAsync(userId, characterName) // Helper to indicate if this is the active character
+                            isActiveCharacter = await IsActiveCharacterAsync(userId, characterName), // Helper to indicate if this is the active character
+                            id = queuedMessageId
                         });
 
                         // Remove from queue
@@ -1174,6 +1182,11 @@ public class FChatService : IFChatService
                 await ProcessPendingCharacterUpdates();
             }
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in BatchUpdateCharacterStatus for {CharacterName}", characterName);
+            throw;
+        }
         finally
         {
             _characterUpdateSemaphore.Release();
@@ -1184,7 +1197,7 @@ public class FChatService : IFChatService
     {
         List<KeyValuePair<string, CharacterUpdateInfo>> updates;
 
-        await _characterUpdateSemaphore.WaitAsync();
+        //await _characterUpdateSemaphore.WaitAsync();
         try
         {
             if (_pendingCharacterUpdates.Count == 0)
@@ -1202,7 +1215,7 @@ public class FChatService : IFChatService
         }
         finally
         {
-            _characterUpdateSemaphore.Release();
+            //_characterUpdateSemaphore.Release();
         }
 
         _logger.LogDebug("Processing {Count} pending character updates", updates.Count);
@@ -1498,6 +1511,49 @@ public class FChatService : IFChatService
         }
     }
 
+    /// <summary>
+    /// Fix #4: Refreshes the friends list by clearing cache and requesting fresh FRL from F-Chat server
+    /// </summary>
+    public async Task RefreshFriendsListAsync(string userId)
+    {
+        try
+        {
+            // Get the active character for this user
+            var activeCharacter = await GetActiveCharacterAsync(userId);
+            if (string.IsNullOrEmpty(activeCharacter))
+            {
+                _logger.LogWarning("No active character found for user {UserId} when refreshing friends list", userId);
+                return;
+            }
+
+            // Get the character connection
+            var connection = await GetCharacterConnectionAsync(userId, activeCharacter);
+            if (connection == null)
+            {
+                _logger.LogWarning("No character connection found for character {CharacterName} of user {UserId}", activeCharacter, userId);
+                return;
+            }
+
+            // Check if the WebSocket client is connected
+            if (!_connections.TryGetValue(userId, out var userConnections) || 
+                !userConnections.TryGetValue(activeCharacter, out var client) || 
+                !client.IsConnected)
+            {
+                _logger.LogWarning("No active WebSocket connection found for character {CharacterName} of user {UserId}", activeCharacter, userId);
+                return;
+            }
+
+            // Refresh the friends list
+            await client.RefreshFriendsListAsync();
+            _logger.LogInformation("Successfully refreshed friends list for character {CharacterName} of user {UserId}", activeCharacter, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error refreshing friends list for user {UserId}", userId);
+            throw;
+        }
+    }
+
     public async Task SearchCharactersAsync(string userId, string characterName, Dictionary<string, object> searchCriteria)
     {
         try
@@ -1590,7 +1646,8 @@ public class FChatService : IFChatService
                 message.Message,
                 message.Timestamp,
                 message.MessageType,
-                characterName
+                characterName,
+                message.Id
             );
 
             using var scope = _serviceProvider.CreateScope();
@@ -1608,7 +1665,8 @@ public class FChatService : IFChatService
                     characterName,
                     message.Message,
                     message.MessageType,
-                    message.Channel);
+                    message.Channel,
+                    message.Id);
             }
             else
             {
@@ -1618,7 +1676,8 @@ public class FChatService : IFChatService
                     message.Character,
                     characterName,
                     message.Message,
-                    message.MessageType);
+                    message.MessageType,
+                    message.Id);
             }
 
             // Broadcast message with character context - frontend will filter based on active character
@@ -1630,7 +1689,8 @@ public class FChatService : IFChatService
                 Timestamp = messageDto.Timestamp,
                 MessageType = messageDto.MessageType,
                 characterName = characterName, // Character that received this message
-                isActiveCharacter = await IsActiveCharacterAsync(userId, characterName) // Helper to indicate if this is the active character
+                isActiveCharacter = await IsActiveCharacterAsync(userId, characterName), // Helper to indicate if this is the active character
+                id = messageDto.Id
             });
 
             // Convert string message type to enum
@@ -1650,7 +1710,8 @@ public class FChatService : IFChatService
                 message.Character,
                 message.Message,
                 messageType,
-                characterName
+                characterName,
+                message.Id
             );
 
             _logger.LogDebug("Saved incoming message from {Character} in channel {Channel} for character {CharacterName} of user {UserId}",
@@ -1961,18 +2022,7 @@ public class FChatService : IFChatService
     {
         try
         {
-            // User came online - logging removed
-
-            // Update character status in unified character store (batched)
-            await BatchUpdateCharacterStatus(characterName, status, null, true);
-
-            // Update gender if provided
-            if (!string.IsNullOrEmpty(gender) && gender != "None")
-            {
-                await ExecuteWithCharacterService(cs => cs.UpdateCharacterGenderAsync(characterName, gender));
-            }
-
-            // Broadcast user online status to SignalR clients
+            // Broadcast user online status to SignalR clients FIRST (don't block on batch update)
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("UserOnline", new
             {
                 CharacterName = characterName,
@@ -1980,6 +2030,25 @@ public class FChatService : IFChatService
                 Gender = gender,
                 Timestamp = DateTime.UtcNow,
                 IsOnline = true
+            });
+
+            // Update character status in unified character store (batched) - fire and forget to avoid blocking
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await BatchUpdateCharacterStatus(characterName, status, null, true);
+
+                    // Update gender if provided
+                    if (!string.IsNullOrEmpty(gender) && gender != "None")
+                    {
+                        await ExecuteWithCharacterService(cs => cs.UpdateCharacterGenderAsync(characterName, gender));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error in background BatchUpdateCharacterStatus for {CharacterName}", characterName);
+                }
             });
         }
         catch (Exception ex)
@@ -1993,17 +2062,25 @@ public class FChatService : IFChatService
     {
         try
         {
-            // User went offline - logging removed
-
-            // Update character status in unified character store (batched)
-            await BatchUpdateCharacterStatus(characterName, "offline", null, false);
-
-            // Broadcast user offline status to SignalR clients
+            // Broadcast user offline status to SignalR clients FIRST (don't block on batch update)
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("UserOffline", new
             {
                 CharacterName = characterName,
                 Timestamp = DateTime.UtcNow,
                 IsOnline = false
+            });
+
+            // Update character status in unified character store (batched) - fire and forget to avoid blocking
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await BatchUpdateCharacterStatus(characterName, "offline", null, false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error in background BatchUpdateCharacterStatus for {CharacterName}", characterName);
+                }
             });
         }
         catch (Exception ex)
@@ -2082,17 +2159,10 @@ public class FChatService : IFChatService
             _logger.LogInformation("Received online characters list with {CharacterCount} characters for character {CharacterName} of user {UserId}", 
                 onlineCharacters.Count, characterName, userId);
 
-            // Log all characters being processed
-            foreach (var fchatCharacter in onlineCharacters)
-            {
-                _logger.LogInformation("Processing character: {Name} (Status: {Status}, Gender: {Gender})", 
-                    fchatCharacter.Name, fchatCharacter.Status, fchatCharacter.Gender);
-            }
-
             // Update character information in unified character store
             foreach (var fchatCharacter in onlineCharacters)
             {
-                _logger.LogInformation("Updating character in database: {Name}", fchatCharacter.Name);
+                //_logger.LogInformation("Updating character in database: {Name}", fchatCharacter.Name);
                 await ExecuteWithCharacterService(cs => cs.UpdateCharacterFromFChatDataAsync(fchatCharacter.Name, fchatCharacter));
             }
 

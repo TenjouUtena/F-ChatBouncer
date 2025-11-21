@@ -30,7 +30,10 @@ public class FChatWebSocketClient : IDisposable
     private readonly HashSet<string> _joinedChannels = new();
     private readonly Dictionary<string, FChatChannel> _joinedChannelDetails = new();
     private readonly Dictionary<string, TaskCompletionSource<object?>> _pendingRequests = new();
-    
+    private readonly TicketManager _ticketManager;
+    private int _onlineCharacterCount = 0;
+    private int _receivedCharacterCount = 0;
+
     // Channel list request deduplication
     private Task<List<FChatChannel>>? _pendingChannelListRequest = null;
     private readonly object _channelListRequestLock = new object();
@@ -59,9 +62,10 @@ public class FChatWebSocketClient : IDisposable
     public event Action<string, string, string>? TypingNotificationReceived; // characterName, fromCharacter, status
     public event Action<List<SearchResult>>? SearchResultsReceived; // search results
 
-    public FChatWebSocketClient(ILogger<FChatWebSocketClient> logger)
+    public FChatWebSocketClient(ILogger<FChatWebSocketClient> logger, TicketManager ticketManager)
     {
         _logger = logger;
+        _ticketManager = ticketManager;
     }
 
     public async Task<bool> ConnectAsync(string username, string password)
@@ -358,29 +362,8 @@ public class FChatWebSocketClient : IDisposable
 
     public void UpdateFriendsListWithOnlineStatus(List<FChatCharacter> onlineCharacters)
     {
-        _logger.LogInformation("=== UpdateFriendsListWithOnlineStatus START ===");
-        _logger.LogInformation("Updating friends list with online status from {CharacterCount} online characters", onlineCharacters.Count);
-        _logger.LogDebug("Current friends list has {FriendCount} friends, bookmarks list has {BookmarkCount} bookmarks", 
-            _friendsList.Count, _bookmarksList.Count);
-        
-        // Debug: Log some sample friends and bookmarks for comparison
-        if (_friendsList.Count > 0)
-        {
-            var sampleFriends = _friendsList.Take(5).ToList();
-            _logger.LogDebug("Sample friends: {SampleFriends}", string.Join(", ", sampleFriends));
-        }
-        if (_bookmarksList.Count > 0)
-        {
-            var sampleBookmarks = _bookmarksList.Take(5).ToList();
-            _logger.LogDebug("Sample bookmarks: {SampleBookmarks}", string.Join(", ", sampleBookmarks));
-        }
-        
         // Create a set of online character names for quick lookup
         var onlineCharacterNames = new HashSet<string>(onlineCharacters.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
-        
-        // Debug: Log some sample online characters for comparison
-        var sampleOnlineCharacters = onlineCharacters.Take(5).Select(c => c.Name).ToList();
-        _logger.LogDebug("Sample online characters: {SampleOnlineCharacters}", string.Join(", ", sampleOnlineCharacters));
         
         var friendsUpdated = 0;
         var friendsMarkedOnline = 0;
@@ -401,8 +384,6 @@ public class FChatWebSocketClient : IDisposable
                 if (isOnline && onlineCharacter != null)
                 {
                     // Update friend with online status and details
-                    _logger.LogInformation("Friend {FriendName} found in LIS - updating to online with status {Status}", 
-                        friendName, onlineCharacter.Status);
                     friend.IsOnline = true;
                     friend.Status = onlineCharacter.Status;
                     friend.StatusMessage = onlineCharacter.StatusMessage;
@@ -433,7 +414,7 @@ public class FChatWebSocketClient : IDisposable
                         }
                         else
                         {
-                            _logger.LogDebug("Friend {FriendName} marked as online with status {Status} (not in LIS)", friendName, friend.Status);
+                            // Keep existing online status
                         }
                     }
                     else
@@ -496,7 +477,6 @@ public class FChatWebSocketClient : IDisposable
                     {
                         // Keep them as online with their current status
                         bookmarkFriend.IsOnline = true;
-                        _logger.LogDebug("Bookmark {BookmarkName} marked as online with status {Status} (not in LIS)", bookmarkName, bookmarkFriend.Status);
                     }
                     else
                     {
@@ -509,9 +489,7 @@ public class FChatWebSocketClient : IDisposable
             bookmarksUpdated++;
         }
         
-        _logger.LogInformation("=== UpdateFriendsListWithOnlineStatus COMPLETE ===");
-        _logger.LogInformation("Updated {FriendsUpdated} friends ({FriendsOnline} online) and {BookmarksUpdated} bookmarks ({BookmarksOnline} online)", 
-            friendsUpdated, friendsMarkedOnline, bookmarksUpdated, bookmarksMarkedOnline);
+        // Logging removed to reduce spam - only log if there are significant updates
     }
 
     /// <summary>
@@ -617,7 +595,6 @@ public class FChatWebSocketClient : IDisposable
                     {
                         // Keep them as online with their current status
                         bookmarkFriend.IsOnline = true;
-                        _logger.LogDebug("Bookmark {BookmarkName} marked as online with status {Status} (not in LIS)", bookmarkName, bookmarkFriend.Status);
                     }
                     else
                     {
@@ -702,6 +679,64 @@ public class FChatWebSocketClient : IDisposable
 
         _logger.LogDebug("Returning {FriendCount} friends with status for user: {Username}", _friendsWithStatus.Count, _username);
         return _friendsWithStatus.Values.ToList();
+    }
+
+    /// <summary>
+    /// Marks all friends and bookmarks as offline. Called when CON is received to reset status before LIS chunks arrive.
+    /// </summary>
+    private void MarkAllFriendsAndBookmarksOffline()
+    {
+        _logger.LogInformation("Marking all friends and bookmarks as offline (CON received, preparing for LIS chunks)");
+        
+        var friendsMarkedOffline = 0;
+        var bookmarksMarkedOffline = 0;
+        
+        // Mark all friends as offline
+        foreach (var friend in _friendsWithStatus.Values)
+        {
+            friend.IsOnline = false;
+            friend.Status = "offline";
+            friend.LastSeen = DateTime.UtcNow;
+            friendsMarkedOffline++;
+        }
+        
+        // Mark all bookmarks as offline
+        foreach (var bookmark in _bookmarksWithStatus.Values)
+        {
+            bookmark.IsOnline = false;
+            bookmark.Status = "offline";
+            bookmark.LastSeen = DateTime.UtcNow;
+            bookmarksMarkedOffline++;
+        }
+        
+        // Clear the online characters cache
+        _onlineCharactersCache.Clear();
+        
+        _logger.LogInformation("Marked {FriendsCount} friends and {BookmarksCount} bookmarks as offline", 
+            friendsMarkedOffline, bookmarksMarkedOffline);
+    }
+
+    /// <summary>
+    /// Fix #4: Refreshes the friends list by clearing cache and requesting fresh FRL from F-Chat server
+    /// </summary>
+    public async Task RefreshFriendsListAsync()
+    {
+        if (!_isAuthenticated || string.IsNullOrEmpty(_selectedCharacter))
+        {
+            throw new InvalidOperationException("Not authenticated or no character selected");
+        }
+
+        _logger.LogInformation("Refreshing friends list - clearing cache and requesting fresh FRL");
+        
+        // Clear the friends cache to force fresh data
+        _friendsWithStatus.Clear();
+        _bookmarksWithStatus.Clear();
+        
+        // Request fresh friends list from F-Chat server
+        // FRL command with empty object requests the full friends list
+        await SendCommandAsync("FRL", new { });
+        
+        _logger.LogInformation("Sent FRL command to refresh friends list");
     }
 
     public async Task<List<FChatChannel>> GetChannelListAsync()
@@ -1385,6 +1420,13 @@ public class FChatWebSocketClient : IDisposable
             return false;
         }
 
+        var ticket = _ticketManager.GetValidTicket(_username, characterName);
+        if (string.IsNullOrEmpty(ticket))
+        {
+            _logger.LogError("Cannot add bookmark: No valid ticket available");
+            return false;
+        }
+
         try
         {
             _logger.LogInformation("Adding bookmark for character: {CharacterName}", characterName);
@@ -1392,10 +1434,12 @@ public class FChatWebSocketClient : IDisposable
             using var httpClient = new HttpClient();
             httpClient.Timeout = TimeSpan.FromSeconds(30);
 
+            _logger.LogInformation("Adding bookmark for character: {CharacterName} with username: {Username} and ticket: {Ticket}", characterName, _username, _ticket);
+
             var bookmarkData = new FormUrlEncodedContent(new[]
             {
                 new KeyValuePair<string, string>("account", _username),
-                new KeyValuePair<string, string>("ticket", _ticket),
+                new KeyValuePair<string, string>("ticket", ticket),
                 new KeyValuePair<string, string>("name", characterName)
             });
 
@@ -1637,7 +1681,32 @@ public class FChatWebSocketClient : IDisposable
             switch (command)
             {
                 case "IDN":
+                    // IDN - Identity response
+                    // payload example:     {"identity":"Some Guy"}
+                    _logger.LogInformation("Received IDN (identity) command with data: {Data}", jsonData);
+                    if (_pendingRequests.TryGetValue("IDN", out var idnTcs))
+                    {
+                        idnTcs.SetResult(data);
+                    }
+                    break;
                 case "CON":
+                    // Count of Online characters response
+                    // payload example:     {"count":9379}
+                    // CON is sent before LIS chunks, so we mark all friends/bookmarks as offline first
+                    // Then LIS chunks will mark them online as they arrive
+
+                    _onlineCharacterCount = JsonSerializer.Deserialize<JsonElement>(jsonData).GetProperty("count").GetInt32();
+                    _receivedCharacterCount = 0;
+                    _logger.LogInformation("Online character count: {Count}", _onlineCharacterCount);
+                    
+                    // Mark all friends and bookmarks as offline before processing LIS chunks
+                    MarkAllFriendsAndBookmarksOffline();
+                    if (_pendingRequests.TryGetValue("CON", out var conTcs))
+                    {
+                        conTcs.SetResult(data);
+                    }
+                    break;
+
                 case "FRL":
                     // Friends list response - parse friends with online status
                     _logger.LogInformation("Received FRL (friends list) command with data: {Data}", jsonData);
@@ -1652,11 +1721,7 @@ public class FChatWebSocketClient : IDisposable
 
                 case "LIS":
                     // LIS - List of online characters with their status
-                    _logger.LogInformation("=== LIS COMMAND RECEIVED ===");
-                    _logger.LogInformation("Raw LIS data: {Data}", jsonData);
-                    _logger.LogInformation("LIS data length: {Length} characters", jsonData.Length);
                     HandleOnlineCharactersList(data);
-                    _logger.LogInformation("=== LIS PROCESSING COMPLETE ===");
                     break;
 
                 case "CHA":
@@ -1967,7 +2032,8 @@ public class FChatWebSocketClient : IDisposable
                     Character = charElement.GetString() ?? "",
                     Message = msgElement.GetString() ?? "",
                     Channel = channelElement.GetString() ?? "",
-                    Timestamp = DateTime.UtcNow
+                    Timestamp = DateTime.UtcNow,
+                    Id = Guid.NewGuid().ToString()
                 };
             }
             if (data.TryGetProperty("character", out charElement) &&
@@ -1978,7 +2044,8 @@ public class FChatWebSocketClient : IDisposable
                     Character = charElement.GetString() ?? "",
                     Message = msgElement.GetString() ?? "",
                     Channel = "PRI-" + charElement.GetString() ?? "",
-                    Timestamp = DateTime.UtcNow
+                    Timestamp = DateTime.UtcNow,
+                    Id = Guid.NewGuid().ToString()
                 };
             }
         }
@@ -2501,6 +2568,39 @@ public class FChatWebSocketClient : IDisposable
                     onlineCharacter.LastSeen = DateTime.UtcNow;
                 }
 
+                // Fix #2: Update friends cache when status changes
+                var statusLower = status.ToLower();
+                var isOffline = statusLower == "offline";
+                
+                if (_friendsWithStatus.TryGetValue(characterName, out var friend))
+                {
+                    friend.Status = status;
+                    friend.StatusMessage = statusMessage;
+                    friend.IsOnline = !isOffline;
+                    friend.LastSeen = DateTime.UtcNow;
+                    
+                    if (isOffline)
+                    {
+                        _logger.LogInformation("Marked friend {CharacterName} as offline via STA command", characterName);
+                        // Remove from online characters cache when explicitly offline
+                        _onlineCharactersCache.TryRemove(characterName, out _);
+                    }
+                }
+                
+                // Also update bookmarks cache
+                if (_bookmarksWithStatus.TryGetValue(characterName, out var bookmark))
+                {
+                    bookmark.Status = status;
+                    bookmark.StatusMessage = statusMessage;
+                    bookmark.IsOnline = !isOffline;
+                    bookmark.LastSeen = DateTime.UtcNow;
+                    
+                    if (isOffline)
+                    {
+                        _logger.LogInformation("Marked bookmark {CharacterName} as offline via STA command", characterName);
+                    }
+                }
+
                 // Fire the status updated event
                 StatusUpdated?.Invoke(characterName, status, statusMessage);
             }
@@ -2591,6 +2691,27 @@ public class FChatWebSocketClient : IDisposable
             if (!string.IsNullOrEmpty(characterName))
             {
                 // User went offline - logging removed
+                
+                // Fix #1: Mark friend as offline in cache
+                if (_friendsWithStatus.TryGetValue(characterName, out var friend))
+                {
+                    friend.IsOnline = false;
+                    friend.Status = "offline";
+                    friend.LastSeen = DateTime.UtcNow;
+                    _logger.LogInformation("Marked friend {CharacterName} as offline in friends cache", characterName);
+                }
+                
+                // Also mark bookmark as offline if it exists
+                if (_bookmarksWithStatus.TryGetValue(characterName, out var bookmark))
+                {
+                    bookmark.IsOnline = false;
+                    bookmark.Status = "offline";
+                    bookmark.LastSeen = DateTime.UtcNow;
+                    _logger.LogInformation("Marked bookmark {CharacterName} as offline in bookmarks cache", characterName);
+                }
+                
+                // Remove from online characters cache
+                _onlineCharactersCache.TryRemove(characterName, out _);
                 
                 // Fire the user offline event
                 UserOffline?.Invoke(characterName);
@@ -2856,6 +2977,10 @@ public class FChatWebSocketClient : IDisposable
                 
                 _logger.LogInformation("Parsed {FriendCount} total friends from FRL response", allFriends.Count);
                 
+                // Update the friends cache with the fresh data from FRL
+                UpdateFriendsListWithStatus(allFriends);
+                _logger.LogInformation("Updated friends cache with {FriendCount} friends from FRL", allFriends.Count);
+                
                 // Fire event with complete friends list
                 _logger.LogInformation("About to invoke FriendsListReceived event. Event has {SubscriberCount} subscribers", 
                     FriendsListReceived?.GetInvocationList().Length ?? 0);
@@ -2889,23 +3014,16 @@ public class FChatWebSocketClient : IDisposable
     {
         try
         {
-            _logger.LogDebug("=== HANDLING LIS DATA ===");
-            _logger.LogDebug("LIS data structure: {Data}", data.ToString());
-
             // LIS response contains a "characters" array with online characters
             // Each character is an array: [name, gender, status, statusMessage]
             if (data.TryGetProperty("characters", out var charactersElement) && charactersElement.ValueKind == JsonValueKind.Array)
             {
-                _logger.LogDebug("Found 'characters' array with {Count} elements", charactersElement.GetArrayLength());
-                
                 var onlineCharacters = new List<FChatCharacter>();
                 var newOnlineCharacters = new List<FChatCharacter>();
                 var statusChangedCharacters = new List<FChatCharacter>();
                 
                 foreach (var characterElement in charactersElement.EnumerateArray())
                 {
-                    _logger.LogDebug("Processing character element: {Element}", characterElement.ToString());
-                    
                     if (characterElement.ValueKind == JsonValueKind.Array && characterElement.GetArrayLength() >= 3)
                     {
                         var characterArray = characterElement.EnumerateArray().ToArray();
@@ -2918,9 +3036,6 @@ public class FChatWebSocketClient : IDisposable
                             StatusMessage = characterArray.Length > 3 ? characterArray[3].GetString() : null,
                             LastSeen = DateTime.UtcNow
                         };
-                        
-                        _logger.LogDebug("Parsed character: Name='{Name}', Gender='{Gender}', Status='{Status}', StatusMessage='{StatusMessage}'", 
-                            character.Name, character.Gender, character.Status, character.StatusMessage ?? "null");
                         
                         if (!string.IsNullOrEmpty(character.Name))
                         {
@@ -2938,8 +3053,6 @@ public class FChatWebSocketClient : IDisposable
                                 
                                 // Fire individual character online event
                                 UserOnline?.Invoke(character.Name, character.Status, character.Gender);
-                                
-                                _logger.LogDebug("New character came online: {CharacterName} ({Status})", character.Name, character.Status);
                             }
                             else
                             {
@@ -2949,9 +3062,6 @@ public class FChatWebSocketClient : IDisposable
                                 {
                                     statusChangedCharacters.Add(character);
                                     _onlineCharactersCache[character.Name] = character;
-                                    
-                                    _logger.LogDebug("Character status changed: {CharacterName} from {OldStatus} to {NewStatus}", 
-                                        character.Name, cachedCharacter.Status, character.Status);
                                 }
                                 else
                                 {
@@ -2966,28 +3076,28 @@ public class FChatWebSocketClient : IDisposable
                     }
                 }
                 
-                // Remove characters that are no longer online
-                var currentOnlineNames = new HashSet<string>(onlineCharacters.Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+                // Update the received character count with the actual number of characters parsed
+                _receivedCharacterCount += onlineCharacters.Count;
                 
-                _logger.LogInformation("=== LIS PROCESSING SUMMARY ===");
-                _logger.LogInformation("Total characters parsed: {CharacterCount}", onlineCharacters.Count);
-                _logger.LogInformation("New characters: {NewCount}", newOnlineCharacters.Count);
-                _logger.LogInformation("Status changes: {ChangedCount}", statusChangedCharacters.Count);
-                
-                // Log all character names for debugging
-                var characterNames = onlineCharacters.Select(c => c.Name).ToList();
-                _logger.LogInformation("All online character names: {CharacterNames}", string.Join(", ", characterNames));
+                // Only log summary periodically or when significant events occur
+                if (_receivedCharacterCount % 1000 == 0 || _receivedCharacterCount >= _onlineCharacterCount)
+                {
+                    _logger.LogInformation("LIS progress: {ReceivedCount}/{TotalCount} characters received", 
+                        _receivedCharacterCount, _onlineCharacterCount);
+                }
                 
                 // Update channel characters with gender information from LIS data
                 UpdateChannelCharactersWithLISData(onlineCharacters);
                 
+                // Update friends list with online status from LIS
+                UpdateFriendsListWithOnlineStatus(onlineCharacters);
+                
                 // Fire event with complete online characters list
                 OnlineCharactersListReceived?.Invoke(onlineCharacters);
-                _logger.LogInformation("=== LIS EVENT FIRED ===");
             }
             else
             {
-                _logger.LogWarning("LIS response format not recognized: {Data}", data.ToString());
+                _logger.LogWarning("LIS response format not recognized");
             }
         }
         catch (Exception ex)
@@ -3117,4 +3227,5 @@ public class FChatMessage
     public string Channel { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
     public string MessageType { get; set; } = "Chat";
+    public string? Id { get; set; }
 }

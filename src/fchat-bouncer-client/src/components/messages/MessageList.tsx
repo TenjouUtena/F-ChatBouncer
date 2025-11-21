@@ -115,7 +115,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   // Handle profile from context menu
   const handleOpenProfile = useCallback((username: string) => {
     const profileUrl = `https://www.f-list.net/c/${encodeURIComponent(username.toLowerCase())}/`;
-    console.log('Opening profile for:', username, 'URL:', profileUrl);
+    console.debug('Opening profile for:', username, 'URL:', profileUrl);
     window.open(profileUrl, '_blank', 'noopener,noreferrer');
   }, []);
 

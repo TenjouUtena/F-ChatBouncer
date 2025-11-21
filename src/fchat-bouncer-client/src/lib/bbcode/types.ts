@@ -2,6 +2,13 @@
  * Types and interfaces for the BBCode parsing system
  */
 
+export interface BBCodeParseContext {
+  /** Inlines dictionary for img tag lookups */
+  inlines?: Record<string, { hash: string; extension: string; nsfw: boolean }>;
+  /** Additional context data can be added here */
+  [key: string]: any;
+}
+
 export interface BBCodeTag {
   /** Tag name (e.g., 'url', 'b', 'i') */
   name: string;
@@ -12,7 +19,7 @@ export interface BBCodeTag {
   /** Whether this tag is self-closing (e.g., [img] without [/img]) */
   selfClosing: boolean;
   /** Parse function to convert BBCode to HTML */
-  parse: (content: string, attributes?: Record<string, string>) => string;
+  parse: (content: string, attributes?: Record<string, string>, context?: BBCodeParseContext) => string;
   /** Validation function for attributes and content */
   validate?: (content: string, attributes?: Record<string, string>) => boolean;
 }

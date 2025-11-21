@@ -9,19 +9,19 @@ export function migrateExistingProfileData(): void {
   try {
     if (typeof window === 'undefined') return;
     
-    console.log('Starting profile data migration...');
+    console.debug('Starting profile data migration...');
     
     // Check if migration has already been done
     const migrationKey = 'fchat-bouncer-migration-completed';
     if (localStorage.getItem(migrationKey)) {
-      console.log('Profile data migration already completed');
+      console.debug('Profile data migration already completed');
       return;
     }
     
     // Get existing chat-storage data
     const existingData = localStorage.getItem('chat-storage');
     if (!existingData) {
-      console.log('No existing profile data to migrate');
+      console.debug('No existing profile data to migrate');
       localStorage.setItem(migrationKey, 'true');
       return;
     }
@@ -49,17 +49,17 @@ export function migrateExistingProfileData(): void {
           migratedCount++;
         }
       } catch (error) {
-        console.warn(`Failed to migrate profile for ${characterName}:`, error);
+        console.debug(`Failed to migrate profile for ${characterName}:`, error);
       }
     });
     
-    console.log(`Profile data migration completed. Migrated ${migratedCount} characters to lightweight storage.`);
+    console.debug(`Profile data migration completed. Migrated ${migratedCount} characters to lightweight storage.`);
     
     // Mark migration as completed
     localStorage.setItem(migrationKey, 'true');
     
   } catch (error) {
-    console.error('Error during profile data migration:', error);
+    console.debug('Error during profile data migration:', error);
     // Still mark as completed to prevent retry loops
     localStorage.setItem('fchat-bouncer-migration-completed', 'true');
   }

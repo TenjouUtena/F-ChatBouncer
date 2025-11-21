@@ -39,7 +39,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<strong>${hasHtmlTags ? content : sanitizeContent(content)}</strong>`;
@@ -50,7 +50,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<em>${hasHtmlTags ? content : sanitizeContent(content)}</em>`;
@@ -61,7 +61,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<u>${hasHtmlTags ? content : sanitizeContent(content)}</u>`;
@@ -72,7 +72,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<sub>${hasHtmlTags ? content : sanitizeContent(content)}</sub>`;
@@ -83,7 +83,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<sup>${hasHtmlTags ? content : sanitizeContent(content)}</sup>`;
@@ -94,7 +94,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<del>${hasHtmlTags ? content : sanitizeContent(content)}</del>`;
@@ -105,7 +105,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<span style="font-size: 1.2em;">${hasHtmlTags ? content : sanitizeContent(content)}</span>`;
@@ -116,7 +116,7 @@ export const basicTags: BBCodeTag[] = [
     hasAttributes: false,
     hasContent: true,
     selfClosing: false,
-    parse: (content: string) => {
+    parse: (content: string, attributes?: Record<string, string>, context?: any) => {
       // Check if content contains HTML tags (already processed)
       const hasHtmlTags = /<[^>]+>/.test(content);
       return `<span style="font-size: 0.8em;">${hasHtmlTags ? content : sanitizeContent(content)}</span>`;
@@ -187,7 +187,7 @@ export const colorTag: BBCodeTag = {
   hasAttributes: true,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string, attributes?: Record<string, string>) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     const color = attributes?.color || '';
     
     if (!isValidColor(color)) {
@@ -213,7 +213,7 @@ export const spoilerTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Generate unique ID for this spoiler instance
     const spoilerId = `spoiler-${Math.random().toString(36).substr(2, 9)}`;
     
@@ -258,7 +258,7 @@ export const quoteTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Check if content contains HTML tags (already processed)
     const hasHtmlTags = /<[^>]+>/.test(content);
     const sanitizedContent = hasHtmlTags ? content : sanitizeContent(content);
@@ -286,7 +286,7 @@ export const userTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     const username = content.trim();
     
     if (!username) {
@@ -319,7 +319,7 @@ export const headingTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Check if content contains HTML tags (already processed)
     const hasHtmlTags = /<[^>]+>/.test(content);
     const sanitizedContent = hasHtmlTags ? content : sanitizeContent(content);
@@ -346,7 +346,7 @@ export const indentTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Check if content contains HTML tags (already processed)
     const hasHtmlTags = /<[^>]+>/.test(content);
     const sanitizedContent = hasHtmlTags ? content : sanitizeContent(content);
@@ -367,7 +367,7 @@ export const justifyTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Check if content contains HTML tags (already processed)
     const hasHtmlTags = /<[^>]+>/.test(content);
     const sanitizedContent = hasHtmlTags ? content : sanitizeContent(content);
@@ -384,7 +384,7 @@ export const hrTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: false,
   selfClosing: true,
-  parse: () => {
+  parse: (content?: string, attributes?: Record<string, string>, context?: any) => {
     return '<hr style="border: none; border-top: 1px solid #ccc; margin: 12px 0;" />';
   },
 };
@@ -397,7 +397,7 @@ export const leftAlignTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Check if content contains HTML tags (already processed)
     const hasHtmlTags = /<[^>]+>/.test(content);
     const sanitizedContent = hasHtmlTags ? content : sanitizeContent(content);
@@ -411,7 +411,7 @@ export const centerAlignTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Check if content contains HTML tags (already processed)
     const hasHtmlTags = /<[^>]+>/.test(content);
     const sanitizedContent = hasHtmlTags ? content : sanitizeContent(content);
@@ -425,7 +425,7 @@ export const rightAlignTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Check if content contains HTML tags (already processed)
     const hasHtmlTags = /<[^>]+>/.test(content);
     const sanitizedContent = hasHtmlTags ? content : sanitizeContent(content);
@@ -442,7 +442,7 @@ export const iconTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     const username = content.trim();
     
     if (!username) {
@@ -494,7 +494,7 @@ export const noparseTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     // Return the content as-is, HTML-encoded for safety
     return sanitizeContent(content);
   },
@@ -508,7 +508,7 @@ export const collapseTag: BBCodeTag = {
   hasAttributes: true,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string, attributes?: Record<string, string>) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     const header = attributes?.value || attributes?.header || 'Click to expand';
     
     // Parse the content to handle nested BBCode
@@ -552,7 +552,7 @@ export const eiconTag: BBCodeTag = {
   hasAttributes: false,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     const trimmedContent = content.trim();
 
     // Remove any potential path traversal or dangerous characters for security
@@ -579,6 +579,66 @@ export const eiconTag: BBCodeTag = {
 };
 
 /**
+ * Img tag implementation for F-List inline images
+ * Format: [img=3708725]bed[/img] where 3708725 is the inline ID
+ */
+export const imgTag: BBCodeTag = {
+  name: 'img',
+  hasAttributes: true,
+  hasContent: true,
+  selfClosing: false,
+  parse: (content: string, attributes?: Record<string, string>, context?: { inlines?: Record<string, { hash: string; extension: string; nsfw: boolean }> }) => {
+    // Get inline ID from attributes (format: [img=3708725])
+    const inlineId = attributes?.img || attributes?.value || '';
+    
+    if (!inlineId) {
+      // Return original BBCode if no inline ID provided
+      return sanitizeContent(`[img${attributes ? `=${inlineId}` : ''}]${content}[/img]`);
+    }
+
+    // Get inlines from context
+    const inlines = context?.inlines;
+    
+    if (!inlines || !inlines[inlineId]) {
+      // Return original BBCode if inline not found
+      return sanitizeContent(`[img=${inlineId}]${content}[/img]`);
+    }
+
+    const inline = inlines[inlineId];
+    const hash = inline.hash;
+    const extension = inline.extension;
+    const altText = content.trim() || `Inline image ${inlineId}`;
+    
+    // Construct URL: https://static.f-list.net/images/charinline/{first2}/{next2}/{hash}.{extension}
+    // Example: hash "6af9343f11fda003b8df71c56dab603ae13165b7" -> "6a/f9/6af9343f11fda003b8df71c56dab603ae13165b7.jpg"
+    const first2 = hash.substring(0, 2);
+    const next2 = hash.substring(2, 4);
+    const imageUrl = `https://static.f-list.net/images/charinline/${first2}/${next2}/${hash}.${extension}`;
+    
+    return `
+      <img 
+        src="${imageUrl}" 
+        alt="${sanitizeContent(altText)}" 
+        style="
+          max-width: 100%; 
+          height: auto; 
+          display: inline-block;
+          margin: 4px 0;
+        " 
+        loading="lazy" 
+        title="${sanitizeContent(altText)}"
+        onerror="this.style.display='none'"
+      />
+    `;
+  },
+  validate: (content: string, attributes?: Record<string, string>) => {
+    const inlineId = attributes?.img || attributes?.value || '';
+    // Basic validation: inline ID should be present
+    return inlineId.length > 0;
+  },
+};
+
+/**
  * URL tag implementation with extensible preview support
  */
 export const urlTag: BBCodeTag = {
@@ -586,7 +646,7 @@ export const urlTag: BBCodeTag = {
   hasAttributes: true,
   hasContent: true,
   selfClosing: false,
-  parse: (content: string, attributes?: Record<string, string>) => {
+  parse: (content: string, attributes?: Record<string, string>, context?: any) => {
     let url: string;
     let displayText: string;
 
@@ -638,6 +698,9 @@ export class BBCodeTagRegistry {
 
     // Register URL tag
     this.register(urlTag);
+
+    // Register img tag
+    this.register(imgTag);
 
     // Register eicon tag
     this.register(eiconTag);

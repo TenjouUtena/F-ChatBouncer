@@ -102,7 +102,7 @@ public class EncryptionService : IEncryptionService
         try
         {
             var encryptedBytes = Convert.FromBase64String(encryptedText);
-            
+
             if (encryptedBytes.Length < NonceSize + TagSize)
                 throw new CryptographicException("Invalid encrypted data format");
             

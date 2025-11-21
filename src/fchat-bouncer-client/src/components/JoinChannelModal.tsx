@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ChannelSelection from './ChannelSelection';
 
 interface JoinChannelModalProps {
@@ -12,6 +12,13 @@ interface JoinChannelModalProps {
 export default function JoinChannelModal({ isOpen, onClose, onChannelsJoined }: JoinChannelModalProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedChannelIds, setSelectedChannelIds] = useState<string[]>([]);
+  
+  // Reset selection when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setSelectedChannelIds([]);
+    }
+  }, [isOpen]);
 
   const handleChannelsSelected = async (channels: string[]) => {
     // This is called when the user makes channel selections in the component

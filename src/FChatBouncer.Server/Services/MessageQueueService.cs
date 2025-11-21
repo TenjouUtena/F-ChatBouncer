@@ -27,6 +27,7 @@ public class MessageQueueService : IMessageQueueService
         string senderCharacterId,
         string content,
         string messageType,
+        string? fchatMessageId = null,
         CancellationToken cancellationToken = default)
     {
         var normalizedType = NormalizeMessageType(messageType);
@@ -51,6 +52,11 @@ public class MessageQueueService : IMessageQueueService
             }
         };
 
+        if (!string.IsNullOrWhiteSpace(fchatMessageId))
+        {
+            message.Metadata["fchatMessageId"] = fchatMessageId;
+        }
+
         var streamKey = StreamKeys.GetRoomStreamKey(userId, roomId);
         return await _messageQueue.PublishMessageAsync(streamKey, message, cancellationToken).ConfigureAwait(false);
     }
@@ -63,6 +69,7 @@ public class MessageQueueService : IMessageQueueService
         string content,
         string messageType,
         string? channelName = null,
+        string? fchatMessageId = null,
         CancellationToken cancellationToken = default)
     {
         var normalizedType = NormalizeMessageType(messageType);
@@ -92,6 +99,11 @@ public class MessageQueueService : IMessageQueueService
                 ["channel"] = displayChannel
             }
         };
+
+        if (!string.IsNullOrWhiteSpace(fchatMessageId))
+        {
+            message.Metadata["fchatMessageId"] = fchatMessageId;
+        }
 
         var streamKey = StreamKeys.GetDirectStreamKey(userId, normalizedConversationId);
         return await _messageQueue.PublishMessageAsync(streamKey, message, cancellationToken).ConfigureAwait(false);

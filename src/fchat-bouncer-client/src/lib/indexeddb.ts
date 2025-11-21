@@ -101,12 +101,12 @@ class IndexedDBService {
       const request = store.put(data);
 
       request.onsuccess = () => {
-        console.log(`Stored ${type} profile for ${characterName}`);
+        console.debug(`Stored ${type} profile for ${characterName}`);
         resolve();
       };
 
       request.onerror = () => {
-        console.error(`Failed to store ${type} profile for ${characterName}:`, request.error);
+        console.debug(`Failed to store ${type} profile for ${characterName}:`, request.error);
         reject(request.error);
       };
     });
@@ -137,7 +137,7 @@ class IndexedDBService {
       };
 
       request.onerror = () => {
-        console.error(`Failed to get ${type} profile for ${characterName}:`, request.error);
+        console.debug(`Failed to get ${type} profile for ${characterName}:`, request.error);
         reject(request.error);
       };
     });
@@ -164,12 +164,12 @@ class IndexedDBService {
       const request = store.delete(key);
 
       request.onsuccess = () => {
-        console.log(`Deleted ${type} profile for ${characterName}`);
+        console.debug(`Deleted ${type} profile for ${characterName}`);
         resolve();
       };
 
       request.onerror = () => {
-        console.error(`Failed to delete ${type} profile for ${characterName}:`, request.error);
+        console.debug(`Failed to delete ${type} profile for ${characterName}:`, request.error);
         reject(request.error);
       };
     });
@@ -196,12 +196,12 @@ class IndexedDBService {
           results = results.filter(item => item.type === type);
         }
         
-        console.log(`Retrieved ${results.length} profiles${type ? ` of type ${type}` : ''}`);
+        console.debug(`Retrieved ${results.length} profiles${type ? ` of type ${type}` : ''}`);
         resolve(results);
       };
 
       request.onerror = () => {
-        console.error('Failed to get all profiles:', request.error);
+        console.debug('Failed to get all profiles:', request.error);
         reject(request.error);
       };
     });
@@ -223,12 +223,12 @@ class IndexedDBService {
 
       request.onsuccess = () => {
         const results = request.result;
-        console.log(`Retrieved ${results.length} profiles for ${characterName}`);
+        console.debug(`Retrieved ${results.length} profiles for ${characterName}`);
         resolve(results);
       };
 
       request.onerror = () => {
-        console.error(`Failed to get profiles for ${characterName}:`, request.error);
+        console.debug(`Failed to get profiles for ${characterName}:`, request.error);
         reject(request.error);
       };
     });
@@ -248,12 +248,12 @@ class IndexedDBService {
       const request = store.clear();
 
       request.onsuccess = () => {
-        console.log('Cleared all profiles from IndexedDB');
+        console.debug('Cleared all profiles from IndexedDB');
         resolve();
       };
 
       request.onerror = () => {
-        console.error('Failed to clear all profiles:', request.error);
+        console.debug('Failed to clear all profiles:', request.error);
         reject(request.error);
       };
     });
@@ -283,11 +283,11 @@ class IndexedDBService {
         await this.deleteProfile(profile.characterName, profile.type);
         deletedCount++;
       } catch (error) {
-        console.error(`Failed to delete old profile for ${profile.characterName}:`, error);
+        console.debug(`Failed to delete old profile for ${profile.characterName}:`, error);
       }
     }
     
-    console.log(`Cleaned up ${deletedCount} old profiles`);
+    console.debug(`Cleaned up ${deletedCount} old profiles`);
     return deletedCount;
   }
 }

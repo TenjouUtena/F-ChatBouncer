@@ -216,9 +216,9 @@ export const api = {
           const delay = Math.pow(2, attempt) * 10000; // Exponential backoff: 10s, 20s, 40s
           
           if (isRateLimited) {
-            console.log(`Profile request rate limited (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
+            console.debug(`Profile request rate limited (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
           } else {
-            console.log(`Profile request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
+            console.debug(`Profile request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
           }
           
           await new Promise(resolve => setTimeout(resolve, delay));

@@ -2,7 +2,7 @@
  * Enhanced BBCode parser with support for complex tags
  */
 
-import { BBCodeMatch, BBCodeParseResult, BBCodeAttributes } from './types';
+import { BBCodeMatch, BBCodeParseResult, BBCodeAttributes, BBCodeParseContext } from './types';
 import { tagRegistry } from './tags';
 import * as he from 'he';
 
@@ -159,7 +159,7 @@ function findBBCodeMatches(content: string): BBCodeMatch[] {
 /**
  * Parse BBCode content to HTML
  */
-export function parseBBCodeToHtml(content: string): BBCodeParseResult {
+export function parseBBCodeToHtml(content: string, context?: BBCodeParseContext): BBCodeParseResult {
   const errors: string[] = [];
   let result = content;
 
@@ -192,8 +192,8 @@ export function parseBBCodeToHtml(content: string): BBCodeParseResult {
       }
 
       try {
-        // Parse the tag to HTML
-        const html = tag.parse(match.content, match.attributes);
+        // Parse the tag to HTML, passing context if available
+        const html = tag.parse(match.content, match.attributes, context);
 
         // Replace the BBCode with HTML
         const before = result.substring(0, match.startIndex);

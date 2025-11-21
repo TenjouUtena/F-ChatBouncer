@@ -35,14 +35,14 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
     try {
       await indexedDBService.initialize();
       set({ isIndexedDBAvailable: true });
-      console.log('Profile store initialized with IndexedDB');
+      console.debug('Profile store initialized with IndexedDB');
       
       // Check for and migrate legacy profiles
       const hasLegacy = await ProfileMigration.hasLegacyProfiles();
       if (hasLegacy) {
-        console.log('Found legacy profiles, starting migration...');
+        console.debug('Found legacy profiles, starting migration...');
         const result = await ProfileMigration.migrateProfiles();
-        console.log(`Migration completed: ${result.migrated} profiles migrated, ${result.errors} errors`);
+        console.debug(`Migration completed: ${result.migrated} profiles migrated, ${result.errors} errors`);
       }
     } catch (error) {
       console.error('Failed to initialize profile store with IndexedDB:', error);
@@ -75,9 +75,9 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         }
       }));
       
-      console.log(`Profile stored for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
+      console.debug(`Profile stored for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
     } catch (error) {
-      console.error(`Failed to store profile for ${characterName}:`, error);
+      console.debug(`Failed to store profile for ${characterName}:`, error);
       throw error;
     }
   },
@@ -107,7 +107,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
 
       return null;
     } catch (error) {
-      console.error(`Failed to get profile for ${characterName}:`, error);
+      console.debug(`Failed to get profile for ${characterName}:`, error);
       return null;
     }
   },
@@ -123,7 +123,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
       try {
         return await indexedDBService.hasProfile(characterName, 'FULL');
       } catch (error) {
-        console.error(`Failed to check if profile exists for ${characterName}:`, error);
+        console.debug(`Failed to check if profile exists for ${characterName}:`, error);
         return false;
       }
     }
@@ -156,9 +156,9 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         };
       });
       
-      console.log(`Profile deleted for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
+      console.debug(`Profile deleted for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
     } catch (error) {
-      console.error(`Failed to delete profile for ${characterName}:`, error);
+      console.debug(`Failed to delete profile for ${characterName}:`, error);
       throw error;
     }
   },
@@ -177,9 +177,9 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
         profileLastRequested: {}
       });
       
-      console.log(`All profiles cleared${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
+      console.debug(`All profiles cleared${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
     } catch (error) {
-      console.error('Failed to clear all profiles:', error);
+      console.debug('Failed to clear all profiles:', error);
       throw error;
     }
   },
@@ -256,7 +256,7 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
       
       return deletedCount;
     } catch (error) {
-      console.error('Failed to cleanup old profiles:', error);
+      console.debug('Failed to cleanup old profiles:', error);
       return 0;
     }
   }

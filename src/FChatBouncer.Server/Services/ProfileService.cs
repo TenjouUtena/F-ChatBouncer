@@ -372,23 +372,16 @@ public class ProfileService : IProfileService
                 try {
                     (account, password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
                 } catch (CryptographicException ex) {
-                    _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}", userId);
+                    _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}, {FChatCredentialsEncrypted}", userId, settings.FChatCredentialsEncrypted);
+                
                     return;
                 }
-                
-                // Use the new method with automatic ticket renewal
+
                 var characterData = await characterDataService.GetCharacterDataWithMappingAndTicketRenewalAsync(characterName, account, password);
-                
-                // Convert CharacterDataResponse to ProfileData
-                var profileData = ConvertCharacterDataToProfileData(characterData);
-                
-                // Save the structured profile data
+                var profileData = characterDataService.ConvertToProfileData(characterData);
                 await SaveStructuredProfileAsync(userId, profileData);
-                
-                _logger.LogInformation("Successfully fetched and saved profile for {CharacterName} (User: {UserId}) using F-List API with ticket renewal: {Summary}", 
-                    characterName, userId, profileData.GetSummary());
-                
-                return;
+                _logger.LogInformation("Successfully retrieved and saved character data for {CharacterName} (User: {UserId}) with automatic ticket renewal", characterName, userId);
+
             }
             catch (Exception apiEx)
             {

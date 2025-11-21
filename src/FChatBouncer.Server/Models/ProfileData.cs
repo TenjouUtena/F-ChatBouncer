@@ -81,6 +81,12 @@ public class ProfileData
     public List<ProfileImage> Images { get; set; } = new();
 
     /// <summary>
+    /// Character's inline images (dictionary keyed by inline ID)
+    /// </summary>
+    [JsonPropertyName("inlines")]
+    public Dictionary<string, CharacterInline> Inlines { get; set; } = new();
+
+    /// <summary>
     /// When this profile data was built/received
     /// </summary>
     [JsonPropertyName("timestamp")]

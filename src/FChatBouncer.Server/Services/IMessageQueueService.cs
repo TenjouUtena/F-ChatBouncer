@@ -11,6 +11,7 @@ public interface IMessageQueueService
         string senderCharacterId,
         string content,
         string messageType,
+        string? fchatMessageId = null,
         CancellationToken cancellationToken = default);
 
     Task<string> PublishDirectMessageAsync(
@@ -21,6 +22,7 @@ public interface IMessageQueueService
         string content,
         string messageType,
         string? channelName = null,
+        string? fchatMessageId = null,
         CancellationToken cancellationToken = default);
 
     Task<string> PublishSystemEventAsync(

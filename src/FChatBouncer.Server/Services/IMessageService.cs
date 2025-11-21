@@ -8,7 +8,7 @@ public interface IMessageService
     Task<List<MessageDto>> GetMessagesAsync(string userId, string channel, DateTime since, int limit = 100);
     Task<List<MessageDto>> GetChannelMessagesSinceAsync(string userId, string channel, DateTime since, int limit = 100);
     Task<List<MessageDto>> GetRecentMessagesAsync(string userId, DateTime since);
-    Task SaveMessageAsync(string userId, string channel, string sender, string content, MessageType messageType, string characterName = "");
+    Task SaveMessageAsync(string userId, string channel, string sender, string content, MessageType messageType, string characterName = "", string? messageId = null);
     Task<int> PurgeMessagesAsync(string userId, DateTime? before = null, string? channel = null);
     Task QueueMessageAsync(string userId, string channel, string senderCharacter, string content, MessageType messageType);
     Task<List<QueuedMessage>> GetQueuedMessagesAsync(string userId);

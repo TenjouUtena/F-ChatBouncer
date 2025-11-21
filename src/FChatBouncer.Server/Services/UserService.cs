@@ -9,11 +9,12 @@ public class UserService : IUserService
 {
     private readonly BouncerDbContext _context;
     private readonly UserManager<BouncerUser> _userManager;
-
-    public UserService(BouncerDbContext context, UserManager<BouncerUser> userManager)
+    private readonly ILogger<UserService> _logger;
+    public UserService(BouncerDbContext context, UserManager<BouncerUser> userManager, ILogger<UserService> logger)
     {
         _context = context;
         _userManager = userManager;
+        _logger = logger;
     }
 
     public async Task<BouncerUser?> GetUserByIdAsync(string userId)
@@ -32,6 +33,7 @@ public class UserService : IUserService
 
     public async Task<UserSettings?> GetUserSettingsAsync(string userId)
     {
+        _logger.LogInformation("Getting user settings for user {UserId} From the database.", userId);
         return await _context.UserSettings
             .FirstOrDefaultAsync(us => us.UserId == userId);
     }
@@ -39,8 +41,10 @@ public class UserService : IUserService
     public async Task UpdateUserSettingsAsync(string userId, UserSettings settings)
     {
         var existing = await GetUserSettingsAsync(userId);
+        
         if (existing != null)
         {
+            _context.UserSettings.Update(existing);
             existing.RetentionDays = settings.RetentionDays;
             existing.AutoPurgeEnabled = settings.AutoPurgeEnabled;
             existing.FChatCredentialsEncrypted = settings.FChatCredentialsEncrypted;

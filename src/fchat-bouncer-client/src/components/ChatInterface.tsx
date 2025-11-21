@@ -1,7 +1,23 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MessageSquare, Hash, MessageSquareMore } from 'lucide-react';
+import { MessageSquare, Hash, MessageSquareMore, GripVertical } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
@@ -31,6 +47,99 @@ import MobileTabs from './MobileTabs';
 
 interface ChatInterfaceProps {
   isCharacterRestoring?: boolean;
+}
+
+interface SortableChannelItemProps {
+  channel: string;
+  isPM: boolean;
+  typingState: any;
+  selectedChannel: string;
+  currentUnreadCounts: Record<string, number>;
+  getChannelDisplayName: (channel: string) => string;
+  getTypingState: (characterName: string, channel: string) => any;
+  activeCharacter: string | null;
+  onChannelClick: (channel: string) => void;
+  onContextMenu: (e: React.MouseEvent, channel: string) => void;
+}
+
+function SortableChannelItem({
+  channel,
+  isPM,
+  typingState,
+  selectedChannel,
+  currentUnreadCounts,
+  getChannelDisplayName,
+  onChannelClick,
+  onContextMenu,
+}: SortableChannelItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: channel });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <button
+        onClick={() => onChannelClick(channel)}
+        className={`w-full text-left px-3 py-2 rounded text-sm ${
+          selectedChannel === channel
+            ? 'bg-indigo-600 text-white'
+            : currentUnreadCounts[channel]
+              ? 'bg-gray-700 text-white'
+              : 'text-gray-300 hover:bg-gray-700'
+        }`}
+        onContextMenu={(e) => onContextMenu(e, channel)}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center flex-1">
+            <div
+              {...attributes}
+              {...listeners}
+              className="mr-2 cursor-grab active:cursor-grabbing touch-none"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <GripVertical size={16} className="text-gray-500" />
+            </div>
+            <span className="mr-2">
+              {isPM ? (
+                typingState?.status === 'typing' ? (
+                  <MessageSquare size={16} className="text-gray-400 animate-bounce" />
+                ) : typingState?.status === 'paused' ? (
+                  <MessageSquareMore size={16} className="text-gray-400" />
+                ) : (
+                  <MessageSquare size={16} className="text-gray-400" />
+                )
+              ) : (
+                typingState?.status === 'typing' ? (
+                  <Hash size={16} className="text-gray-400 animate-bounce" />
+                ) : (
+                  <Hash size={16} className="text-gray-400" />
+                )
+              )}
+            </span>
+            <div className="flex flex-col">
+              <span>{getChannelDisplayName(channel)}</span>
+            </div>
+          </div>
+          {currentUnreadCounts[channel] && selectedChannel !== channel && (
+            <span className="ml-2 bg-indigo-600 text-indigo-100 text-xs rounded-full px-2 py-0.5">
+              {currentUnreadCounts[channel]}
+            </span>
+          )}
+        </div>
+      </button>
+    </div>
+  );
 }
 
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
@@ -82,7 +191,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     ingestHistoryMessages,
     indexedDBReady,
     characterSelectedChannels,
-    getLastMessageTime
+    getLastMessageTime,
+    addToJoinedChannels,
+    loadMessagesForNewChannel,
+    getJoinedChannelsForCharacter,
+    reorderChannelsForCharacter
   } = useChatStore();
   
   // Initialize notifications
@@ -112,6 +225,48 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   const pendingRecentMessagesRef = useRef<Record<string, Message[]>>({});
   const requestedRecentCharactersRef = useRef<Record<string, boolean>>({});
   const requestedChannelHistoryRef = useRef<Record<string, boolean>>({});
+  
+  // Draggable divider state
+  const [friendsSectionHeight, setFriendsSectionHeight] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('friendsSectionHeight');
+      return saved ? parseInt(saved, 10) : 200;
+    }
+    return 200;
+  });
+  const [isResizingDivider, setIsResizingDivider] = useState(false);
+  const [resizeStart, setResizeStart] = useState({ y: 0, height: 0 });
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Handle drag end for channel reordering
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+
+    if (!over || !activeCharacter) {
+      return;
+    }
+
+    if (active.id !== over.id) {
+      const oldIndex = currentSelectedChannels.indexOf(active.id as string);
+      const newIndex = currentSelectedChannels.indexOf(over.id as string);
+
+      if (oldIndex !== -1 && newIndex !== -1) {
+        reorderChannelsForCharacter(activeCharacter, oldIndex, newIndex);
+      }
+    }
+  };
 
   // Determine if current channel is a PM and get the PM character name
   const isPMChannel = selectedChannel.startsWith('PRI-');
@@ -238,7 +393,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         }
       }
     } catch (e) {
-      console.warn('Profile fetch attempt failed:', e);
+      console.debug('Profile fetch attempt failed:', e);
     }
    }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, selectedChannels, notificationChannel, hasCharacterData, getCharacterGender, getProfileRequestStatus, markCharacterKnown, requestProfileForCharacter, refreshProfile, isNotificationReady, showPMNotification, openPMChannel, setSelectedChannel]);
 
@@ -356,8 +511,24 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   }, [indexedDBReady, connections, characterSelectedChannels, getLastMessageTime]);
 
   const handleReceiveHistory = useCallback((data: any) => {
-    ingestHistoryMessages(data.messages, activeCharacter || undefined);
-  }, [ingestHistoryMessages, activeCharacter]);
+    const channel = data.channel;
+    const messages = data.messages || [];
+    const characterName = activeCharacter || undefined;
+    
+    if (channel && characterName) {
+      // Ensure the channel is added to joined channels if we're receiving history for it
+      // This helps maintain the channel list when history is received
+      const currentJoinedChannels = getJoinedChannelsForCharacter(characterName);
+      if (!currentJoinedChannels.includes(channel)) {
+        console.log(`Adding channel ${channel} to joined channels for ${characterName} based on history`);
+        addToJoinedChannels([channel], characterName);
+      }
+    }
+    
+    if (messages.length > 0) {
+      ingestHistoryMessages(messages, characterName);
+    }
+  }, [ingestHistoryMessages, activeCharacter, addToJoinedChannels, getJoinedChannelsForCharacter]);
 
   const handleChannelsSubscribed = useCallback((channels: string[]) => {
     console.log('Successfully subscribed to channels:', channels);
@@ -418,7 +589,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     });
 
     signalRService.onProfileError((error) => {
-      console.error('Profile error:', error);
+      console.debug('Profile error:', error);
     });
 
     // Handle character errors (e.g., character not found)
@@ -500,12 +671,12 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           const parsedProfile = JSON.parse(profileData) as ProfileData;
           addProfile(characterName, parsedProfile);
         } else {
-          console.error('Unexpected profileData format:', typeof profileData, profileData);
+          console.debug('Unexpected profileData format:', typeof profileData, profileData);
         }
 
         // Update friend/bookmark status if online status is provided
         if (onlineStatus && characterName) {
-          console.log('Updating online status for character:', characterName, onlineStatus);
+          console.debug('Updating online status for character:', characterName, onlineStatus);
           
           // Update the friend status in the store
           const { updateFriendStatus, setFriendOnline } = useFriendsStore.getState();
@@ -520,7 +691,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           }
         }
       } catch (error) {
-        console.error('Failed to process profile data:', error);
+        console.debug('Failed to process profile data:', error);
       }
     });
 
@@ -585,6 +756,62 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       signalRService.removeListener('ActiveCharacterSwitched');
     };
   }, []); // Empty dependency array - only runs once
+
+  // Handle ChannelJoined events - add channel to list without changing active channel
+  useEffect(() => {
+    console.log('Setting up ChannelJoined listener');
+    
+    signalRService.onChannelJoined((data: { channel: string; characterName: string; message: string }) => {
+      console.log('=== ChatInterface: ChannelJoined event received ===');
+      console.log('Event data:', data);
+      
+      const channelId = data.channel;
+      const characterName = data.characterName;
+
+      console.log('channelId', channelId);
+      console.log('characterName', characterName);
+      
+      if (!channelId || !characterName) {
+        console.warn('ChannelJoined event missing required data:', data);
+        return;
+      }
+      
+      // Add channel to joined channels for this character
+      addToJoinedChannels([channelId], characterName);
+      console.log(`Added ${channelId} to joined channels for ${characterName}`);
+      
+      // Check if channel is already in selected channels
+      const currentSelectedChannels = getSelectedChannelsForCharacter(characterName);
+      const isAlreadySelected = currentSelectedChannels.includes(channelId);
+      
+      if (!isAlreadySelected) {
+        // Add channel to selected channels (this will make it appear in the channel list)
+        addToSelectedChannels([channelId], characterName);
+        console.log(`Added ${channelId} to selected channels for ${characterName}`);
+        
+        // Load messages for the newly joined channel
+        loadMessagesForNewChannel(characterName, channelId).catch(error => {
+          console.error(`Failed to load messages for new channel ${channelId}:`, error);
+        });
+        
+        // Only change the active channel if no channel is currently selected
+        // AND this is for the active character
+        if (characterName === activeCharacter && !selectedChannel) {
+          console.log(`No channel currently selected, setting ${channelId} as active channel`);
+          setSelectedChannel(channelId);
+        } else {
+          console.log(`Channel ${channelId} added to list but not changing active channel (current: ${selectedChannel})`);
+        }
+      } else {
+        console.log(`Channel ${channelId} already in selected channels for ${characterName}`);
+      }
+    });
+    
+    return () => {
+      console.log('Cleaning up ChannelJoined listener');
+      signalRService.removeListener('ChannelJoined');
+    };
+  }, [activeCharacter, selectedChannel, addToJoinedChannels, addToSelectedChannels, getSelectedChannelsForCharacter, setSelectedChannel, loadMessagesForNewChannel]);
 
   useEffect(() => {
     // Smart autoscroll: only scroll to bottom if user is already near the bottom
@@ -711,7 +938,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
             requestProfileForCharacter(selectedProfileCharacter);
           }
         } catch (error) {
-          console.error('Failed to load profile:', error);
+          console.debug('Failed to load profile:', error);
         } finally {
           setIsLoadingProfile(false);
         }
@@ -822,10 +1049,66 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     }
   };
 
+  // Handle divider resize mouse down
+  const handleDividerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizingDivider(true);
+    setResizeStart({
+      y: e.clientY,
+      height: friendsSectionHeight
+    });
+  };
+
+  // Handle divider resize mouse move and mouse up
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (isResizingDivider && sidebarRef.current) {
+        const sidebarRect = sidebarRef.current.getBoundingClientRect();
+        const newHeight = resizeStart.height + (e.clientY - resizeStart.y);
+        
+        // Apply constraints: min 100px, max 70% of sidebar height
+        const minHeight = 100;
+        const maxHeight = sidebarRect.height * 0.7;
+        const constrainedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+        
+        setFriendsSectionHeight(constrainedHeight);
+      }
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      if (isResizingDivider && sidebarRef.current) {
+        const sidebarRect = sidebarRef.current.getBoundingClientRect();
+        const newHeight = resizeStart.height + (e.clientY - resizeStart.y);
+        
+        // Apply constraints: min 100px, max 70% of sidebar height
+        const minHeight = 100;
+        const maxHeight = sidebarRect.height * 0.7;
+        const constrainedHeight = Math.max(minHeight, Math.min(maxHeight, newHeight));
+        
+        setIsResizingDivider(false);
+        // Save to localStorage using the calculated height
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('friendsSectionHeight', constrainedHeight.toString());
+        }
+      }
+    };
+
+    if (isResizingDivider) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingDivider, resizeStart]);
+
   return (
     <div className="flex h-screen bg-gray-900" onClick={handleGlobalClick}>
       {/* Sidebar - Hidden on mobile */}
-      <div className="hidden lg:flex w-64 bg-gray-800 shadow-md flex-col">
+      <div ref={sidebarRef} className="hidden lg:flex w-64 bg-gray-800 shadow-md flex-col">
         <div className="p-4 border-b border-gray-700">
           <h2 className="font-bold text-lg text-white">F-Chat Bouncer</h2>
           <p className="text-sm text-gray-300">Welcome, {user?.username}</p>
@@ -851,64 +1134,65 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         </div>
 
         {/* Friends List */}
-        <div className="p-4 border-b border-gray-700">
-          <FriendsList onOpenPM={handleOpenPM} />
+        <div 
+          className="overflow-y-auto flex-shrink-0"
+          style={{ height: `${friendsSectionHeight}px` }}
+        >
+          <div className="p-4">
+            <FriendsList onOpenPM={handleOpenPM} />
+          </div>
         </div>
 
-        <div className="p-4 flex-1 overflow-y-auto">
-          <h3 className="font-semibold text-sm text-gray-300 mb-2">Channels & Messages</h3>
-          <div className="space-y-1 mb-4">
-            {currentSelectedChannels.map((channel) => {
-              const isPM = channel.startsWith('PRI-');
-              const typingState = activeCharacter ? getTypingState(activeCharacter, channel) : null;
-              return (
-                <button
-                  key={channel}
-                  onClick={() => {
-                    setSelectedChannel(channel);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded text-sm ${
-                    selectedChannel === channel
-                      ? 'bg-indigo-600 text-white'
-                      : currentUnreadCounts[channel]
-                        ? 'bg-gray-700 text-white'
-                        : 'text-gray-300 hover:bg-gray-700'
-                  }`}
-                  onContextMenu={(e) => handleChannelContextMenu(e, channel)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center flex-1">
-                      <span className="mr-2">
-                        {isPM ? (
-                          typingState?.status === 'typing' ? (
-                            <MessageSquare size={16} className="text-gray-400 animate-bounce" />
-                          ) : typingState?.status === 'paused' ? (
-                            <MessageSquareMore size={16} className="text-gray-400" />
-                          ) : (
-                            <MessageSquare size={16} className="text-gray-400" />
-                          )
-                        ) : (
-                          typingState?.status === 'typing' ? (
-                            <Hash size={16} className="text-gray-400 animate-bounce" />
-                          ) : (
-                            <Hash size={16} className="text-gray-400" />
-                          )
-                        )}
-                      </span>
-                      <div className="flex flex-col">
-                        <span>{getChannelDisplayName(channel)}</span>
-                      </div>
-                    </div>
-                    {currentUnreadCounts[channel] && selectedChannel !== channel && (
-                      <span className="ml-2 bg-indigo-600 text-indigo-100 text-xs rounded-full px-2 py-0.5">
-                        {currentUnreadCounts[channel]}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+        {/* Draggable Divider */}
+        <div
+          onMouseDown={handleDividerMouseDown}
+          className={`relative flex-shrink-0 cursor-row-resize bg-gray-700 hover:bg-gray-600 transition-colors group ${
+            isResizingDivider ? 'bg-gray-500' : ''
+          }`}
+          style={{ height: '6px' }}
+          title="Drag to resize"
+        >
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className={`w-16 h-0.5 rounded transition-colors ${
+              isResizingDivider ? 'bg-gray-400' : 'bg-gray-500 group-hover:bg-gray-400'
+            }`}></div>
           </div>
+        </div>
+
+        <div className="p-4 flex-1 overflow-y-auto min-h-0">
+          <h3 className="font-semibold text-sm text-gray-300 mb-2">Channels & Messages</h3>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={currentSelectedChannels}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-1 mb-4">
+                {currentSelectedChannels.map((channel) => {
+                  const isPM = channel.startsWith('PRI-');
+                  const typingState = activeCharacter ? getTypingState(activeCharacter, channel) : null;
+                  return (
+                    <SortableChannelItem
+                      key={channel}
+                      channel={channel}
+                      isPM={isPM}
+                      typingState={typingState}
+                      selectedChannel={selectedChannel}
+                      currentUnreadCounts={currentUnreadCounts}
+                      getChannelDisplayName={getChannelDisplayName}
+                      getTypingState={getTypingState}
+                      activeCharacter={activeCharacter}
+                      onChannelClick={setSelectedChannel}
+                      onContextMenu={handleChannelContextMenu}
+                    />
+                  );
+                })}
+              </div>
+            </SortableContext>
+          </DndContext>
 
           {/* Character Activity Overview */}
           {activeCharacter && (
@@ -1280,60 +1564,41 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         position="left"
       >
         <div className="p-4">
-          <div className="space-y-1 mb-4">
-            {currentSelectedChannels.map((channel) => {
-              const isPM = channel.startsWith('PRI-');
-              const typingState = activeCharacter ? getTypingState(activeCharacter, channel) : null;
-              return (
-                <button
-                  key={channel}
-                  onClick={() => {
-                    setSelectedChannel(channel);
-                    setActiveMobileTab(null);
-                  }}
-                  className={`w-full text-left px-3 py-2 rounded text-sm ${
-                    selectedChannel === channel
-                      ? 'bg-indigo-600 text-white'
-                      : currentUnreadCounts[channel]
-                        ? 'bg-gray-700 text-white'
-                        : 'text-gray-300 hover:bg-gray-700'
-                  }`}
-                  onContextMenu={(e) => handleChannelContextMenu(e, channel)}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center flex-1">
-                      <span className="mr-2">
-                        {isPM ? (
-                          typingState?.status === 'typing' ? (
-                            <MessageSquare size={16} className="text-gray-400 animate-bounce" />
-                          ) : typingState?.status === 'paused' ? (
-                            <MessageSquareMore size={16} className="text-gray-400" />
-                          ) : (
-                            <MessageSquare size={16} className="text-gray-400" />
-                          )
-                        ) : (
-                          typingState?.status === 'typing' ? (
-                            <Hash size={16} className="text-gray-400 animate-bounce" />
-                          ) : (
-                            <Hash size={16} className="text-gray-400" />
-                          )
-                        )}
-                      </span>
-                      <div className="flex flex-col">
-                        <span>{getChannelDisplayName(channel)}</span>
-
-                      </div>
-                    </div>
-                    {currentUnreadCounts[channel] && selectedChannel !== channel && (
-                      <span className="ml-2 bg-indigo-600 text-indigo-100 text-xs rounded-full px-2 py-0.5">
-                        {currentUnreadCounts[channel]}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={currentSelectedChannels}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-1 mb-4">
+                {currentSelectedChannels.map((channel) => {
+                  const isPM = channel.startsWith('PRI-');
+                  const typingState = activeCharacter ? getTypingState(activeCharacter, channel) : null;
+                  return (
+                    <SortableChannelItem
+                      key={channel}
+                      channel={channel}
+                      isPM={isPM}
+                      typingState={typingState}
+                      selectedChannel={selectedChannel}
+                      currentUnreadCounts={currentUnreadCounts}
+                      getChannelDisplayName={getChannelDisplayName}
+                      getTypingState={getTypingState}
+                      activeCharacter={activeCharacter}
+                      onChannelClick={(channel) => {
+                        setSelectedChannel(channel);
+                        setActiveMobileTab(null);
+                      }}
+                      onContextMenu={handleChannelContextMenu}
+                    />
+                  );
+                })}
+              </div>
+            </SortableContext>
+          </DndContext>
 
           {/* Character Activity Overview */}
           {activeCharacter && (

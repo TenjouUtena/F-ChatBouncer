@@ -597,7 +597,7 @@ this.onSearchResultsReceived = callback;
     this.addUniqueListener('ReceiveActiveCharacters', callback);
   }
 
-  onChannelJoined(callback: (data: { Channel: string; CharacterName: string; Message: string }) => void): void {
+  onChannelJoined(callback: (data: { channel: string; characterName: string; message: string }) => void): void {
     this.addUniqueListener('ChannelJoined', callback);
   }
 

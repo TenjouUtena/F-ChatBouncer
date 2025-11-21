@@ -27,7 +27,7 @@ export class ProfileMigration {
       const parsed = JSON.parse(legacyData);
       return parsed.state?.profiles && Object.keys(parsed.state.profiles).length > 0;
     } catch (error) {
-      console.error('Error checking for legacy profiles:', error);
+      console.debug('Error checking for legacy profiles:', error);
       return false;
     }
   }
@@ -47,7 +47,7 @@ export class ProfileMigration {
       // Get legacy data from localStorage
       const legacyData = localStorage.getItem(this.LEGACY_STORAGE_KEY);
       if (!legacyData) {
-        console.log('No legacy data found to migrate');
+        console.debug('No legacy data found to migrate');
         return { migrated: 0, errors: 0 };
       }
 
@@ -55,11 +55,11 @@ export class ProfileMigration {
       const legacyProfiles = parsed.state?.profiles || {};
       
       if (Object.keys(legacyProfiles).length === 0) {
-        console.log('No legacy profiles found to migrate');
+        console.debug('No legacy profiles found to migrate');
         return { migrated: 0, errors: 0 };
       }
 
-      console.log(`Found ${Object.keys(legacyProfiles).length} legacy profiles to migrate`);
+      console.debug(`Found ${Object.keys(legacyProfiles).length} legacy profiles to migrate`);
 
       let migrated = 0;
       let errors = 0;
@@ -69,9 +69,9 @@ export class ProfileMigration {
         try {
           await indexedDBService.storeProfile(characterName, profileData as LegacyProfileData, 'FULL');
           migrated++;
-          console.log(`Migrated profile for ${characterName}`);
+          console.debug(`Migrated profile for ${characterName}`);
         } catch (error) {
-          console.error(`Failed to migrate profile for ${characterName}:`, error);
+          console.debug(`Failed to migrate profile for ${characterName}:`, error);
           errors++;
         }
       }
@@ -85,17 +85,17 @@ export class ProfileMigration {
           delete updatedData.state.profileLastRequested;
           
           localStorage.setItem(this.LEGACY_STORAGE_KEY, JSON.stringify(updatedData));
-          console.log('Cleaned up legacy profile data from localStorage');
+          console.debug('Cleaned up legacy profile data from localStorage');
         } catch (error) {
-          console.error('Failed to clean up legacy data:', error);
+          console.debug('Failed to clean up legacy data:', error);
         }
       }
 
-      console.log(`Migration completed: ${migrated} profiles migrated, ${errors} errors`);
+      console.debug(`Migration completed: ${migrated} profiles migrated, ${errors} errors`);
       return { migrated, errors };
 
     } catch (error) {
-      console.error('Profile migration failed:', error);
+      console.debug('Profile migration failed:', error);
       throw error;
     }
   }
@@ -118,7 +118,7 @@ export class ProfileMigration {
         indexedDBSize: indexedDBInfo.estimatedSize
       };
     } catch (error) {
-      console.error('Error getting migration status:', error);
+      console.debug('Error getting migration status:', error);
       return {
         hasLegacy: false,
         indexedDBCount: 0,

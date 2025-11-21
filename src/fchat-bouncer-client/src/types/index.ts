@@ -108,6 +108,12 @@ export interface ProfileImage {
   image_description: string;
 }
 
+export interface CharacterInline {
+  hash: string;
+  extension: string;
+  nsfw: boolean;
+}
+
 export interface LightweightCharacterData {
   character: string;
   gender: string;
@@ -125,6 +131,7 @@ export interface ProfileData {
   info: Record<string, string>;
   kinks: KinkInfo[];
   images: ProfileImage[];
+  inlines: Record<string, CharacterInline>;
   timestamp: string;
 }
 
