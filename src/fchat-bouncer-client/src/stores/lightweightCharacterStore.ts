@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { LightweightCharacterData } from '@/types';
 import { useLightweightCharacterIndexedDBStore } from './lightweightCharacterIndexedDBStore';
-import { CharacterMigration } from '@/lib/characterMigration';
 
 interface LightweightCharacterStore {
   // Lightweight character data (gender + species only) - now delegated to IndexedDB store
@@ -100,14 +99,6 @@ export const useLightweightCharacterStore = create<LightweightCharacterStore>()(
         try {
           const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
           await indexedDBStore.initialize();
-          
-          // Check for and migrate legacy lightweight characters
-          const hasLegacy = await CharacterMigration.hasLegacyLightweightCharacters();
-          if (hasLegacy) {
-            console.log('Found legacy lightweight characters, starting migration...');
-            const result = await CharacterMigration.migrateLightweightCharacters();
-            console.log(`Lightweight character migration completed: ${result.migrated} characters migrated, ${result.errors} errors`);
-          }
           
           // Sync state from IndexedDB store
           const indexedDBState = indexedDBStore;

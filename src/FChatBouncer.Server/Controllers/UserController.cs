@@ -41,7 +41,8 @@ public class UserController : ControllerBase
                 return NotFound();
             }
 
-            var isConnected = await _fChatService.IsUserConnectedAsync(userId);
+            var activeCharacter = await _fChatService.GetActiveCharacterAsync(userId);
+            var isConnected = activeCharacter != null && await _fChatService.IsCharacterConnectedAsync(userId, activeCharacter);
 
             return Ok(new UserStatusResponse
             {

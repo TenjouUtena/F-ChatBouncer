@@ -80,10 +80,7 @@ export interface AuthState {
 }
 
 export interface ChatState {
-  messages: Message[];
-  connectionStatus: ConnectionStatus;
-  isConnected: boolean;
-  selectedChannels: string[];
+  /** Character-scoped state lives in chatStore (characterMessages, characterSelectedChannels, etc.) */
 }
 
 export interface Channel {
@@ -219,4 +216,29 @@ export interface MemoResponse {
   characterName: string;
   memo?: string;
   hasMemo: boolean;
+}
+
+// Status types for new status reporting system
+export type BackendStatus = 'connected' | 'not-connected' | 'waiting-for-character' | 'needs-credentials';
+export type FrontendServiceStatus = 'ready' | 'loading' | 'failed';
+
+export interface BackendStatusInfo {
+  status: BackendStatus;
+  characterName?: string;
+  lastActivity?: string;
+  isConnectedToFChat: boolean;
+  hasCredentials: boolean;
+  statusMessage?: string;
+  timestamp: string;
+}
+
+export interface FrontendStatusInfo {
+  signalR: FrontendServiceStatus;
+  indexedDB: FrontendServiceStatus;
+  overallStatus: 'ready' | 'loading' | 'failed';
+}
+
+export interface DetailedStatus {
+  backend: BackendStatusInfo;
+  frontend: FrontendStatusInfo;
 }

@@ -44,75 +44,9 @@ public class FChatService : IFChatService
         _characterUpdateTimer = new Timer(async _ => await ProcessPendingCharacterUpdates(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
     }
 
-    #region Legacy Single-Character Methods (Backward Compatibility)
-
-    public async Task ConnectUserAsync(string userId, string fchatUsername, string fchatPassword)
-    {
-        // For backward compatibility, connect as "default" character
-        await ConnectCharacterAsync(userId, "default", fchatUsername, fchatPassword);
-    }
-
-    public async Task DisconnectUserAsync(string userId)
-    {
-        await DisconnectAllCharactersAsync(userId);
-    }
-
-    public async Task SendMessageAsync(string userId, string channel, string message)
-    {
-        var activeCharacter = await GetActiveCharacterAsync(userId);
-        if (activeCharacter == null)
-            throw new InvalidOperationException("No active character for user");
-        
-        await SendMessageAsync(userId, activeCharacter, channel, message);
-    }
-
-    public async Task JoinChannelAsync(string userId, string channel)
-    {
-        var activeCharacter = await GetActiveCharacterAsync(userId);
-        if (activeCharacter == null)
-            throw new InvalidOperationException("No active character for user");
-        
-        await JoinChannelAsync(userId, activeCharacter, channel);
-    }
-
-    public async Task LeaveChannelAsync(string userId, string channel)
-    {
-        var activeCharacter = await GetActiveCharacterAsync(userId);
-        if (activeCharacter == null)
-            throw new InvalidOperationException("No active character for user");
-        
-        await LeaveChannelAsync(userId, activeCharacter, channel);
-    }
-
-    public Task<bool> IsUserConnectedAsync(string userId)
-    {
-        // Check actual WebSocket connections, not database field
-        if (_connections.TryGetValue(userId, out var userConnections))
-        {
-            return Task.FromResult(userConnections.Values.Any(client => client.IsConnected));
-        }
-        return Task.FromResult(false);
-    }
-
     public async Task CleanupInvalidCharactersAsync(string userId)
     {
-        await ExecuteWithDbContext(async dbContext =>
-        {
-            // Remove any "default" character connections that don't have actual WebSocket connections
-            var defaultConnections = await dbContext.CharacterConnections
-                .Include(cc => cc.Character)
-                .Where(cc => cc.UserId == userId && cc.Character.Name == "default")
-                .ToListAsync();
-
-            if (defaultConnections.Any())
-            {
-                _logger.LogInformation("Removing {Count} invalid 'default' character connections for user {UserId}", 
-                    defaultConnections.Count, userId);
-                
-                dbContext.CharacterConnections.RemoveRange(defaultConnections);
-                await dbContext.SaveChangesAsync();
-            }
-        });
+        await Task.CompletedTask;
     }
 
     public async Task RefreshUserConnectionAsync(string userId)
@@ -537,11 +471,6 @@ public class FChatService : IFChatService
 
         return false;
     }
-
-    #endregion
-
-    #region New Multi-Character Methods
-
 
     public async Task ConnectCharacterAsync(string userId, string characterName, string fchatUsername, string fchatPassword)
     {
@@ -1117,8 +1046,6 @@ public class FChatService : IFChatService
         var activeCharacter = await ExecuteWithCharacterService(cs => cs.GetActiveCharacterAsync(userId));
         return activeCharacter?.Name;
     }
-
-    #endregion
 
     #region Private Helper Methods
 

@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Enable standalone output for Docker
-  output: 'standalone',
-  
+  // Standalone only for Docker/Railway; Vercel uses its own runtime
+  ...(process.env.BUILD_STANDALONE === 'true' && { output: 'standalone' }),
+
   async rewrites() {
     // Use environment variable for API URL in production
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';

@@ -3,13 +3,41 @@
 import React, { useState, useEffect } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
-import { getStorageStatistics } from '@/lib/storageMigration';
 import { useProfileStore } from '@/stores/profileStore';
 
+async function getStorageStatistics(): Promise<{
+  lightweightCharacters: number;
+  fullProfiles: number;
+  lightweightSize: number;
+  fullProfileSize: number;
+  totalSize: number;
+}> {
+  const chatStore = useChatStore.getState();
+  const profileStore = useProfileStore.getState();
+  const lightweightStore = useLightweightCharacterStore.getState();
+  const chatSize = chatStore.getStorageSize();
+  const [profileInfo, lightweightInfo] = await Promise.all([
+    profileStore.getStorageInfo(),
+    lightweightStore.getStorageInfo()
+  ]);
+  const lightweightCharacters = lightweightInfo.lightweight;
+  const lightweightSize = lightweightInfo.estimatedSize;
+  const fullProfiles = profileInfo.count;
+  const fullProfileSize = profileInfo.estimatedSize;
+  const totalSize = chatSize + lightweightSize + fullProfileSize;
+  return {
+    lightweightCharacters,
+    fullProfiles,
+    lightweightSize,
+    fullProfileSize,
+    totalSize
+  };
+}
+
 export default function StorageManagement() {
-  const { cleanupStorage, getStorageSize, characterMessages } = useChatStore();
+  const { cleanupStorage, characterMessages } = useChatStore();
   const { profiles } = useProfileStore();
-  const { cleanupOldCharacters, getStorageSize: getLightweightSize } = useLightweightCharacterStore();
+  const { cleanupOldCharacters } = useLightweightCharacterStore();
   const [storageStats, setStorageStats] = useState({
     lightweightCharacters: 0,
     fullProfiles: 0,
@@ -21,9 +49,7 @@ export default function StorageManagement() {
   const [cleanupResult, setCleanupResult] = useState<string | null>(null);
 
   useEffect(() => {
-    // Calculate initial storage statistics
-    const stats = getStorageStatistics();
-    setStorageStats(stats);
+    getStorageStatistics().then(setStorageStats);
   }, []);
 
   const formatBytes = (bytes: number): string => {
@@ -39,16 +65,16 @@ export default function StorageManagement() {
     setCleanupResult(null);
     
     try {
-      const beforeStats = getStorageStatistics();
+      const beforeStats = await getStorageStatistics();
       
       // Clean up both full profiles and lightweight characters
       cleanupStorage();
-      cleanupOldCharacters();
+      await cleanupOldCharacters();
       
       // Wait a bit for the cleanup to complete
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      const afterStats = getStorageStatistics();
+      const afterStats = await getStorageStatistics();
       setStorageStats(afterStats);
       
       const removedProfiles = beforeStats.fullProfiles - afterStats.fullProfiles;

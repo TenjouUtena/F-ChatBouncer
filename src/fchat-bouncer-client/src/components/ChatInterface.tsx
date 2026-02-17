@@ -44,6 +44,7 @@ import DebugPanel from './DebugPanel';
 import Console from './Console';
 import MobileDrawer from './MobileDrawer';
 import MobileTabs from './MobileTabs';
+import StatusIndicators from './StatusIndicators';
 
 interface ChatInterfaceProps {
   isCharacterRestoring?: boolean;
@@ -146,16 +147,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   const { user, logout } = useAuthStore();
   const { activeCharacter, connections } = useCharacterIndexedDBStore();
   const {
-    messages,
     addMessage,
     clearAllHistory,
     setConnected,
-    isConnected,
-    selectedChannels,
-    unknownChannels,
-    unknownChannelCounts,
     addToSelectedChannels,
-    clearUnknownChannel,
+    clearUnknownChannelForCharacter,
     getChannelDisplayName,
     addProfile,
     getProfile,
@@ -362,7 +358,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       const activeCharacterName = useCharacterIndexedDBStore.getState().activeCharacter;
       const currentSelectedChannelsForMessage = activeCharacterName 
         ? getSelectedChannelsForCharacter(activeCharacterName) 
-        : selectedChannels;
+        : [];
       
       // Check if this is from an unknown channel before adding
       // A channel is "unknown" if it's not in the selected channels (what's open in the UI)
@@ -395,7 +391,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     } catch (e) {
       console.debug('Profile fetch attempt failed:', e);
     }
-   }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, selectedChannels, notificationChannel, hasCharacterData, getCharacterGender, getProfileRequestStatus, markCharacterKnown, requestProfileForCharacter, refreshProfile, isNotificationReady, showPMNotification, openPMChannel, setSelectedChannel]);
+   }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, notificationChannel, hasCharacterData, getCharacterGender, getProfileRequestStatus, markCharacterKnown, requestProfileForCharacter, refreshProfile, isNotificationReady, showPMNotification, openPMChannel, setSelectedChannel]);
 
   const flushPendingRecentMessages = useCallback((characterName?: string) => {
     const targetCharacter = characterName || activeCharacter;
@@ -540,13 +536,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     }
   }, [addToSelectedChannels, activeCharacter, notificationChannel]);
 
-  // Get messages and channels for the active character
-  const currentMessages = activeCharacter ? getMessagesForCharacter(activeCharacter) : messages;
-  const currentSelectedChannels = activeCharacter ? getSelectedChannelsForCharacter(activeCharacter) : selectedChannels;
-  
-  // Get unknown channels for the active character
-  const currentUnknownChannels = activeCharacter ? getUnknownChannelsForCharacter(activeCharacter) : unknownChannels;
-  const currentUnknownChannelCounts = activeCharacter ? getUnknownChannelCountsForCharacter(activeCharacter) : unknownChannelCounts;
+  // Get messages and channels for the active character (required)
+  const currentMessages = activeCharacter ? getMessagesForCharacter(activeCharacter) : [];
+  const currentSelectedChannels = activeCharacter ? getSelectedChannelsForCharacter(activeCharacter) : [];
+  const currentUnknownChannels = activeCharacter ? getUnknownChannelsForCharacter(activeCharacter) : new Set<string>();
+  const currentUnknownChannelCounts = activeCharacter ? getUnknownChannelCountsForCharacter(activeCharacter) : {};
   
   // Get unread counts for the active character
   const currentUnreadCounts = activeCharacter ? getUnreadCountsForCharacter(activeCharacter) : {};
@@ -695,8 +689,10 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       }
     });
 
-    // Update connection status
-    setConnected(signalRService.isConnected);
+    // Update connection status for active character
+    if (activeCharacter) {
+      setConnected(signalRService.isConnected, activeCharacter);
+    }
 
     return () => {
       // Cleanup listeners when component unmounts or effect re-runs
@@ -1025,7 +1021,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       clearUnreadCountForChannel(activeCharacter, channel);
     }
 
-    // Remove from character-scoped channels if we have an active character
+    // Remove from character-scoped channels
     if (activeCharacter) {
       useChatStore.setState((state) => ({
         characterSelectedChannels: {
@@ -1033,18 +1029,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
           [activeCharacter]: (state.characterSelectedChannels[activeCharacter] || []).filter((ch) => ch !== channel)
         }
       }));
-    } else {
-      // Legacy behavior
-      useChatStore.setState((state) => ({
-        selectedChannels: state.selectedChannels.filter((ch) => ch !== channel),
-      }));
     }
 
     // If we closed the active channel, select the next available one
-    if (selectedChannel === channel) {
-      const remaining = activeCharacter ? 
-        useChatStore.getState().characterSelectedChannels[activeCharacter] || [] :
-        useChatStore.getState().selectedChannels;
+    if (selectedChannel === channel && activeCharacter) {
+      const remaining = useChatStore.getState().characterSelectedChannels[activeCharacter] || [];
       setSelectedChannel(remaining[0] || '');
     }
 
@@ -1147,11 +1136,8 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
 
           </div>
           
-          <div className="flex items-center mt-2">
-            <div className={`w-2 h-2 rounded-full mr-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-            <span className="text-xs text-gray-300">
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
+          <div className="flex items-center mt-3">
+            <StatusIndicators />
           </div>
         </div>
 
@@ -1484,7 +1470,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
                   onTypingStop={typingStatus.handleTypingStop}
                   onInputChange={typingStatus.handleInputChange}
                   placeholder={`Message ${getChannelDisplayName(selectedChannel)}... Use [b], [i], [u] for formatting`}
-                  disabled={!isConnected}
+                  disabled={!activeCharacter || !connections.find((c) => c.characterName === activeCharacter)?.isConnected}
                   className="w-full"
                 />
               </div>
@@ -1508,10 +1494,10 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       />
 
       {/* Unknown Channel Notification */}
-      {notificationChannel && unknownChannelCounts[notificationChannel] && (
+      {notificationChannel && currentUnknownChannelCounts[notificationChannel] && (
         <UnknownChannelNotification
           channel={notificationChannel}
-          messageCount={unknownChannelCounts[notificationChannel]}
+          messageCount={currentUnknownChannelCounts[notificationChannel]}
           onJoin={handleJoinNotificationChannel}
           onDismiss={handleDismissNotification}
         />

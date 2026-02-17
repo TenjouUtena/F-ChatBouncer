@@ -256,22 +256,31 @@ builder.Services.AddAuthentication(options =>
         var errorMessage = context.Failure?.Message ?? "Unknown error";
         var request = context.HttpContext.Request;
         
+        static string ToFrontendRedirect(IConfiguration? config, string path)
+        {
+            var baseUrl = config?["Frontend:BaseUrl"] ?? Environment.GetEnvironmentVariable("FRONTEND_BASE_URL");
+            if (string.IsNullOrWhiteSpace(baseUrl)) return path;
+            var trimmed = baseUrl.TrimEnd('/');
+            return path.StartsWith("/") ? trimmed + path : trimmed + "/" + path;
+        }
+
         // Check if this is a duplicate request without OAuth parameters
         if (!request.Query.ContainsKey("code") && !request.Query.ContainsKey("state"))
         {
             logger.LogWarning("OAuth failure on request without parameters - likely duplicate callback");
-            context.Response.Redirect("/"); // Redirect to main app
+            var config = context.HttpContext.RequestServices.GetService<IConfiguration>();
+            context.Response.Redirect(ToFrontendRedirect(config, "/"));
             context.HandleResponse();
             await Task.CompletedTask;
             return;
         }
-        
+
         // Log detailed OAuth failure information
         logger.LogError("Google OAuth failure: {Error}", errorMessage);
         logger.LogError("Request URL: {Url}", $"{request.Scheme}://{request.Host}{request.Path}{request.QueryString}");
         logger.LogError("Request Headers: {Headers}", string.Join(", ", request.Headers.Select(h => $"{h.Key}={h.Value}")));
         logger.LogError("Query Parameters: {Query}", request.QueryString);
-        
+
         // Log specific OAuth state errors
         if (errorMessage.Contains("state") || errorMessage.Contains("invalid"))
         {
@@ -281,9 +290,10 @@ builder.Services.AddAuthentication(options =>
             logger.LogError("3. Port mismatch (server on 5001, Google app configured for 5000?)");
             logger.LogError("4. CORS or cookie policy issues");
         }
-        
+
         // Redirect to frontend with error
-        context.Response.Redirect($"/login?error=oauth_failed&message={Uri.EscapeDataString(errorMessage)}");
+        var configuration = context.HttpContext.RequestServices.GetService<IConfiguration>();
+        context.Response.Redirect(ToFrontendRedirect(configuration, $"/login?error=oauth_failed&message={Uri.EscapeDataString(errorMessage)}"));
         context.HandleResponse();
         await Task.CompletedTask;
     };

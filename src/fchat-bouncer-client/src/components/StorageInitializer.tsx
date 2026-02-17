@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { migrateExistingProfileData, cleanupOldStorageEntries } from '@/lib/storageMigration';
 import { useProfileStore } from '@/stores/profileStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useLightweightCharacterIndexedDBStore } from '@/stores/lightweightCharacterIndexedDBStore';
@@ -81,10 +80,6 @@ export default function StorageInitializer() {
           console.error('IndexedDB test failed:', testError);
         }
         
-        // Run migration and cleanup after stores are initialized
-        migrateExistingProfileData();
-        cleanupOldStorageEntries();
-        
         // Load limited messages from IndexedDB into memory for open channels only
         // Get characters with selected channels (open channels)
         const characterSelectedChannels = chatStore.characterSelectedChannels || {};
@@ -109,14 +104,6 @@ export default function StorageInitializer() {
         const chatStore = useChatStore.getState();
         chatStore.handleIndexedDBFailure(error);
         console.warn('Application will continue with limited storage functionality');
-        
-        // Still try to run migration and cleanup even if IndexedDB failed
-        try {
-          migrateExistingProfileData();
-          cleanupOldStorageEntries();
-        } catch (migrationError) {
-          console.error('Migration/cleanup failed:', migrationError);
-        }
       }
     };
 

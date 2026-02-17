@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
+import { useCredentialsStore } from '@/stores/credentialsStore';
 import { signalRService } from '@/lib/signalr';
 import { Character } from '@/types';
 
@@ -11,6 +12,7 @@ interface CharacterSelectionProps {
 
 export default function CharacterSelection({ onCharacterSelect }: CharacterSelectionProps) {
   const { user, availableCharacters, setAvailableCharacters } = useAuthStore();
+  const { retrieveCredentials } = useCredentialsStore();
   const [isLoading, setIsLoading] = useState(false);
   const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,8 +75,19 @@ export default function CharacterSelection({ onCharacterSelect }: CharacterSelec
     setIsLoading(true);
     setError(null);
     try {
-      await signalRService.selectCharacter(selectedCharacter.name);
-      // Call the parent callback to update state and navigate
+      const credentials = await retrieveCredentials();
+      if (credentials?.fchatUsername && credentials?.fchatPassword) {
+        await signalRService.connectCharacter(
+          selectedCharacter.name,
+          credentials.fchatUsername,
+          credentials.fchatPassword
+        );
+        await signalRService.setActiveCharacter(selectedCharacter.name);
+      } else {
+        setError('F-Chat credentials not found. Please set them in F-Chat Setup or log in again with "Remember F-Chat credentials".');
+        setIsLoading(false);
+        return;
+      }
       await onCharacterSelect(selectedCharacter);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to select character');

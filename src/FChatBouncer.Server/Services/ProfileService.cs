@@ -64,22 +64,6 @@ public class ProfileService : IProfileService
         }
     }
 
-    [Obsolete("Profile table removed - use GetStructuredProfileAsync instead")]
-    public async Task<Profile?> GetProfileAsync(string userId, string characterName)
-    {
-        // Profile table has been removed - this method is deprecated
-        _logger.LogWarning("GetProfileAsync called but Profile table has been removed - use GetStructuredProfileAsync instead");
-        return null;
-    }
-
-    [Obsolete("Profile table removed - use CharacterService to get character profiles")]
-    public async Task<List<Profile>> GetUserProfilesAsync(string userId)
-    {
-        // Profile table has been removed - this method is deprecated
-        _logger.LogWarning("GetUserProfilesAsync called but Profile table has been removed");
-        return new List<Profile>();
-    }
-
     public async Task SaveStructuredProfileAsync(string userId, ProfileData profileData)
     {
         using var scope = _serviceProvider.CreateScope();
@@ -239,7 +223,6 @@ public class ProfileService : IProfileService
                 _logger.LogDebug("Profile request already in queue for {CharacterName} (User: {UserId})", characterName, userId);
             }
 
-            // Failed to get profile from CharacterService, try legacy Profile table
             return null;
         }
         catch (Exception ex)
@@ -363,7 +346,7 @@ public class ProfileService : IProfileService
                 if (settings?.FChatCredentialsEncrypted == null)
                 {
                     _logger.LogInformation("No F-Chat credentials found for user {UserId}, falling back to PRO/PRD commands", userId);
-                    await _fChatService.RequestProfileAsync(userId, characterName);
+                    await _fChatService.RequestProfileAsync(userId, characterName, characterName);
                     return;
                 }
 
@@ -389,7 +372,7 @@ public class ProfileService : IProfileService
                     characterName, userId);
                 
                 // Fall back to PRO/PRD commands
-                await _fChatService.RequestProfileAsync(userId, characterName);
+                await _fChatService.RequestProfileAsync(userId, characterName, characterName);
             }
         }
         catch (Exception ex)

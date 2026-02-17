@@ -203,6 +203,19 @@ public class AuthController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Returns the full redirect URL for the frontend. When Frontend:BaseUrl (or FRONTEND_BASE_URL) is set
+    /// (e.g. for Vercel), redirects go to that origin; otherwise uses relative path for same-host.
+    /// </summary>
+    private string GetFrontendRedirect(string path)
+    {
+        var baseUrl = _configuration["Frontend:BaseUrl"] ?? Environment.GetEnvironmentVariable("FRONTEND_BASE_URL");
+        if (string.IsNullOrWhiteSpace(baseUrl))
+            return path;
+        var trimmed = baseUrl.TrimEnd('/');
+        return path.StartsWith("/") ? trimmed + path : trimmed + "/" + path;
+    }
+
     [HttpGet("google")]
     public IActionResult GoogleLogin()
     {
@@ -224,9 +237,9 @@ public class AuthController : ControllerBase
             if (!Request.Query.ContainsKey("code") && !Request.Query.ContainsKey("state"))
             {
                 _logger.LogWarning("OAuth callback received without code/state parameters - likely a duplicate request");
-                return Redirect("/"); // Redirect to main app instead of showing error
+                return Redirect(GetFrontendRedirect("/"));
             }
-            
+
             var info = await _signInManager.GetExternalLoginInfoAsync();
             if (info == null)
             {
@@ -235,7 +248,7 @@ public class AuthController : ControllerBase
                 _logger.LogWarning("1. Session/cookie issues");
                 _logger.LogWarning("2. Incorrect redirect URI in Google Console");
                 _logger.LogWarning("3. Port mismatch (server on 5001, Google app configured for 5000?)");
-                return Redirect($"/login?error=external_login_failed");
+                return Redirect(GetFrontendRedirect("/login?error=external_login_failed"));
             }
 
             _logger.LogInformation("External login info retrieved successfully");
@@ -247,7 +260,7 @@ public class AuthController : ControllerBase
             if (string.IsNullOrEmpty(googleId) || string.IsNullOrEmpty(email))
             {
                 _logger.LogWarning("Missing Google data - GoogleId: {GoogleId}, Email: {Email}", googleId, email);
-                return Redirect($"/login?error=invalid_google_data");
+                return Redirect(GetFrontendRedirect("/login?error=invalid_google_data"));
             }
 
             // Check if user exists by Google ID
@@ -278,7 +291,7 @@ public class AuthController : ControllerBase
                     if (!result.Succeeded)
                     {
                         _logger.LogError("Failed to create Google user: {Errors}", string.Join(", ", result.Errors.Select(e => e.Description)));
-                        return Redirect($"/login?error=user_creation_failed");
+                        return Redirect(GetFrontendRedirect("/login?error=user_creation_failed"));
                     }
 
                     // Create user settings
@@ -312,7 +325,7 @@ public class AuthController : ControllerBase
 
             if (!user.IsActive)
             {
-                return Redirect($"/login?error=account_deactivated");
+                return Redirect(GetFrontendRedirect("/login?error=account_deactivated"));
             }
 
             // Sign in the user
@@ -324,12 +337,12 @@ public class AuthController : ControllerBase
 
             // Redirect to frontend with tokens
             var frontendUrl = $"/auth-success?token={token}&refreshToken={refreshToken}&userId={user.Id}&hasFChatCredentials={user.HasFChatCredentials}";
-            return Redirect(frontendUrl);
+            return Redirect(GetFrontendRedirect(frontendUrl));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Google OAuth callback failed");
-            return Redirect($"/login?error=oauth_callback_failed");
+            return Redirect(GetFrontendRedirect("/login?error=oauth_callback_failed"));
         }
     }
 

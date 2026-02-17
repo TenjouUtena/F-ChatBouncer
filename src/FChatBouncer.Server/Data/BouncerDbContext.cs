@@ -15,9 +15,8 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
     public DbSet<Message> Messages { get; set; }
     public DbSet<Channel> Channels { get; set; }
     public DbSet<QueuedMessage> QueuedMessages { get; set; }
-    // Profile DbSet removed - data migrated to Character.StructuredProfileData
-    
-    // New unified character models
+
+    // Unified character models
     public DbSet<Character> Characters { get; set; }
     public DbSet<CharacterConnection> CharacterConnections { get; set; }
     public DbSet<CharacterChannel> CharacterChannels { get; set; }
@@ -61,8 +60,6 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
             .HasOne(qm => qm.User)
             .WithMany(u => u.QueuedMessages)
             .HasForeignKey(qm => qm.UserId);
-
-        // Profile relationship removed - data migrated to Character model
 
         // Character relationships
         builder.Entity<Character>()

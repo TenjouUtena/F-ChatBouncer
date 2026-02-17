@@ -7,21 +7,6 @@ import * as he from 'he';
 import { parseBBCodeToHtml, parseHtmlToBBCode } from './bbcode/parser';
 import { bbcodeToAST, astToBBCode, astToTipTapJSON, tipTapJSONToAST } from './bbcode/ast';
 
-export interface BBCodeMapping {
-  htmlTag: string;
-  bbcodeTag: string;
-  attributes?: Record<string, string>;
-}
-
-// Legacy F-Chat BBCode mappings (for fallback/simple editor)
-export const BBCODE_MAPPINGS: BBCodeMapping[] = [
-  { htmlTag: 'strong', bbcodeTag: 'b' },
-  { htmlTag: 'b', bbcodeTag: 'b' },
-  { htmlTag: 'em', bbcodeTag: 'i' },
-  { htmlTag: 'i', bbcodeTag: 'i' },
-  { htmlTag: 'u', bbcodeTag: 'u' },
-];
-
 /**
  * Convert HTML content from Tiptap editor to F-Chat BBCode format
  * Enhanced to support advanced BBCode tags using AST system
@@ -63,35 +48,6 @@ export function tipTapJSONToBBCode(tiptapDoc: any): string {
 }
 
 /**
- * Legacy function for simple BBCode conversion (fallback)
- */
-export function simpleBBCodeToHtml(bbcode: string): string {
-  let html = bbcode;
-
-  // Convert each BBCode tag to HTML
-  BBCODE_MAPPINGS.forEach(({ htmlTag, bbcodeTag }) => {
-    // Replace opening tags
-    const openRegex = new RegExp(`\\[${bbcodeTag}\\]`, 'gi');
-    html = html.replace(openRegex, `<${htmlTag}>`);
-
-    // Replace closing tags
-    const closeRegex = new RegExp(`\\[/${bbcodeTag}\\]`, 'gi');
-    html = html.replace(closeRegex, `</${htmlTag}>`);
-  });
-
-  // Convert line breaks to br tags
-  html = html.replace(/\n/g, '<br>');
-
-  // Encode HTML entities for safety using proper library
-  html = he.encode(html, {
-    useNamedReferences: true,
-    allowUnsafeSymbols: false
-  });
-
-  return html;
-}
-
-/**
  * Get plain text content without any formatting
  */
 export function getPlainText(html: string): string {
@@ -113,37 +69,4 @@ export function isValidBBCode(content: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Legacy validation function for basic tags only
- */
-export function isValidBasicBBCode(content: string): boolean {
-  const supportedTags = ['b', 'i', 'u'];
-  const tagRegex = /\[(\/?)(b|i|u)\]/gi;
-  const matches = content.match(tagRegex);
-
-  if (!matches) return true; // No BBCode tags is valid
-
-  const tagStack: string[] = [];
-
-  for (const match of matches) {
-    const [, isClosing, tag] = match.match(/\[(\/?)(b|i|u)\]/i) || [];
-
-    if (isClosing) {
-      // Closing tag
-      if (tagStack.length === 0 || tagStack.pop() !== tag.toLowerCase()) {
-        return false; // Mismatched closing tag
-      }
-    } else {
-      // Opening tag
-      if (supportedTags.includes(tag.toLowerCase())) {
-        tagStack.push(tag.toLowerCase());
-      } else {
-        return false; // Unsupported tag
-      }
-    }
-  }
-
-  return tagStack.length === 0; // All tags should be closed
 }

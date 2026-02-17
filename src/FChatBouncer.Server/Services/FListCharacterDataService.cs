@@ -321,10 +321,6 @@ public class FListCharacterDataService : IFListCharacterDataService
             {
                 profileData.Inlines[inlineEntry.Key] = inlineEntry.Value;
             }
-            
-            // Also keep the hashes in Info for backward compatibility
-            var inlineHashes = string.Join(", ", characterData.Inlines.Select(inline => inline.Value.Hash));
-            profileData.Info["Inlines"] = inlineHashes;
         }
 
         // Extract gender from profile data

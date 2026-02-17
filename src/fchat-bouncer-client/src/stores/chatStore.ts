@@ -44,15 +44,6 @@ interface ChatStore extends ChatState {
   // Typing indicators state (character-scoped)
   characterTypingStates: Record<string, Record<string, TypingState>>; // characterName -> channelId -> typing state
   
-  // Legacy fields (for backward compatibility)
-  messages: Message[];
-  selectedChannels: string[];
-  connectionStatus: ConnectionStatus;
-  isConnected: boolean;
-  unknownChannels: Set<string>;
-  unknownChannelCounts: Record<string, number>;
-  channelMetadata: Record<string, Channel>;
-
   // Character-scoped methods
   addMessage: (message: Message, characterName?: string) => void;
   addMessages: (messages: Message[], characterName: string) => void;
@@ -129,12 +120,8 @@ interface ChatStore extends ChatState {
   clearTypingState: (characterName: string, channelId: string) => void;
   getTypingDisplayText: (characterName: string, channelId: string) => string;
   
-  // Legacy methods (for backward compatibility)
-  addUnknownChannel: (channel: string) => void;
-  clearUnknownChannel: (channel: string) => void;
-  clearMessages: () => void;
   clearAllHistory: () => void;
-  
+
   // Storage management
   cleanupStorage: () => void;
   getStorageSize: () => number;
@@ -256,7 +243,6 @@ export const useChatStore = create<ChatStore>()(
         console.log(`[ChatStore] ${label ?? 'state'}`, {
           characters: Object.keys(state.characterMessages),
           selectedChannels: state.characterSelectedChannels,
-          pendingUnknownChannels: Array.from(state.unknownChannels),
         });
       },
       // Character-scoped data
@@ -278,19 +264,6 @@ export const useChatStore = create<ChatStore>()(
       
       // Typing indicators state
       characterTypingStates: {},
-      
-      // Legacy fields (for backward compatibility)
-      messages: [],
-      selectedChannels: [],
-      connectionStatus: {
-        isConnected: false,
-        status: 'Disconnected',
-        lastActivity: new Date().toISOString(),
-      },
-      isConnected: false,
-      unknownChannels: new Set<string>(),
-      unknownChannelCounts: {},
-      channelMetadata: {},
 
       // Character-scoped methods
       handleIndexedDBReady: () => {
@@ -366,27 +339,9 @@ export const useChatStore = create<ChatStore>()(
           });
         }
 
+        if (!characterName) return;
+
         set((state) => {
-          // If no character specified, use legacy behavior
-          if (!characterName) {
-            // Prioritize ID-based deduplication for efficiency
-            const isDuplicate = messageWithId.id
-              ? state.messages.some(existingMsg => existingMsg.id === messageWithId.id)
-              : state.messages.some(existingMsg =>
-                  existingMsg.timestamp === messageWithId.timestamp &&
-                  existingMsg.sender === messageWithId.sender &&
-                  existingMsg.content === messageWithId.content &&
-                  existingMsg.channel === messageWithId.channel
-                );
-
-            if (isDuplicate) return state;
-
-            return {
-              messages: [...state.messages, messageWithId]
-            };
-          }
-
-          // Character-scoped behavior
           const characterMessages = state.characterMessages[characterName] || [];
           // Prioritize ID-based deduplication for efficiency
           const isDuplicate = messageWithId.id
@@ -461,15 +416,6 @@ export const useChatStore = create<ChatStore>()(
               ...state.characterUnknownChannelCounts,
               [characterName]: newCounts
             };
-
-            // Also maintain legacy global state for backward compatibility
-            const globalUnknownChannels = new Set(state.unknownChannels);
-            globalUnknownChannels.add(message.channel);
-            const globalCounts = { ...state.unknownChannelCounts };
-            globalCounts[message.channel] = (globalCounts[message.channel] || 0) + 1;
-            
-            newState.unknownChannels = globalUnknownChannels;
-            newState.unknownChannelCounts = globalCounts;
           }
 
           // Only request profile if we don't know the sender's gender
@@ -520,11 +466,7 @@ export const useChatStore = create<ChatStore>()(
       },
 
       setConnectionStatus: (status: ConnectionStatus, characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          set(() => ({ connectionStatus: status }));
-          return;
-        }
+        if (!characterName) return;
 
         set((state) => ({
           characterConnectionStatus: {
@@ -535,11 +477,7 @@ export const useChatStore = create<ChatStore>()(
       },
 
       setConnected: (connected: boolean, characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          set(() => ({ isConnected: connected }));
-          return;
-        }
+        if (!characterName) return;
 
         set((state) => ({
           characterConnectionStatus: {
@@ -554,11 +492,7 @@ export const useChatStore = create<ChatStore>()(
       },
 
       setSelectedChannels: (channels: string[], characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          set(() => ({ selectedChannels: channels }));
-          return;
-        }
+        if (!characterName) return;
 
         set((state) => ({
           characterSelectedChannels: {
@@ -569,34 +503,12 @@ export const useChatStore = create<ChatStore>()(
       },
 
       addToSelectedChannels: (channels: string[], characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          set((state) => {
-            const newSelectedChannels = Array.from(new Set([...state.selectedChannels, ...channels]));
-            
-            // Clear unknown channels that are now selected
-            const newUnknownChannels = new Set(state.unknownChannels);
-            const newUnknownCounts = { ...state.unknownChannelCounts };
-            
-            channels.forEach(channel => {
-              newUnknownChannels.delete(channel);
-              delete newUnknownCounts[channel];
-            });
-            
-            return {
-              selectedChannels: newSelectedChannels,
-              unknownChannels: newUnknownChannels,
-              unknownChannelCounts: newUnknownCounts
-            };
-          });
-          return;
-        }
+        if (!characterName) return;
 
         set((state) => {
           const currentChannels = state.characterSelectedChannels[characterName] || [];
           const newChannels = Array.from(new Set([...currentChannels, ...channels]));
           
-          // Clear unknown channels that are now selected for this character
           const currentUnknownChannels = state.characterUnknownChannels[characterName] || new Set();
           const newCharacterUnknownChannels = new Set(currentUnknownChannels);
           const currentCounts = state.characterUnknownChannelCounts[characterName] || {};
@@ -605,15 +517,6 @@ export const useChatStore = create<ChatStore>()(
           channels.forEach(channel => {
             newCharacterUnknownChannels.delete(channel);
             delete newCharacterCounts[channel];
-          });
-          
-          // Also clear from global state for backward compatibility
-          const newGlobalUnknownChannels = new Set(state.unknownChannels);
-          const newGlobalCounts = { ...state.unknownChannelCounts };
-          
-          channels.forEach(channel => {
-            newGlobalUnknownChannels.delete(channel);
-            delete newGlobalCounts[channel];
           });
           
           return {
@@ -628,21 +531,13 @@ export const useChatStore = create<ChatStore>()(
             characterUnknownChannelCounts: {
               ...state.characterUnknownChannelCounts,
               [characterName]: newCharacterCounts
-            },
-            unknownChannels: newGlobalUnknownChannels,
-            unknownChannelCounts: newGlobalCounts
+            }
           };
         });
       },
 
       removeFromSelectedChannels: (channels: string[], characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          set((state) => ({
-            selectedChannels: state.selectedChannels.filter(channel => !channels.includes(channel))
-          }));
-          return;
-        }
+        if (!characterName) return;
 
         set((state) => {
           const currentChannels = state.characterSelectedChannels[characterName] || [];
@@ -683,35 +578,12 @@ export const useChatStore = create<ChatStore>()(
 
       openPMChannel: (friendName: string, characterName?: string) => {
         const pmChannelId = `PRI-${friendName}`;
-        
-        if (!characterName) {
-          // Legacy behavior
-          set((state) => {
-            const newSelectedChannels = Array.from(new Set([...state.selectedChannels, pmChannelId]));
-            
-            // Clear unknown channels that are now selected
-            const newUnknownChannels = new Set(state.unknownChannels);
-            const newUnknownCounts = { ...state.unknownChannelCounts };
-            
-            if (newUnknownChannels.has(pmChannelId)) {
-              newUnknownChannels.delete(pmChannelId);
-              delete newUnknownCounts[pmChannelId];
-            }
-            
-            return {
-              selectedChannels: newSelectedChannels,
-              unknownChannels: newUnknownChannels,
-              unknownChannelCounts: newUnknownCounts
-            };
-          });
-          return;
-        }
+        if (!characterName) return;
 
         set((state) => {
           const currentChannels = state.characterSelectedChannels[characterName] || [];
           const newChannels = Array.from(new Set([...currentChannels, pmChannelId]));
           
-          // Clear unknown channels that are now selected for this character
           const currentUnknownChannels = state.characterUnknownChannels[characterName] || new Set();
           const newCharacterUnknownChannels = new Set(currentUnknownChannels);
           const currentCounts = state.characterUnknownChannelCounts[characterName] || {};
@@ -720,15 +592,6 @@ export const useChatStore = create<ChatStore>()(
           if (newCharacterUnknownChannels.has(pmChannelId)) {
             newCharacterUnknownChannels.delete(pmChannelId);
             delete newCharacterCounts[pmChannelId];
-          }
-          
-          // Also clear from global state for backward compatibility
-          const newGlobalUnknownChannels = new Set(state.unknownChannels);
-          const newGlobalCounts = { ...state.unknownChannelCounts };
-          
-          if (newGlobalUnknownChannels.has(pmChannelId)) {
-            newGlobalUnknownChannels.delete(pmChannelId);
-            delete newGlobalCounts[pmChannelId];
           }
           
           return {
@@ -743,9 +606,7 @@ export const useChatStore = create<ChatStore>()(
             characterUnknownChannelCounts: {
               ...state.characterUnknownChannelCounts,
               [characterName]: newCharacterCounts
-            },
-            unknownChannels: newGlobalUnknownChannels,
-            unknownChannelCounts: newGlobalCounts
+            }
           };
         });
       },
@@ -827,16 +688,7 @@ export const useChatStore = create<ChatStore>()(
       },
 
       setChannelMetadata: (channels: Channel[], characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          const metadata = channels.reduce((acc, channel) => {
-            acc[channel.id] = channel;
-            return acc;
-          }, {} as Record<string, Channel>);
-          
-          set(() => ({ channelMetadata: metadata }));
-          return;
-        }
+        if (!characterName) return;
 
         const metadata = channels.reduce((acc, channel) => {
           acc[channel.id] = channel;
@@ -852,11 +704,7 @@ export const useChatStore = create<ChatStore>()(
       },
 
       getChannelDisplayName: (channelId: string, characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          const metadata = get().channelMetadata;
-          return metadata[channelId]?.title || metadata[channelId]?.name || channelId;
-        }
+        if (!characterName) return channelId;
 
         const characterMetadata = get().characterChannelMetadata[characterName] || {};
         return characterMetadata[channelId]?.title || characterMetadata[channelId]?.name || channelId;
@@ -898,17 +746,7 @@ export const useChatStore = create<ChatStore>()(
       },
 
       getLastMessageTime: (channel?: string, characterName?: string) => {
-        if (!characterName) {
-          // Legacy behavior
-          const messages = get().messages;
-          const channelMessages = channel ? messages.filter(m => m.channel === channel) : messages;
-          if (channelMessages.length === 0) return null;
-          
-          const latestMessage = channelMessages.reduce((latest, current) => 
-            new Date(current.timestamp) > new Date(latest.timestamp) ? current : latest
-          );
-          return new Date(latestMessage.timestamp);
-        }
+        if (!characterName) return null;
 
         const messages = get().characterMessages[characterName] || [];
         const channelMessages = channel ? messages.filter(m => m.channel === channel) : messages;
@@ -1305,45 +1143,17 @@ export const useChatStore = create<ChatStore>()(
         }
       },
 
-      // Legacy methods (for backward compatibility)
-      addUnknownChannel: (channel: string) => {
-        set((state) => {
-          const newUnknownChannels = new Set(state.unknownChannels);
-          newUnknownChannels.add(channel);
-          
-          const newCounts = { ...state.unknownChannelCounts };
-          newCounts[channel] = (newCounts[channel] || 0) + 1;
-          
-          return {
-            unknownChannels: newUnknownChannels,
-            unknownChannelCounts: newCounts
-          };
-        });
-      },
-
-      clearUnknownChannel: (channel: string) => {
-        set((state) => {
-          const newUnknownChannels = new Set(state.unknownChannels);
-          newUnknownChannels.delete(channel);
-          
-          const newCounts = { ...state.unknownChannelCounts };
-          delete newCounts[channel];
-          
-          return {
-            unknownChannels: newUnknownChannels,
-            unknownChannelCounts: newCounts
-          };
-        });
-      },
-
-      clearMessages: () => {
-        set(() => ({ messages: [] }));
-      },
-
       clearAllHistory: () => {
         set(() => ({
-          messages: [],
           characterMessages: {},
+          characterSelectedChannels: {},
+          characterJoinedChannels: {},
+          characterConnectionStatus: {},
+          characterChannelMetadata: {},
+          characterUnknownChannels: {},
+          characterUnknownChannelCounts: {},
+          characterUnreadCounts: {},
+          characterFocusedChannel: {},
           profiles: {},
           profileRequestStatus: {},
           profileLastRequested: {},
@@ -1466,10 +1276,7 @@ export const useChatStore = create<ChatStore>()(
               Object.entries(currentState.characterUnknownChannels).map(([key, value]) => [key, Array.from(value)])
             ),
             characterUnknownChannelCounts: currentState.characterUnknownChannelCounts,
-            characterUnreadCounts: currentState.characterUnreadCounts,
-            messages: currentState.messages,
-            selectedChannels: currentState.selectedChannels,
-            channelMetadata: currentState.channelMetadata
+            characterUnreadCounts: currentState.characterUnreadCounts
           };
           
           return estimateStorageSize(partializedData);
@@ -1748,10 +1555,7 @@ export const useChatStore = create<ChatStore>()(
         ),
         characterUnknownChannelCounts: state.characterUnknownChannelCounts,
         characterUnreadCounts: state.characterUnreadCounts,
-        characterFocusedChannel: state.characterFocusedChannel,
-        // Legacy fields for backward compatibility (excluding messages)
-        selectedChannels: state.selectedChannels,
-        channelMetadata: state.channelMetadata
+        characterFocusedChannel: state.characterFocusedChannel
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {

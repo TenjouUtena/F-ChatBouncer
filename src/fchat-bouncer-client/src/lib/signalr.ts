@@ -754,6 +754,15 @@ this.onSearchResultsReceived = callback;
     this.removeListener('CharacterError');
   }
 
+  /**
+   * Generic event listener registration
+   * @param eventName The name of the SignalR event to listen for
+   * @param callback The callback function to execute when the event is received
+   */
+  on(eventName: string, callback: Function): void {
+    this.addUniqueListener(eventName, callback);
+  }
+
   removeListener(eventName: string, callback?: Function): void {
     if (!this.connection) return;
 
@@ -816,34 +825,6 @@ this.onSearchResultsReceived = callback;
     for (const channel of channels) {
       await this.joinChannelForCharacter(targetCharacter, channel);
     }
-  }
-
-  /**
-   * @deprecated This method uses legacy single-character API. The backend now requires character context.
-   * This method will automatically get the active character from the store.
-   */
-  async sendMessage(channel: string, content: string, characterName?: string): Promise<void> {
-    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
-      throw new Error('SignalR connection not available');
-    }
-    
-    let targetCharacter = characterName;
-    if (!targetCharacter) {
-      // Get active character from store
-      try {
-        const { useCharacterIndexedDBStore } = await import('@/stores/characterIndexedDBStore');
-        targetCharacter = useCharacterIndexedDBStore.getState().activeCharacter || '';
-      } catch (error) {
-        console.error('Failed to get active character:', error);
-      }
-    }
-    
-    if (!targetCharacter) {
-      throw new Error('No active character selected for sending message');
-    }
-    
-    // Use new multi-character method
-    await this.sendMessageFromCharacter(targetCharacter, channel, content);
   }
 
   async getRecentMessages(characterName?: string): Promise<void> {
@@ -938,28 +919,6 @@ this.onSearchResultsReceived = callback;
       this.addUniqueListener('ReceiveCharacters', handleCharacters);
       this.connection!.invoke('GetCharacters').catch(reject);
     });
-  }
-
-  /**
-   * @deprecated This method uses legacy SelectCharacter hub method which is marked obsolete on the backend.
-   * The backend still supports it for backward compatibility but logs warnings.
-   * For new code, use connectCharacter + setActiveCharacter flow instead.
-   */
-  async selectCharacter(characterName: string): Promise<void> {
-    if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
-      throw new Error('SignalR connection not available');
-    }
-    console.warn('selectCharacter uses deprecated backend method. Consider using connectCharacter + setActiveCharacter flow for new code.');
-    await this.connection.invoke('SelectCharacter', characterName);
-  }
-
-  /**
-   * @deprecated This method uses legacy SetSelectedCharacter hub method which is obsolete on the backend.
-   * Use setActiveCharacter instead.
-   */
-  async setSelectedCharacter(characterName: string): Promise<void> {
-    console.warn('setSelectedCharacter is deprecated. Use setActiveCharacter instead. Redirecting to setActiveCharacter...');
-    await this.setActiveCharacter(characterName);
   }
 
   async setActiveCharacter(characterName: string): Promise<void> {

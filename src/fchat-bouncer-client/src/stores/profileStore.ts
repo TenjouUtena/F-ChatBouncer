@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { ProfileData } from '@/types';
 import { indexedDBService } from '@/lib/indexeddb';
-import { ProfileMigration } from '@/lib/profileMigration';
 
 interface ProfileStore {
   // In-memory cache for quick access
@@ -36,14 +35,6 @@ export const useProfileStore = create<ProfileStore>((set, get) => ({
       await indexedDBService.initialize();
       set({ isIndexedDBAvailable: true });
       console.debug('Profile store initialized with IndexedDB');
-      
-      // Check for and migrate legacy profiles
-      const hasLegacy = await ProfileMigration.hasLegacyProfiles();
-      if (hasLegacy) {
-        console.debug('Found legacy profiles, starting migration...');
-        const result = await ProfileMigration.migrateProfiles();
-        console.debug(`Migration completed: ${result.migrated} profiles migrated, ${result.errors} errors`);
-      }
     } catch (error) {
       console.error('Failed to initialize profile store with IndexedDB:', error);
       set({ isIndexedDBAvailable: false });
