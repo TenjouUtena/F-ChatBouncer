@@ -17,8 +17,9 @@ public class TicketManager
         _logger = logger;
         _encryptionKey = configuration["CREDENTIAL_ENCRYPTION_KEY"]
             ?? Environment.GetEnvironmentVariable("CREDENTIAL_ENCRYPTION_KEY")
+            ?? configuration["Security:CredentialEncryptionKey"]
             ?? throw new InvalidOperationException(
-                "CREDENTIAL_ENCRYPTION_KEY not configured. Set the environment variable or add it to configuration.");
+                "CREDENTIAL_ENCRYPTION_KEY not configured. Set the environment variable for this service (e.g. in Railway: Service → Variables), then redeploy so the new value is loaded.");
     }
 
     /// <summary>

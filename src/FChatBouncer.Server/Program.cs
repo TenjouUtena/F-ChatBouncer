@@ -455,6 +455,17 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
+// Log whether CREDENTIAL_ENCRYPTION_KEY is present at startup (helps debug env/configuration issues)
+var credentialKey = app.Configuration["CREDENTIAL_ENCRYPTION_KEY"] ?? Environment.GetEnvironmentVariable("CREDENTIAL_ENCRYPTION_KEY");
+if (string.IsNullOrEmpty(credentialKey))
+{
+    app.Logger.LogWarning("CREDENTIAL_ENCRYPTION_KEY is not set at startup. Set the environment variable for this service and redeploy.");
+}
+else
+{
+    app.Logger.LogInformation("CREDENTIAL_ENCRYPTION_KEY is configured (length {Length})", credentialKey.Length);
+}
+
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
 {
