@@ -60,6 +60,18 @@ class CharacterIndexedDBService {
 
       request.onsuccess = () => {
         this.db = request.result;
+
+        this.db.onclose = () => {
+          console.warn('Character IndexedDB connection closed unexpectedly');
+          this.db = null;
+        };
+
+        this.db.onversionchange = () => {
+          console.warn('Character IndexedDB version change detected, closing connection');
+          this.db?.close();
+          this.db = null;
+        };
+
         console.log('Character IndexedDB initialized successfully:', {
           dbName: this.dbName,
           version: this.dbVersion,
@@ -89,6 +101,33 @@ class CharacterIndexedDBService {
     }
   }
 
+  private async reconnect(): Promise<void> {
+    this.db = null;
+    await this.ensureInitialized();
+  }
+
+  private async getTransaction(mode: IDBTransactionMode): Promise<IDBTransaction> {
+    await this.ensureInitialized();
+
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    try {
+      return this.db.transaction([this.storeName], mode);
+    } catch (error: any) {
+      if (error?.name === 'InvalidStateError') {
+        console.warn('Character IndexedDB connection stale, reconnecting...');
+        await this.reconnect();
+        if (!this.db) {
+          throw new Error('Database reconnection failed');
+        }
+        return this.db.transaction([this.storeName], mode);
+      }
+      throw error;
+    }
+  }
+
   private generateKey(characterName: string, type: 'CONN' | 'LIGHT'): string {
     // URL encode the character name to handle special characters
     const encodedName = encodeURIComponent(characterName);
@@ -97,16 +136,10 @@ class CharacterIndexedDBService {
 
   // Character Connection Methods
   async storeConnection(connection: Omit<CharacterConnectionData, 'timestamp' | 'type'>): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       
       const key = this.generateKey(connection.characterName, 'CONN');
       const data: CharacterConnectionData & { key: string } = {
@@ -131,16 +164,10 @@ class CharacterIndexedDBService {
   }
 
   async getConnection(characterName: string): Promise<CharacterConnectionData | null> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const key = this.generateKey(characterName, 'CONN');
       
       const request = store.get(key);
@@ -164,16 +191,10 @@ class CharacterIndexedDBService {
   }
 
   async getAllConnections(): Promise<CharacterConnectionData[]> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const index = store.index('type');
       const request = index.getAll('CONN');
 
@@ -191,16 +212,10 @@ class CharacterIndexedDBService {
   }
 
   async deleteConnection(characterName: string): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const key = this.generateKey(characterName, 'CONN');
       
       const request = store.delete(key);
@@ -219,16 +234,10 @@ class CharacterIndexedDBService {
 
   // Lightweight Character Methods
   async storeLightweightCharacter(characterData: Omit<LightweightCharacterData, 'timestamp' | 'type'>): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       
       const key = this.generateKey(characterData.character, 'LIGHT');
       const data: LightweightCharacterData & { key: string } = {
@@ -253,16 +262,10 @@ class CharacterIndexedDBService {
   }
 
   async getLightweightCharacter(characterName: string): Promise<LightweightCharacterData | null> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const key = this.generateKey(characterName, 'LIGHT');
       
       const request = store.get(key);
@@ -286,16 +289,10 @@ class CharacterIndexedDBService {
   }
 
   async getAllLightweightCharacters(): Promise<LightweightCharacterData[]> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const index = store.index('type');
       const request = index.getAll('LIGHT');
 
@@ -313,16 +310,10 @@ class CharacterIndexedDBService {
   }
 
   async deleteLightweightCharacter(characterName: string): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const key = this.generateKey(characterName, 'LIGHT');
       
       const request = store.delete(key);
@@ -341,16 +332,10 @@ class CharacterIndexedDBService {
 
   // General Methods
   async clearAllData(): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.clear();
 
       request.onsuccess = () => {

@@ -43,6 +43,18 @@ class IndexedDBService {
 
       request.onsuccess = () => {
         this.db = request.result;
+
+        this.db.onclose = () => {
+          console.warn('Profile IndexedDB connection closed unexpectedly');
+          this.db = null;
+        };
+
+        this.db.onversionchange = () => {
+          console.warn('Profile IndexedDB version change detected, closing connection');
+          this.db?.close();
+          this.db = null;
+        };
+
         console.log('IndexedDB initialized successfully:', {
           dbName: this.dbName,
           version: this.dbVersion,
@@ -71,6 +83,33 @@ class IndexedDBService {
     }
   }
 
+  private async reconnect(): Promise<void> {
+    this.db = null;
+    await this.ensureInitialized();
+  }
+
+  private async getTransaction(mode: IDBTransactionMode): Promise<IDBTransaction> {
+    await this.ensureInitialized();
+
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    try {
+      return this.db.transaction([this.storeName], mode);
+    } catch (error: any) {
+      if (error?.name === 'InvalidStateError') {
+        console.warn('Profile IndexedDB connection stale, reconnecting...');
+        await this.reconnect();
+        if (!this.db) {
+          throw new Error('Database reconnection failed');
+        }
+        return this.db.transaction([this.storeName], mode);
+      }
+      throw error;
+    }
+  }
+
   private generateKey(characterName: string, type: 'BASIC' | 'FULL'): string {
     // URL encode the character name to handle special characters
     const encodedName = encodeURIComponent(characterName);
@@ -78,16 +117,10 @@ class IndexedDBService {
   }
 
   async storeProfile(characterName: string, profileData: any, type: 'BASIC' | 'FULL' = 'FULL'): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       
       const key = this.generateKey(characterName, type);
       const data: ProfileStorageData & { key: string } = {
@@ -113,16 +146,10 @@ class IndexedDBService {
   }
 
   async getProfile(characterName: string, type: 'BASIC' | 'FULL' = 'FULL'): Promise<any | null> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const key = this.generateKey(characterName, type);
       
       const request = store.get(key);
@@ -149,16 +176,10 @@ class IndexedDBService {
   }
 
   async deleteProfile(characterName: string, type: 'BASIC' | 'FULL' = 'FULL'): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const key = this.generateKey(characterName, type);
       
       const request = store.delete(key);
@@ -176,16 +197,10 @@ class IndexedDBService {
   }
 
   async getAllProfiles(type?: 'BASIC' | 'FULL'): Promise<ProfileStorageData[]> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.getAll();
 
       request.onsuccess = () => {
@@ -208,16 +223,10 @@ class IndexedDBService {
   }
 
   async getProfilesByCharacter(characterName: string): Promise<ProfileStorageData[]> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const index = store.index('characterName');
       const request = index.getAll(characterName);
 
@@ -235,16 +244,10 @@ class IndexedDBService {
   }
 
   async clearAllProfiles(): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.clear();
 
       request.onsuccess = () => {

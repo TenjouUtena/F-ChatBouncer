@@ -55,4 +55,11 @@ public interface IFChatService
     
     // Status methods
     Task<DetailedConnectionStatusDto> GetDetailedConnectionStatusAsync(string userId);
+
+    /// <summary>
+    /// Tries to authenticate with F-List using the provided credentials and returns
+    /// the character list. Has NO side effects — does not save or clear stored credentials.
+    /// Returns an empty list if authentication fails.
+    /// </summary>
+    Task<List<FChatCharacter>> TryGetCharactersWithCredentialsAsync(string username, string password);
 }

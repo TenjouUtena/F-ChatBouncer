@@ -174,6 +174,24 @@ public class BouncerHub : Hub
             // 3. Fall back to F-List API with stored credentials (gets ticket and character list)
             var characters = await _fChatService.GetCharactersAsync(userId);
 
+            if (characters.Count == 0)
+            {
+                // No characters retrieved — stored credentials are missing, invalid,
+                // or the account is throttled. Either way, ask the frontend for
+                // (new) credentials so the user can act.
+                var settings = await _userService.GetUserSettingsAsync(userId);
+                bool hadStoredCreds = !string.IsNullOrEmpty(settings?.FChatCredentialsEncrypted);
+
+                _logger.LogInformation(
+                    "Empty character list for user {UserId} (had stored creds: {HadCreds}). Requesting credentials from client.",
+                    userId, hadStoredCreds);
+
+                // If we had stored creds and still got nothing, treat it as a failure
+                // so the frontend prompts for fresh input instead of auto-submitting.
+                await RequestFChatCredentials(characterName: "", lastLoginFailed: hadStoredCreds);
+                return;
+            }
+
             _logger.LogInformation("Returning {Count} characters for user {UserId}", characters.Count, userId);
             await Clients.Caller.SendAsync("ReceiveCharacters", characters.Select(c => new
             {
@@ -456,52 +474,17 @@ public class BouncerHub : Hub
             await _fChatService.SetActiveCharacterAsync(userId, characterName);
             _logger.LogInformation("SetActiveCharacterAsync completed successfully for user {UserId}, character {CharacterName}", userId, characterName);
 
-            // Check if this character already exists in the database (to avoid creating duplicates)
-            var existingConnection = await _fChatService.GetCharacterConnectionAsync(userId, characterName);
             var hasWebSocketConnection = await _fChatService.HasWebSocketConnectionAsync(userId, characterName);
             _logger.LogInformation("HasWebSocketConnectionAsync returned {HasConnection} for character {CharacterName}", hasWebSocketConnection, characterName);
-            
-            // Only create a new WebSocket connection if the character doesn't exist in the database at all
-            if (existingConnection == null && !hasWebSocketConnection)
+
+            if (hasWebSocketConnection)
             {
-                _logger.LogInformation("No WebSocket connection found for character {CharacterName}, creating one", characterName);
-                
-                // Get user credentials and create WebSocket connection
-                var settings = await _userService.GetUserSettingsAsync(userId);
-                if (settings?.FChatCredentialsEncrypted != null)
-                {
-                    // Decrypt F-Chat credentials using AES-256-GCM
-                    try
-                    {
-                        (string username, string password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
-                        
-                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", characterName, username);
-                        await _fChatService.ConnectCharacterAsync(userId, characterName, username, password);
-                        _logger.LogInformation("Successfully created WebSocket connection for {CharacterName}", characterName);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
-                        throw new InvalidOperationException("Failed to decrypt credentials. Please re-enter your F-Chat credentials.");
-                    }
-                }
-                else
-                {
-                    throw new InvalidOperationException("No F-Chat credentials found");
-                }
-            }
-            else if (existingConnection != null && !hasWebSocketConnection)
-            {
-                _logger.LogInformation("Character {CharacterName} exists in database but WebSocket connection is missing, reconnecting", characterName);
-                
-                // Get user credentials and recreate WebSocket connection
-                // Request credentials from client for reconnection
-                _logger.LogInformation("Requesting credentials for character reconnection: {CharacterName}", characterName);
-                await RequestFChatCredentials(characterName);
+                _logger.LogInformation("Character {CharacterName} already has active WebSocket connection", characterName);
             }
             else
             {
-                _logger.LogInformation("Character {CharacterName} already has active WebSocket connection", characterName);
+                // No active WebSocket — try stored server-side credentials, then fall back to requesting from the client
+                await TryConnectWithStoredCredsOrRequestAsync(userId, characterName);
             }
 
             // Notify successful character activation (using the same event as SwitchActiveCharacter for consistency)
@@ -560,52 +543,17 @@ public class BouncerHub : Hub
             await _fChatService.SetActiveCharacterAsync(userId, characterName);
             _logger.LogInformation("SetActiveCharacterAsync completed");
 
-            // Check if this character already exists in the database and has a WebSocket connection
-            var existingConnection = await _fChatService.GetCharacterConnectionAsync(userId, characterName);
             var hasWebSocketConnection = await _fChatService.HasWebSocketConnectionAsync(userId, characterName);
             _logger.LogInformation("HasWebSocketConnectionAsync returned {HasConnection} for character {CharacterName}", hasWebSocketConnection, characterName);
-            
-            // Create or reconnect WebSocket connection if needed
-            if (existingConnection == null && !hasWebSocketConnection)
+
+            if (hasWebSocketConnection)
             {
-                _logger.LogInformation("No WebSocket connection found for character {CharacterName}, creating one", characterName);
-                
-                // Get user credentials and create WebSocket connection
-                var settings = await _userService.GetUserSettingsAsync(userId);
-                if (settings?.FChatCredentialsEncrypted != null)
-                {
-                    // Decrypt F-Chat credentials using AES-256-GCM
-                    try
-                    {
-                        (string username, string password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
-                        
-                        _logger.LogInformation("About to call ConnectCharacterAsync for {CharacterName} with username {Username}", characterName, username);
-                        await _fChatService.ConnectCharacterAsync(userId, characterName, username, password);
-                        _logger.LogInformation("Successfully created WebSocket connection for {CharacterName}", characterName);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed to decrypt F-Chat credentials for user {UserId}. Credentials may be in old format - user will need to re-enter them.", userId);
-                        throw new InvalidOperationException("Failed to decrypt credentials. Please re-enter your F-Chat credentials.");
-                    }
-                }
-                else
-                {
-                    throw new InvalidOperationException("No F-Chat credentials found");
-                }
-            }
-            else if (existingConnection != null && !hasWebSocketConnection)
-            {
-                _logger.LogInformation("Character {CharacterName} exists in database but WebSocket connection is missing, reconnecting", characterName);
-                
-                // Get user credentials and recreate WebSocket connection
-                // Request credentials from client for reconnection
-                _logger.LogInformation("Requesting credentials for character reconnection: {CharacterName}", characterName);
-                await RequestFChatCredentials(characterName);
+                _logger.LogInformation("Character {CharacterName} already has active WebSocket connection", characterName);
             }
             else
             {
-                _logger.LogInformation("Character {CharacterName} already has active WebSocket connection", characterName);
+                // No active WebSocket — try stored server-side credentials, then fall back to requesting from the client
+                await TryConnectWithStoredCredsOrRequestAsync(userId, characterName);
             }
 
             // Send recent messages for the newly active character
@@ -1237,6 +1185,45 @@ public class BouncerHub : Hub
     #region Secure Credential Management
 
     /// <summary>
+    /// Tries to connect a character using server-side stored credentials.
+    /// If no credentials are stored, or the connection fails, falls back
+    /// to requesting fresh credentials from the frontend via SignalR.
+    /// </summary>
+    private async Task TryConnectWithStoredCredsOrRequestAsync(string userId, string characterName)
+    {
+        var settings = await _userService.GetUserSettingsAsync(userId);
+
+        if (settings?.FChatCredentialsEncrypted != null)
+        {
+            try
+            {
+                (string username, string password) = _encryptionService.DecryptCredentials(settings.FChatCredentialsEncrypted);
+
+                _logger.LogInformation("Attempting to connect character {CharacterName} with stored credentials for user {UserId}",
+                    characterName, userId);
+                await _fChatService.ConnectCharacterAsync(userId, characterName, username, password);
+                _logger.LogInformation("Successfully connected character {CharacterName} with stored credentials", characterName);
+                return; // success — nothing more to do
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Stored credentials failed for user {UserId}, character {CharacterName}. Requesting fresh credentials from client.",
+                    userId, characterName);
+
+                // Fall through to RequestFChatCredentials with failure flag
+                await RequestFChatCredentials(characterName, lastLoginFailed: true);
+                return;
+            }
+        }
+
+        // No stored credentials at all — ask the frontend
+        _logger.LogInformation("No stored credentials for user {UserId}. Requesting credentials from client for character {CharacterName}.",
+            userId, characterName);
+        await RequestFChatCredentials(characterName, lastLoginFailed: false);
+    }
+
+    /// <summary>
     /// Requests FChat credentials from the client for a specific character.
     /// When <paramref name="lastLoginFailed"/> is true, the frontend should
     /// prompt for fresh credentials instead of auto-submitting stored ones.
@@ -1346,13 +1333,29 @@ public class BouncerHub : Hub
             _logger.LogInformation("Successfully decoded credentials for user {UserId}, character {CharacterName}", 
                 userId, request.CharacterName);
 
-            // Use credentials to connect to FChat
-            try
+            // If no character name was specified, this request was for account-level
+            // credentials (e.g. to fetch the character list).
+            // IMPORTANT: Verify credentials BEFORE saving them to avoid a loop where
+            // bad creds are saved → GetCharactersAsync finds them → tries API → fails → re-requests.
+            if (string.IsNullOrEmpty(request.CharacterName))
             {
-                await _fChatService.ConnectCharacterAsync(userId, request.CharacterName, credentials.Username, credentials.Password);
-                
-                // Save credentials to UserSettings using proper AES-256-GCM encryption
-                // This ensures credentials are persisted for future connections
+                _logger.LogInformation("Credential request had no character name — verifying credentials for user {UserId}", userId);
+
+                var characters = await _fChatService.TryGetCharactersWithCredentialsAsync(
+                    credentials.Username, credentials.Password);
+
+                if (characters.Count == 0)
+                {
+                    // Credentials are invalid — do NOT save them, do NOT auto-re-request.
+                    // Just tell the frontend the login failed so the user can try again manually.
+                    _logger.LogWarning("Credentials invalid for user {UserId} (username: {Username}). NOT saving. Sending failure to client.",
+                        userId, credentials.Username);
+                    await Clients.Caller.SendAsync("FChatConnectionFailed",
+                        "The credentials were rejected by F-List. Please check your username and password.");
+                    return;
+                }
+
+                // Credentials verified — now save them
                 try
                 {
                     var settings = await _userService.GetUserSettingsAsync(userId) ?? new UserSettings { UserId = userId };
@@ -1361,8 +1364,36 @@ public class BouncerHub : Hub
                 }
                 catch (Exception saveEx)
                 {
-                    _logger.LogError(saveEx, "Failed to save credentials to UserSettings for user {UserId}, but connection succeeded", userId);
+                    _logger.LogError(saveEx, "Failed to save verified credentials for user {UserId}", userId);
                 }
+
+                await Clients.Caller.SendAsync("ReceiveCharacters", characters.Select(c => new
+                {
+                    c.Name,
+                    c.Status,
+                    c.StatusMessage,
+                    c.Gender
+                }).ToArray());
+                await Clients.Caller.SendAsync("FChatConnectionEstablished", "");
+                return;
+            }
+
+            // Character-specific connection: save credentials first, then connect
+            try
+            {
+                var settings = await _userService.GetUserSettingsAsync(userId) ?? new UserSettings { UserId = userId };
+                settings.FChatCredentialsEncrypted = _encryptionService.EncryptCredentials(credentials.Username, credentials.Password);
+                await _userService.UpdateUserSettingsAsync(userId, settings);
+            }
+            catch (Exception saveEx)
+            {
+                _logger.LogError(saveEx, "Failed to save credentials to UserSettings for user {UserId}", userId);
+            }
+
+            // Use credentials to connect a specific character to FChat
+            try
+            {
+                await _fChatService.ConnectCharacterAsync(userId, request.CharacterName, credentials.Username, credentials.Password);
                 
                 await Clients.Caller.SendAsync("FChatConnectionEstablished", request.CharacterName);
                 _logger.LogInformation("FChat connection established for user {UserId}, character {CharacterName}", 

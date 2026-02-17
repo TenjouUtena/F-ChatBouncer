@@ -44,6 +44,20 @@ class MessageIndexedDBService {
 
       request.onsuccess = () => {
         this.db = request.result;
+
+        // Reset our reference when the browser closes the connection
+        // (e.g. version change from another tab, memory pressure, tab lifecycle)
+        this.db.onclose = () => {
+          console.warn('Message IndexedDB connection closed unexpectedly');
+          this.db = null;
+        };
+
+        this.db.onversionchange = () => {
+          console.warn('Message IndexedDB version change detected, closing connection');
+          this.db?.close();
+          this.db = null;
+        };
+
         resolve();
       };
 
@@ -83,6 +97,33 @@ class MessageIndexedDBService {
     await this.initializingPromise;
   }
 
+  private async reconnect(): Promise<void> {
+    this.db = null;
+    await this.ensureInitialized();
+  }
+
+  private async getTransaction(mode: IDBTransactionMode): Promise<IDBTransaction> {
+    await this.ensureInitialized();
+
+    if (!this.db) {
+      throw new Error('Database not initialized');
+    }
+
+    try {
+      return this.db.transaction([this.storeName], mode);
+    } catch (error: any) {
+      if (error?.name === 'InvalidStateError') {
+        console.warn('Message IndexedDB connection stale, reconnecting...');
+        await this.reconnect();
+        if (!this.db) {
+          throw new Error('Database reconnection failed');
+        }
+        return this.db.transaction([this.storeName], mode);
+      }
+      throw error;
+    }
+  }
+
   private generateKey(characterName: string, channelId: string, messageId: string): string {
     const encodedCharacter = encodeURIComponent(characterName);
     const encodedChannel = encodeURIComponent(channelId);
@@ -91,33 +132,25 @@ class MessageIndexedDBService {
   }
 
   async storeMessage(characterName: string, channelId: string, message: any): Promise<void> {
-    await this.ensureInitialized();
-    
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
+
+    const messageId = message.id || `${Date.now()}-${Math.random()}`;
+    const key = this.generateKey(characterName, channelId, messageId);
+    const data: MessageStorageData & { key: string } = {
+      key,
+      messageId,
+      characterName,
+      channelId,
+      message,
+      timestamp: Date.now(),
+      type: 'MESSAGE'
+    };
+
     return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
-
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
-      
-      const messageId = message.id || `${Date.now()}-${Math.random()}`;
-      const key = this.generateKey(characterName, channelId, messageId);
-      const data: MessageStorageData & { key: string } = {
-        key,
-        messageId,
-        characterName,
-        channelId,
-        message,
-        timestamp: Date.now(),
-        type: 'MESSAGE'
-      };
-
       const request = store.put(data);
 
       request.onsuccess = () => {
-        //console.log(`Stored message for ${characterName} in ${channelId}`);
         resolve();
       };
 
@@ -129,16 +162,10 @@ class MessageIndexedDBService {
   }
 
   async getMessages(characterName: string, channelId?: string, limit?: number): Promise<any[]> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       
       let request: IDBRequest;
       
@@ -187,16 +214,10 @@ class MessageIndexedDBService {
   }
 
   async getRecentMessagesForChannel(characterName: string, channelId: string, limit: number = 100): Promise<any[]> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const index = store.index('characterName');
       const range = IDBKeyRange.only(characterName);
       const request = index.getAll(range);
@@ -260,16 +281,10 @@ class MessageIndexedDBService {
   }
 
   async deleteMessages(characterName: string, channelId?: string): Promise<number> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const index = store.index('characterName');
       const range = IDBKeyRange.only(characterName);
       const request = index.getAll(range);
@@ -313,16 +328,10 @@ class MessageIndexedDBService {
   }
 
   async clearAllMessages(): Promise<void> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.clear();
 
       request.onsuccess = () => {
@@ -338,16 +347,10 @@ class MessageIndexedDBService {
   }
 
   async getStorageInfo(): Promise<{ count: number; estimatedSize: number }> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.getAll();
 
       request.onsuccess = () => {
@@ -373,16 +376,10 @@ class MessageIndexedDBService {
     // maxAge in milliseconds, default 7 days
     const cutoffTime = Date.now() - maxAge;
     
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.getAll();
 
       request.onsuccess = () => {
@@ -431,16 +428,10 @@ class MessageIndexedDBService {
       }>;
     }>;
   }> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readonly');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readonly');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.getAll();
 
       request.onsuccess = () => {
@@ -541,16 +532,10 @@ class MessageIndexedDBService {
       duplicatesRemoved: number;
     }>;
   }> {
-    await this.ensureInitialized();
-    
-    return new Promise((resolve, reject) => {
-      if (!this.db) {
-        reject(new Error('Database not initialized'));
-        return;
-      }
+    const transaction = await this.getTransaction('readwrite');
+    const store = transaction.objectStore(this.storeName);
 
-      const transaction = this.db.transaction([this.storeName], 'readwrite');
-      const store = transaction.objectStore(this.storeName);
+    return new Promise((resolve, reject) => {
       const request = store.getAll();
 
       request.onsuccess = () => {

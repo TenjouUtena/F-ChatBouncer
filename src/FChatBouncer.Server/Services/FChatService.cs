@@ -227,7 +227,19 @@ public class FChatService : IFChatService
             return characters;
         }
 
-        // If no database connections either, try to get characters from F-List API using stored credentials
+        // If no database connections either, check if we even have stored credentials before hitting the API
+        {
+            using var credScope = _serviceProvider.CreateScope();
+            var credUserService = credScope.ServiceProvider.GetRequiredService<IUserService>();
+            var credSettings = await credUserService.GetUserSettingsAsync(userId);
+            if (string.IsNullOrEmpty(credSettings?.FChatCredentialsEncrypted))
+            {
+                _logger.LogWarning("No stored F-Chat credentials for user {UserId}. Returning empty character list so the hub can request credentials from the client.", userId);
+                return new List<FChatCharacter>();
+            }
+        }
+
+        // Try to get characters from F-List API using stored credentials
         _logger.LogWarning("No character connections found in database for user {UserId}. Attempting to get characters from F-List API...", userId);
         
         try
@@ -244,39 +256,10 @@ public class FChatService : IFChatService
             _logger.LogWarning(ex, "Failed to get characters from F-List API for user {UserId}", userId);
         }
 
-        // Fallback: try to refresh connection
-        _logger.LogWarning("F-List API failed, attempting to refresh connection for user {UserId}...", userId);
-        await RefreshUserConnectionAsync(userId);
-        
-        // Try one more time after refresh
-        if (_connections.TryGetValue(userId, out var refreshedConnections))
-        {
-            foreach (var kvp in refreshedConnections)
-            {
-                var characterName = kvp.Key;
-                var client = kvp.Value;
-                if (client.IsConnected)
-                {
-                    try
-                    {
-                        var characters = await client.GetCharactersAsync();
-                        if (characters.Count > 0)
-                        {
-                            _logger.LogInformation("Successfully retrieved {Count} characters after refresh from character {CharacterName} of user {UserId}", 
-                                characters.Count, characterName, userId);
-                            return characters;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to get characters after refresh from character {CharacterName} of user {UserId}", characterName, userId);
-                    }
-                }
-            }
-        }
-        
-        // If still no characters, return empty list
-        _logger.LogError("No characters found for user {UserId} even after refresh attempt", userId);
+        // API call failed or returned empty — credentials may have been cleared.
+        // Do NOT retry via RefreshUserConnectionAsync; the hub layer will request
+        // fresh credentials from the frontend instead.
+        _logger.LogWarning("No characters found for user {UserId} from any source. The hub should request credentials from the frontend.", userId);
         return new List<FChatCharacter>();
     }
 
@@ -386,6 +369,37 @@ public class FChatService : IFChatService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to clear stored F-Chat credentials for user {UserId}", userId);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<List<FChatCharacter>> TryGetCharactersWithCredentialsAsync(string username, string password)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
+            var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
+            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager);
+
+            var connected = await tempClient.ConnectAsync(username, password);
+            if (!connected)
+            {
+                var authError = tempClient.GetLastAuthenticationError();
+                _logger.LogWarning("TryGetCharactersWithCredentialsAsync: F-List rejected credentials for {Username}: {Error}",
+                    username, authError ?? "unknown error");
+                return new List<FChatCharacter>();
+            }
+
+            var characters = await tempClient.GetCharactersAsync();
+            _logger.LogInformation("TryGetCharactersWithCredentialsAsync: retrieved {Count} characters for {Username}",
+                characters.Count, username);
+            return characters;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "TryGetCharactersWithCredentialsAsync: unexpected error for {Username}", username);
+            return new List<FChatCharacter>();
         }
     }
 
