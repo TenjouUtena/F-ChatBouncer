@@ -44,7 +44,7 @@ public class UserService : IUserService
         
         if (existing != null)
         {
-            _context.UserSettings.Update(existing);
+            // existing is already tracked from the query; only update properties
             existing.RetentionDays = settings.RetentionDays;
             existing.AutoPurgeEnabled = settings.AutoPurgeEnabled;
             existing.FChatCredentialsEncrypted = settings.FChatCredentialsEncrypted;

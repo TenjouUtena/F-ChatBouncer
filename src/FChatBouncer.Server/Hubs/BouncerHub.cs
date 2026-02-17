@@ -1237,9 +1237,11 @@ public class BouncerHub : Hub
     #region Secure Credential Management
 
     /// <summary>
-    /// Requests FChat credentials from the client for a specific character
+    /// Requests FChat credentials from the client for a specific character.
+    /// When <paramref name="lastLoginFailed"/> is true, the frontend should
+    /// prompt for fresh credentials instead of auto-submitting stored ones.
     /// </summary>
-    public async Task RequestFChatCredentials(string characterName)
+    public async Task RequestFChatCredentials(string characterName, bool lastLoginFailed = false)
     {
         var userId = Context.UserIdentifier;
         if (userId == null)
@@ -1248,7 +1250,8 @@ public class BouncerHub : Hub
             return;
         }
 
-        _logger.LogInformation("Requesting FChat credentials for user {UserId}, character {CharacterName}", userId, characterName);
+        _logger.LogInformation("Requesting FChat credentials for user {UserId}, character {CharacterName}, lastLoginFailed: {LastLoginFailed}",
+            userId, characterName, lastLoginFailed);
 
         var requestId = Guid.NewGuid().ToString();
         var request = new CredentialRequest
@@ -1257,7 +1260,8 @@ public class BouncerHub : Hub
             UserId = userId,
             CharacterName = characterName,
             RequestedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddMinutes(5) // 5 minute timeout
+            ExpiresAt = DateTime.UtcNow.AddMinutes(5), // 5 minute timeout
+            LastLoginFailed = lastLoginFailed
         };
 
         _pendingCredentialRequests[requestId] = request;
@@ -1268,8 +1272,11 @@ public class BouncerHub : Hub
             {
                 RequestId = requestId,
                 CharacterName = characterName,
-                Message = "Please provide your FChat credentials to connect",
-                ExpiresAt = request.ExpiresAt
+                Message = lastLoginFailed
+                    ? "The previous login attempt failed. Please re-enter your FChat credentials."
+                    : "Please provide your FChat credentials to connect",
+                ExpiresAt = request.ExpiresAt,
+                LastLoginFailed = lastLoginFailed
             });
         }
         catch (Exception ex)
@@ -1363,9 +1370,12 @@ public class BouncerHub : Hub
             }
             catch (Exception connectEx)
             {
-                await Clients.Caller.SendAsync("FChatConnectionFailed", "Failed to connect to FChat");
-                _logger.LogWarning(connectEx, "FChat connection failed for user {UserId}, character {CharacterName}", 
+                _logger.LogWarning(connectEx, "FChat connection failed for user {UserId}, character {CharacterName}. Re-requesting credentials.",
                     userId, request.CharacterName);
+                await Clients.Caller.SendAsync("FChatConnectionFailed", "Failed to connect to FChat");
+                // Re-request credentials with the failure flag so the frontend
+                // prompts the user instead of auto-submitting the same bad creds.
+                await RequestFChatCredentials(request.CharacterName, lastLoginFailed: true);
             }
         }
         catch (Exception ex)

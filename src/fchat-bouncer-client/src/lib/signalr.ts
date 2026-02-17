@@ -448,8 +448,15 @@ this.onSearchResultsReceived = callback;
     });
 
     // Secure credential request handlers
-    this.connection.on('RequestFChatCredentials', async (request: { requestId: string; characterName: string; message: string; expiresAt: string }) => {
+    this.connection.on('RequestFChatCredentials', async (request: { requestId: string; characterName: string; message: string; expiresAt: string; lastLoginFailed?: boolean }) => {
       try {
+        // If the last login failed, skip stored credentials and prompt the user
+        if (request.lastLoginFailed) {
+          console.log('Previous login failed — prompting for fresh credentials');
+          this.showCredentialDialog(request);
+          return;
+        }
+
         // Import credentials store
         const { useCredentialsStore } = await import('@/stores/credentialsStore');
         const credentialsStore = useCredentialsStore.getState();
@@ -1050,10 +1057,10 @@ this.onSearchResultsReceived = callback;
   }
 
   // Credential dialog management
-  private currentCredentialRequest: { requestId: string; characterName: string; message: string; expiresAt: string } | null = null;
+  private currentCredentialRequest: { requestId: string; characterName: string; message: string; expiresAt: string; lastLoginFailed?: boolean } | null = null;
   private credentialDialogCallback?: (credentials: { username: string; password: string }) => void;
 
-  private showCredentialDialog(request: { requestId: string; characterName: string; message: string; expiresAt: string }): void {
+  private showCredentialDialog(request: { requestId: string; characterName: string; message: string; expiresAt: string; lastLoginFailed?: boolean }): void {
     this.currentCredentialRequest = request;
     
     // Emit event for UI to show credential dialog
@@ -1063,6 +1070,7 @@ this.onSearchResultsReceived = callback;
         characterName: request.characterName,
         message: request.message,
         expiresAt: request.expiresAt,
+        lastLoginFailed: request.lastLoginFailed ?? false,
         onSubmit: (credentials: { username: string; password: string }) => {
           this.handleCredentialSubmission(credentials);
         },

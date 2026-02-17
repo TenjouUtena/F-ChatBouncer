@@ -9,6 +9,7 @@ interface FChatCredentialDialogProps {
   characterName: string;
   message: string;
   expiresAt?: string;
+  lastLoginFailed?: boolean;
   onSubmit: (credentials: { username: string; password: string }) => void;
   onCancel: () => void;
 }
@@ -19,6 +20,7 @@ export default function FChatCredentialDialog({
   characterName,
   message,
   expiresAt,
+  lastLoginFailed = false,
   onSubmit,
   onCancel
 }: FChatCredentialDialogProps) {
@@ -84,6 +86,14 @@ export default function FChatCredentialDialog({
       <div className="white rounded-lg p-6 w-full max-w-md mx-4">
         <h2 className="text-xl font-bold mb-4">FChat Credentials Required</h2>
         
+        {lastLoginFailed && (
+          <div className="bg-red-50 border border-red-300 rounded-md p-3 mb-4">
+            <p className="text-red-700 text-sm font-medium">
+              The previous login attempt failed. Please check your credentials and try again.
+            </p>
+          </div>
+        )}
+
         <p className="text-gray-600 mb-4">
           {message || `Please provide your FChat credentials to connect as ${characterName}.`}
         </p>

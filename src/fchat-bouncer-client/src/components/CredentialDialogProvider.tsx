@@ -8,6 +8,7 @@ interface CredentialRequest {
   characterName: string;
   message: string;
   expiresAt: string;
+  lastLoginFailed: boolean;
   onSubmit: (credentials: { username: string; password: string }) => void;
   onCancel: () => void;
 }
@@ -17,13 +18,14 @@ export default function CredentialDialogProvider({ children }: { children: React
 
   useEffect(() => {
     const handleShowCredentialDialog = (event: CustomEvent) => {
-      const { requestId, characterName, message, expiresAt, onSubmit, onCancel } = event.detail;
+      const { requestId, characterName, message, expiresAt, lastLoginFailed, onSubmit, onCancel } = event.detail;
       
       setCredentialRequest({
         requestId,
         characterName,
         message,
         expiresAt,
+        lastLoginFailed: lastLoginFailed ?? false,
         onSubmit: (credentials) => {
           onSubmit(credentials);
           setCredentialRequest(null);
@@ -58,6 +60,7 @@ export default function CredentialDialogProvider({ children }: { children: React
         characterName={credentialRequest?.characterName || ''}
         message={credentialRequest?.message || ''}
         expiresAt={credentialRequest?.expiresAt || ''}
+        lastLoginFailed={credentialRequest?.lastLoginFailed ?? false}
         onSubmit={credentialRequest?.onSubmit || (() => {})}
         onCancel={credentialRequest?.onCancel || (() => {})}
       />

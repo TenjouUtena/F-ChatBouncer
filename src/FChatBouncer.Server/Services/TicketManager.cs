@@ -169,4 +169,9 @@ public class CredentialRequest
     public string CharacterName { get; set; } = string.Empty;
     public DateTime RequestedAt { get; set; }
     public DateTime ExpiresAt { get; set; }
+    /// <summary>
+    /// Indicates whether the previous login attempt failed, so the frontend
+    /// should prompt for fresh credentials instead of auto-submitting stored ones.
+    /// </summary>
+    public bool LastLoginFailed { get; set; }
 }

@@ -284,12 +284,10 @@ public class FChatService : IFChatService
     {
         try
         {
-            // Get user settings to retrieve F-Chat credentials
-            var settings = await ExecuteWithDbContext(async dbContext =>
-            {
-                return await dbContext.UserSettings
-                    .FirstOrDefaultAsync(us => us.UserId == userId);
-            });
+            // Get user settings via IUserService (same as hub uses when saving credentials)
+            using var scope = _serviceProvider.CreateScope();
+            var userService = scope.ServiceProvider.GetRequiredService<IUserService>();
+            var settings = await userService.GetUserSettingsAsync(userId);
 
             if (settings?.FChatCredentialsEncrypted == null)
             {
@@ -331,6 +329,12 @@ public class FChatService : IFChatService
             
             if (!success)
             {
+                var authError = tempClient.GetLastAuthenticationError();
+                if (!string.IsNullOrEmpty(authError) && IsFListLoginFailure(authError))
+                {
+                    _logger.LogWarning("F-List rejected credentials for user {UserId}. Clearing stored credentials so user can re-enter.", userId);
+                    await ClearStoredFChatCredentialsAsync(userId, userService);
+                }
                 _logger.LogError("Failed to connect to F-List API for user {UserId}", userId);
                 return new List<FChatCharacter>();
             }
@@ -347,6 +351,41 @@ public class FChatService : IFChatService
         {
             _logger.LogError(ex, "Error getting characters from F-List API for user {UserId}", userId);
             return new List<FChatCharacter>();
+        }
+    }
+
+    private static bool IsFListLoginFailure(string authError)
+    {
+        if (string.IsNullOrWhiteSpace(authError)) return false;
+        var t = authError.Trim();
+        return t.Contains("Login Failed", StringComparison.OrdinalIgnoreCase) ||
+               t.Contains("invalid password", StringComparison.OrdinalIgnoreCase) ||
+               t.Contains("invalid credentials", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task ClearStoredFChatCredentialsAsync(string userId, IUserService userService)
+    {
+        try
+        {
+            var settings = await userService.GetUserSettingsAsync(userId);
+            if (settings != null)
+            {
+                settings.FChatCredentialsEncrypted = null;
+                await userService.UpdateUserSettingsAsync(userId, settings);
+            }
+            await ExecuteWithDbContext(async dbContext =>
+            {
+                var user = await dbContext.Users.FindAsync(userId);
+                if (user != null)
+                {
+                    user.HasFChatCredentials = false;
+                    await dbContext.SaveChangesAsync();
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to clear stored F-Chat credentials for user {UserId}", userId);
         }
     }
 

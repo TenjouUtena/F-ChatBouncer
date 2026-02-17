@@ -116,6 +116,7 @@ public class FChatWebSocketClient : IDisposable
     private string? _username;
     private string? _password;
     private string? _ticket;
+    private string? _lastAuthError;
 
     public void SetCredentials(string username, string password)
     {
@@ -132,6 +133,12 @@ public class FChatWebSocketClient : IDisposable
     {
         return _username;
     }
+
+    /// <summary>
+    /// Error message from the last getApiTicket call when F-List returned an "error" field (e.g. "Login Failed...").
+    /// Used to detect rejected credentials so stored credentials can be cleared.
+    /// </summary>
+    public string? GetLastAuthenticationError() => _lastAuthError;
 
     private async Task<bool> AuthenticateWithCharacterAsync(string characterName, string ticket)
     {
@@ -165,6 +172,7 @@ public class FChatWebSocketClient : IDisposable
 
     private async Task<string?> GetAuthTicketAsync(string username, string password)
     {
+        _lastAuthError = null;
         try
         {
             _logger.LogDebug("Requesting authentication ticket from F-List API");
@@ -198,29 +206,33 @@ public class FChatWebSocketClient : IDisposable
             if (authResponse.TryGetProperty("error", out var errorElement))
             {
                 var errorMessage = errorElement.GetString();
-                if (errorMessage != "")
+                if (!string.IsNullOrEmpty(errorMessage))
                 {
+                    _lastAuthError = errorMessage;
                     _logger.LogError("F-List authentication failed for user {Username}: {Error}", username, errorMessage);
                     return null;
                 }
             }
 
+            _lastAuthError = null;
             if (authResponse.TryGetProperty("ticket", out var ticketElement))
             {
                 var ticket = ticketElement.GetString();
                 _logger.LogInformation("Authentication ticket retrieved successfully for user: {Username}", username);
 
-                // Extract characters from the same response
+                // Extract characters from the same response (support array of strings or array of objects with "name")
                 var characters = new List<FChatCharacter>();
                 if (authResponse.TryGetProperty("characters", out var charactersElement))
                 {
                     foreach (var charElement in charactersElement.EnumerateArray())
                     {
-                        var name = charElement.GetString();
-                        if (name == null)
+                        var name = charElement.ValueKind == JsonValueKind.String
+                            ? charElement.GetString()
+                            : charElement.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+                        if (string.IsNullOrEmpty(name))
                         {
-                            _logger.LogError("Got a bad name, aborting");
-                            return null;
+                            _logger.LogWarning("Skipping character element with missing name in ticket response");
+                            continue;
                         }
                         characters.Add(new FChatCharacter
                         {
@@ -233,10 +245,23 @@ public class FChatWebSocketClient : IDisposable
                         characters.Count, username);
                 }
 
+                // If ticket response had no characters (or wrong format), fetch from character-list.php
+                if (_availableCharacters.Count == 0 && !string.IsNullOrEmpty(ticket))
+                {
+                    var listCharacters = await FetchCharacterListFromApiAsync(username, ticket);
+                    if (listCharacters.Count > 0)
+                    {
+                        _availableCharacters = listCharacters;
+                        _logger.LogInformation("Fetched {CharacterCount} characters from character-list.php for user: {Username}",
+                            listCharacters.Count, username);
+                    }
+                }
+
                 // Extract friends list from the same response
                 if (authResponse.TryGetProperty("friends", out var friendsElement))
                 {
                     var friends = new List<string>();
+                    var characterNames = _availableCharacters.Select(c => c.Name).ToList();
                     foreach (var friendElement in friendsElement.EnumerateArray())
                     {
                         // The friends data structure has dest_name (character) and source_name (friend)
@@ -251,7 +276,6 @@ public class FChatWebSocketClient : IDisposable
                             if (!string.IsNullOrEmpty(destName) && !string.IsNullOrEmpty(sourceName))
                             {
                                 // Check if this friend belongs to any of our characters
-                                var characterNames = characters.Select(c => c.Name).ToList();
                                 if (characterNames.Contains(destName))
                                 {
                                     friends.Add(sourceName);
@@ -311,6 +335,58 @@ public class FChatWebSocketClient : IDisposable
         {
             _logger.LogError(ex, "Unexpected error while getting authentication ticket for user: {Username}", username);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Fetches character list from F-List character-list.php when ticket response does not include characters.
+    /// </summary>
+    private async Task<List<FChatCharacter>> FetchCharacterListFromApiAsync(string username, string ticket)
+    {
+        try
+        {
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(15);
+            var formData = new FormUrlEncodedContent(new[]
+            {
+                new KeyValuePair<string, string>("account", username),
+                new KeyValuePair<string, string>("ticket", ticket)
+            });
+            var response = await httpClient.PostAsync("https://www.f-list.net/json/api/character-list.php", formData);
+            var content = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("character-list.php returned {StatusCode} for user {Username}", response.StatusCode, username);
+                return new List<FChatCharacter>();
+            }
+
+            var root = JsonSerializer.Deserialize<JsonElement>(content);
+            var characters = new List<FChatCharacter>();
+            // Response can be array of strings or object with "characters" array
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in root.EnumerateArray())
+                {
+                    var name = el.GetString();
+                    if (!string.IsNullOrEmpty(name))
+                        characters.Add(new FChatCharacter { Name = name });
+                }
+            }
+            else if (root.TryGetProperty("characters", out var arr))
+            {
+                foreach (var el in arr.EnumerateArray())
+                {
+                    var name = el.ValueKind == JsonValueKind.String ? el.GetString() : el.TryGetProperty("name", out var n) ? n.GetString() : null;
+                    if (!string.IsNullOrEmpty(name))
+                        characters.Add(new FChatCharacter { Name = name });
+                }
+            }
+            return characters;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch character list from API for user {Username}", username);
+            return new List<FChatCharacter>();
         }
     }
 
