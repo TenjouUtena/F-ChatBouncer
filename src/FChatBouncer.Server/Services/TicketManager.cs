@@ -15,8 +15,10 @@ public class TicketManager
     public TicketManager(ILogger<TicketManager> logger, IConfiguration configuration)
     {
         _logger = logger;
-        _encryptionKey = configuration["CREDENTIAL_ENCRYPTION_KEY"] ?? 
-                        throw new InvalidOperationException("CREDENTIAL_ENCRYPTION_KEY not configured");
+        _encryptionKey = configuration["CREDENTIAL_ENCRYPTION_KEY"]
+            ?? Environment.GetEnvironmentVariable("CREDENTIAL_ENCRYPTION_KEY")
+            ?? throw new InvalidOperationException(
+                "CREDENTIAL_ENCRYPTION_KEY not configured. Set the environment variable or add it to configuration.");
     }
 
     /// <summary>

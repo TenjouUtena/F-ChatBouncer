@@ -175,12 +175,13 @@ var googleClientId = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_ID");
 var googleClientSecret = Environment.GetEnvironmentVariable("GOOGLE_CLIENT_SECRET");
 var requireHttps = securitySettings.GetValue<bool>("RequireHttps");
 
-if (string.IsNullOrEmpty(googleClientId) || string.IsNullOrEmpty(googleClientSecret))
+var hasGoogleOAuth = !string.IsNullOrEmpty(googleClientId) && !string.IsNullOrEmpty(googleClientSecret);
+if (!hasGoogleOAuth)
 {
     // Google OAuth credentials not set - Google login will not work
 }
 
-builder.Services.AddAuthentication(options =>
+var authBuilder = builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -214,11 +215,14 @@ builder.Services.AddAuthentication(options =>
             return Task.CompletedTask;
         }
     };
-})
-.AddGoogle(options =>
+});
+
+if (hasGoogleOAuth)
 {
-    options.ClientId = googleClientId ?? "";
-    options.ClientSecret = googleClientSecret ?? "";
+    authBuilder.AddGoogle(options =>
+    {
+        options.ClientId = googleClientId!;
+        options.ClientSecret = googleClientSecret!;
     options.CallbackPath = "/api/auth/google-callback";
     options.SaveTokens = true;
     
@@ -297,7 +301,8 @@ builder.Services.AddAuthentication(options =>
         context.HandleResponse();
         await Task.CompletedTask;
     };
-});
+    });
+}
 
 // Data Protection for OAuth state
 builder.Services.AddDataProtection();
