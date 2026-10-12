@@ -1,10 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { ChatState, Message, ConnectionStatus, Channel, ProfileData, TypingState, LightweightCharacterData } from '@/types';
+import { ChatState, Message, ConnectionStatus, Channel, ProfileData, TypingState } from '@/types';
 import { generateMessageId } from '@/lib/messages/messageUtils';
 import { api, setTokenRefreshCallback } from '@/lib/api';
 import { useAuthStore } from './authStore';
-import { useLightweightCharacterStore } from './lightweightCharacterStore';
+import { useCharacterStore } from './characterStore';
 import { signalRService } from '@/lib/signalr';
 import { useProfileStore } from './profileStore';
 import { messageIndexedDBService } from '@/lib/messageIndexedDB';
@@ -77,7 +77,7 @@ interface ChatStore extends ChatState {
   handleIndexedDBFailure: (error?: unknown) => void;
   
   // Profile management (global) - now delegated to profileStore
-  addProfile: (characterName: string, profileData: ProfileData) => Promise<void>;
+  addProfile: (characterName: string, profileData: ProfileData, fetchedAt?: string | null, isStale?: boolean) => Promise<void>;
   getProfile: (characterName: string) => Promise<ProfileData | null>;
   getCharacterGender: (characterName: string) => Promise<string | null>;
   getCharacterSpecies: (characterName: string) => Promise<string | null>;
@@ -246,7 +246,7 @@ function queueCharacterInfoLookup(name: string): void {
     pendingCharacterInfo.clear();
     try {
       const infos = await signalRService.getCharacterInfo(names);
-      await useLightweightCharacterStore.getState().upsertMany(infos);
+      await useCharacterStore.getState().upsertMany(infos);
     } catch (error) {
       console.debug('Character info lookup failed:', error);
     }
@@ -456,7 +456,7 @@ export const useChatStore = create<ChatStore>()(
           }
 
           // Look up gender/status for senders we have never seen (never a full profile)
-          if (messageWithId.sender && !useLightweightCharacterStore.getState().hasCharacter(messageWithId.sender)) {
+          if (messageWithId.sender && !useCharacterStore.getState().has(messageWithId.sender)) {
             queueCharacterInfoLookup(messageWithId.sender);
           }
 
@@ -784,15 +784,8 @@ export const useChatStore = create<ChatStore>()(
       },
 
       // Profile management (global - shared across characters) - now delegated to profileStore
-      addProfile: async (characterName: string, profileData: ProfileData) => {
-        // Always store lightweight data (gender + species)
-        const lightweightStore = useLightweightCharacterStore.getState();
-        const species = profileData.info?.species || profileData.info?.Species || 'Unknown';
-        lightweightStore.addCharacter(characterName, profileData.gender, species);
-        
-        // Store in IndexedDB via profileStore
-        const profileStore = useProfileStore.getState();
-        await profileStore.addProfile(characterName, profileData);
+      addProfile: async (characterName: string, profileData: ProfileData, fetchedAt?: string | null, isStale?: boolean) => {
+        await useProfileStore.getState().addProfile(characterName, profileData, fetchedAt, isStale);
         
         get().markCharacterKnown(characterName);
       },
@@ -804,13 +797,13 @@ export const useChatStore = create<ChatStore>()(
 
       getCharacterGender: async (characterName: string) => {
         // Character store first; fall back to a cached profile, never request one
-        const lightweightData = useLightweightCharacterStore.getState().getCharacter(characterName);
-        if (lightweightData?.gender && lightweightData.gender !== 'None') {
-          return lightweightData.gender;
+        const character = useCharacterStore.getState().get(characterName);
+        if (character?.gender && character.gender !== 'None') {
+          return character.gender;
         }
 
         const fullProfile = await useProfileStore.getState().getProfile(characterName);
-        return fullProfile?.gender || lightweightData?.gender || null;
+        return fullProfile?.gender || character?.gender || null;
       },
 
       getCharacterSpecies: async (characterName: string) => {
@@ -819,19 +812,12 @@ export const useChatStore = create<ChatStore>()(
         if (fullProfile) {
           return fullProfile.info?.species || fullProfile.info?.Species || 'Unknown';
         }
-
-        const lightweightData = useLightweightCharacterStore.getState().getCharacter(characterName);
-        return lightweightData?.species || null;
+        return null;
       },
 
       hasCharacterData: async (characterName: string) => {
-        // Check both full profile and lightweight storage
-        const profileStore = useProfileStore.getState();
-        const hasFullProfile = await profileStore.hasProfile(characterName);
-        if (hasFullProfile) return true;
-        
-        const lightweightStore = useLightweightCharacterStore.getState();
-        return lightweightStore.hasCharacter(characterName);
+        if (useCharacterStore.getState().has(characterName)) return true;
+        return await useProfileStore.getState().hasProfile(characterName);
       },
 
       markCharacterKnown: (characterName: string) => {
@@ -846,29 +832,25 @@ export const useChatStore = create<ChatStore>()(
 
       requestProfileForCharacter: async (characterName: string) => {
         const profileStore = useProfileStore.getState();
-        
-        // Only skip if a request is already in-flight
         if (profileStore.getProfileRequestStatus(characterName) === 'requesting') {
-          return;
-        }
-        
-        // Also skip if we have a fresh profile already
-        const hasProfile = await profileStore.hasProfile(characterName);
-        if (hasProfile && !profileStore.isProfileStale(characterName)) {
           return;
         }
 
         profileStore.setProfileRequestStatus(characterName, 'requesting');
 
         try {
-          const profileResponse = await api.getProfile(useAuthStore.getState().token!, characterName);
-          
-          if (profileResponse.profileData) {
-            await get().addProfile(characterName, profileResponse.profileData);
-          } else if (profileResponse.isStale) {
-            // The server is fetching it; ProfileAvailable will deliver it
+          // The server returns its cached copy and queues a fetch when missing or stale
+          const response = await api.getProfile(useAuthStore.getState().token!, characterName);
+
+          if (response.profileData) {
+            await get().addProfile(characterName, response.profileData, response.fetchedAt, response.isStale);
+          }
+
+          if (response.isStale) {
+            // A fresh copy is on its way via ProfileAvailable
+            profileStore.setProfileRequestStatus(characterName, 'requesting');
             expireProfileRequest(characterName);
-          } else {
+          } else if (!response.profileData) {
             profileStore.setProfileRequestStatus(characterName, 'idle');
           }
         } catch (error) {
@@ -1587,12 +1569,6 @@ export const useChatStore = create<ChatStore>()(
               Object.entries(state.characterUnknownChannels).map(([key, value]) => [key, new Set(value)])
             );
           }
-          // Initialize profile store after rehydration
-          const profileStore = useProfileStore.getState();
-          profileStore.initialize().catch(error => {
-            console.debug('Failed to initialize profile store after rehydration:', error);
-          });
-
           // Load messages from IndexedDB after rehydration
           setTimeout(() => {
             const chatStore = useChatStore.getState();

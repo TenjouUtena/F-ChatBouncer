@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { characterIndexedDBService, CharacterConnectionData } from '@/lib/characterIndexedDB';
+import { db, ConnectionRecord } from '@/lib/db';
 
 export interface CharacterConnection {
   characterName: string;
@@ -11,7 +11,7 @@ export interface CharacterConnection {
   fchatUsername?: string;
 }
 
-interface CharacterIndexedDBStore {
+interface ConnectionStore {
   // In-memory cache for quick access
   connections: CharacterConnection[];
   activeCharacter: string | null;
@@ -31,10 +31,19 @@ interface CharacterIndexedDBStore {
   isCharacterConnected: (characterName: string) => boolean;
   getConnectedCharacters: () => CharacterConnection[];
   clearAllConnections: () => Promise<void>;
-  getStorageInfo: () => Promise<{ connections: number; lightweight: number; estimatedSize: number }>;
 }
 
-export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, get) => ({
+function toRecord(connection: CharacterConnection): ConnectionRecord {
+  const { characterName, ...rest } = connection;
+  return { name: characterName, ...rest };
+}
+
+function fromRecord(record: ConnectionRecord): CharacterConnection {
+  const { name, ...rest } = record;
+  return { characterName: name, ...rest };
+}
+
+export const useConnectionStore = create<ConnectionStore>((set, get) => ({
   // Initial state
   connections: [],
   activeCharacter: null,
@@ -42,23 +51,11 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
 
   initialize: async () => {
     try {
-      await characterIndexedDBService.initialize();
-      console.log('Character IndexedDB store initialized');
-      
-      // Load existing connections
-      const connections = await characterIndexedDBService.getAllConnections();
+      const connections = (await db.getAll('connections')).map(fromRecord);
       const activeConnection = connections.find(conn => conn.isActive);
-      
+
       set({
-        connections: connections.map(conn => ({
-          characterName: conn.characterName,
-          isConnected: conn.isConnected,
-          isActive: conn.isActive,
-          status: conn.status,
-          lastActivity: conn.lastActivity,
-          connectedAt: conn.connectedAt,
-          fchatUsername: conn.fchatUsername
-        })),
+        connections,
         activeCharacter: activeConnection?.characterName || null,
         connectionStatus: connections.reduce((acc, conn) => {
           acc[conn.characterName] = conn.status;
@@ -66,7 +63,7 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
         }, {} as Record<string, 'connecting' | 'connected' | 'disconnected' | 'error'>)
       });
     } catch (error) {
-      console.error('Failed to initialize character IndexedDB store:', error);
+      console.error('Failed to initialize connection store:', error);
       throw error;
     }
   },
@@ -74,15 +71,7 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
   addConnection: async (connection: CharacterConnection) => {
     try {
       // Store in IndexedDB
-      await characterIndexedDBService.storeConnection({
-        characterName: connection.characterName,
-        isConnected: connection.isConnected,
-        isActive: connection.isActive,
-        status: connection.status,
-        lastActivity: connection.lastActivity,
-        connectedAt: connection.connectedAt,
-        fchatUsername: connection.fchatUsername
-      });
+      await db.put('connections', toRecord(connection));
       
       // Update in-memory cache
       set((state) => ({
@@ -103,7 +92,7 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
   removeConnection: async (characterName: string) => {
     try {
       // Remove from IndexedDB
-      await characterIndexedDBService.deleteConnection(characterName);
+      await db.delete('connections', characterName);
       
       // Update in-memory cache
       set((state) => {
@@ -141,15 +130,7 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
       const updatedConnection = { ...currentConnection, ...updates };
       
       // Update in IndexedDB
-      await characterIndexedDBService.storeConnection({
-        characterName: updatedConnection.characterName,
-        isConnected: updatedConnection.isConnected,
-        isActive: updatedConnection.isActive,
-        status: updatedConnection.status,
-        lastActivity: updatedConnection.lastActivity,
-        connectedAt: updatedConnection.connectedAt,
-        fchatUsername: updatedConnection.fchatUsername
-      });
+      await db.put('connections', toRecord(updatedConnection));
       
       // Update in-memory cache
       set((state) => ({
@@ -173,7 +154,7 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
 
   setActiveCharacter: async (characterName: string) => {
     try {
-      console.log('CharacterIndexedDBStore: Setting active character to:', characterName);
+      console.log('ConnectionStore: Setting active character to:', characterName);
       
       // Update all connections to set the correct active state
       const connections = get().connections;
@@ -254,20 +235,12 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
       // Clear existing connections from IndexedDB only
       const existingConnections = get().connections;
       for (const connection of existingConnections) {
-        await characterIndexedDBService.deleteConnection(connection.characterName);
+        await db.delete('connections', connection.characterName);
       }
       
       // Add new connections to IndexedDB
       for (const connection of connections) {
-        await characterIndexedDBService.storeConnection({
-          characterName: connection.characterName,
-          isConnected: connection.isConnected,
-          isActive: connection.isActive,
-          status: connection.status,
-          lastActivity: connection.lastActivity,
-          connectedAt: connection.connectedAt,
-          fchatUsername: connection.fchatUsername
-        });
+        await db.put('connections', toRecord(connection));
       }
       
       // Update in-memory state in one atomic operation to prevent intermediate renders
@@ -311,7 +284,7 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
       // Clear from IndexedDB
       const connections = get().connections;
       for (const connection of connections) {
-        await characterIndexedDBService.deleteConnection(connection.characterName);
+        await db.delete('connections', connection.characterName);
       }
       
       // Clear in-memory cache
@@ -328,12 +301,4 @@ export const useCharacterIndexedDBStore = create<CharacterIndexedDBStore>((set, 
     }
   },
 
-  getStorageInfo: async () => {
-    try {
-      return await characterIndexedDBService.getStorageInfo();
-    } catch (error) {
-      console.error('Failed to get storage info:', error);
-      return { connections: 0, lightweight: 0, estimatedSize: 0 };
-    }
-  }
 }));

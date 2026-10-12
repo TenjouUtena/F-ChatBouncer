@@ -120,16 +120,6 @@ export interface CharacterInfo {
   isOnline: boolean;
 }
 
-export interface LightweightCharacterData {
-  character: string;
-  gender: string;
-  species: string;
-  lastSeen: number;
-  status?: 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline';
-  statusMessage?: string;
-  isOnline?: boolean;
-}
-
 export interface ProfileData {
   character: string;
   description: string;

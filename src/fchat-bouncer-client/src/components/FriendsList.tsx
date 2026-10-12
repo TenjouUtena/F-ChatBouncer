@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
-import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
+import { useCharacterStore } from '@/stores/characterStore';
 import { Friend } from '@/types';
 import { ChevronDownIcon, ChevronRightIcon, UserIcon, BookmarkIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
 import Character, { CharacterData, getCharacterStatusColor, getCharacterStatusIcon } from './Character';
@@ -23,7 +23,7 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
   const { friends, bookmarks, bookmarksWithStatus, isCollapsed, toggleCollapsed, isLoading, deduplicateFriends, addBookmark, removeBookmark } = useFriendsStore();
   const { token, setFriendsAndBookmarks } = useAuthStore();
   const { getProfile } = useChatStore();
-  const { getCharacter } = useLightweightCharacterStore();
+  const getCharacter = useCharacterStore((state) => state.get);
   const [hoveredFriend, setHoveredFriend] = useState<string | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [userContextMenu, setUserContextMenu] = useState<{
@@ -38,30 +38,30 @@ const FriendsList: React.FC<FriendsListProps> = ({ className = '', onOpenPM }) =
   // Deduplicate friends by name to prevent React key conflicts
   const uniqueFriends = deduplicateFriends(friends);
 
-  // Get status from lightweight character store for all friends
+  // Get status from the character store for all friends
   const friendsWithLightweightStatus = uniqueFriends.map(friend => {
-    const lightweightData = getCharacter(friend.name);
+    const characterData = getCharacter(friend.name);
     return {
       ...friend,
-      // Use lightweight store status if available, fallback to friend status
-      isOnline: lightweightData?.isOnline ?? friend.isOnline,
-      status: lightweightData?.status ?? friend.status,
-      statusMessage: lightweightData?.statusMessage ?? friend.statusMessage
+      // Use character store status if available, fallback to friend status
+      isOnline: characterData?.isOnline ?? friend.isOnline,
+      status: characterData?.status ?? friend.status,
+      statusMessage: characterData?.statusMessage ?? friend.statusMessage
     };
   });
 
   const onlineFriends = friendsWithLightweightStatus.filter(friend => friend.isOnline);
   const offlineFriends = friendsWithLightweightStatus.filter(friend => !friend.isOnline);
   
-  // Get status from lightweight character store for bookmarks
+  // Get status from the character store for bookmarks
   const bookmarksWithLightweightStatus = bookmarksWithStatus.map(bookmark => {
-    const lightweightData = getCharacter(bookmark.name);
+    const characterData = getCharacter(bookmark.name);
     return {
       ...bookmark,
-      // Use lightweight store status if available, fallback to bookmark status
-      isOnline: lightweightData?.isOnline ?? bookmark.isOnline,
-      status: lightweightData?.status ?? bookmark.status,
-      statusMessage: lightweightData?.statusMessage ?? bookmark.statusMessage
+      // Use character store status if available, fallback to bookmark status
+      isOnline: characterData?.isOnline ?? bookmark.isOnline,
+      status: characterData?.status ?? bookmark.status,
+      statusMessage: characterData?.statusMessage ?? bookmark.statusMessage
     };
   });
   

@@ -9,7 +9,7 @@ import MessageComponent from './MessageComponent';
 import UserContextMenu from '../UserContextMenu';
 import ProfileModal from '../ProfileModal';
 import { useChannelMessages } from '@/hooks/useChannelMessages';
-import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
+import { useConnectionStore } from '@/stores/connectionStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
@@ -42,7 +42,7 @@ const MessageList = forwardRef<MessageListRef, MessageListProps>(({
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [selectedProfileCharacter, setSelectedProfileCharacter] = useState<string>('');
 
-  const { activeCharacter } = useCharacterIndexedDBStore();
+  const { activeCharacter } = useConnectionStore();
   const { bookmarks, addBookmark, removeBookmark } = useFriendsStore();
   const { token } = useAuthStore();
   

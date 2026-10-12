@@ -20,7 +20,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
-import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
+import { useConnectionStore } from '@/stores/connectionStore';
 import { useFriendsStore } from '@/stores/friendsStore';
 import { signalRService } from '@/lib/signalr';
 import { Message, ProfileData } from '@/types';
@@ -144,7 +144,7 @@ function SortableChannelItem({
 
 export default function ChatInterface({ isCharacterRestoring = false }: ChatInterfaceProps) {
   const { user, logout } = useAuthStore();
-  const { activeCharacter, connections } = useCharacterIndexedDBStore();
+  const { activeCharacter, connections } = useConnectionStore();
   const {
     addMessage,
     clearAllHistory,
@@ -326,7 +326,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     // Show notification for new unknown channel activity (only for active character)
     if (message.isActiveCharacter) {
       // Get current selected channels for the active character at the time of message
-      const activeCharacterName = useCharacterIndexedDBStore.getState().activeCharacter;
+      const activeCharacterName = useConnectionStore.getState().activeCharacter;
       const currentSelectedChannelsForMessage = activeCharacterName 
         ? getSelectedChannelsForCharacter(activeCharacterName) 
         : [];
@@ -641,7 +641,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
         console.log('Previous active character:', activeCharacter);
         
         // Update the character store
-        useCharacterIndexedDBStore.getState().setActiveCharacter(newCharacterName);
+        useConnectionStore.getState().setActiveCharacter(newCharacterName);
         
         // Auto-select the first channel for the new character
         const newCharacterChannels = getSelectedChannelsForCharacter(newCharacterName);

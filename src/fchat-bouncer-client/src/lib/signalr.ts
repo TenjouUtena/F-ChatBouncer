@@ -816,8 +816,8 @@ this.onSearchResultsReceived = callback;
     if (!targetCharacter) {
       // Get active character from store
       try {
-        const { useCharacterIndexedDBStore } = await import('@/stores/characterIndexedDBStore');
-        targetCharacter = useCharacterIndexedDBStore.getState().activeCharacter || '';
+        const { useConnectionStore } = await import('@/stores/connectionStore');
+        targetCharacter = useConnectionStore.getState().activeCharacter || '';
       } catch (error) {
         console.error('Failed to get active character:', error);
       }

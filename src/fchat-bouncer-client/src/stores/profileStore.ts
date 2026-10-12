@@ -1,253 +1,92 @@
 import { create } from 'zustand';
 import { ProfileData } from '@/types';
-import { indexedDBService } from '@/lib/indexeddb';
+import { db } from '@/lib/db';
+
+type ProfileRequestStatus = 'idle' | 'requesting' | 'failed' | 'success';
+
+const DEFAULT_PROFILE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface ProfileStore {
-  // In-memory cache for quick access
+  // In-memory cache in front of the "profiles" object store
   profiles: Record<string, ProfileData>;
-  profileRequestStatus: Record<string, 'idle' | 'requesting' | 'failed' | 'success'>;
-  profileLastRequested: Record<string, number>;
-  isIndexedDBAvailable: boolean;
-  
-  // Actions
-  initialize: () => Promise<void>;
-  addProfile: (characterName: string, profileData: ProfileData) => Promise<void>;
+  // Staleness as reported by the server; the client keeps no clock of its own
+  staleProfiles: Record<string, boolean>;
+  profileRequestStatus: Record<string, ProfileRequestStatus>;
+
+  addProfile: (characterName: string, profileData: ProfileData, fetchedAt?: string | null, isStale?: boolean) => Promise<void>;
   getProfile: (characterName: string) => Promise<ProfileData | null>;
   hasProfile: (characterName: string) => Promise<boolean>;
-  deleteProfile: (characterName: string) => Promise<void>;
-  clearAllProfiles: () => Promise<void>;
-  getProfileRequestStatus: (characterName: string) => 'idle' | 'requesting' | 'failed' | 'success';
-  setProfileRequestStatus: (characterName: string, status: 'idle' | 'requesting' | 'failed' | 'success') => void;
   isProfileStale: (characterName: string) => boolean;
-  getStorageInfo: () => Promise<{ count: number; estimatedSize: number }>;
+  getProfileRequestStatus: (characterName: string) => ProfileRequestStatus;
+  setProfileRequestStatus: (characterName: string, status: ProfileRequestStatus) => void;
   cleanupOldProfiles: (maxAge?: number) => Promise<number>;
 }
 
 export const useProfileStore = create<ProfileStore>((set, get) => ({
-  // Initial state
   profiles: {},
+  staleProfiles: {},
   profileRequestStatus: {},
-  profileLastRequested: {},
-  isIndexedDBAvailable: false,
 
-  initialize: async () => {
-    try {
-      await indexedDBService.initialize();
-      set({ isIndexedDBAvailable: true });
-      console.debug('Profile store initialized with IndexedDB');
-    } catch (error) {
-      console.error('Failed to initialize profile store with IndexedDB:', error);
-      set({ isIndexedDBAvailable: false });
-      console.warn('Profile store will operate in memory-only mode');
-      // Don't throw error - allow the store to continue with limited functionality
-    }
-  },
-
-  addProfile: async (characterName: string, profileData: ProfileData) => {
-    try {
-      // Store in IndexedDB if available
-      if (get().isIndexedDBAvailable) {
-        await indexedDBService.storeProfile(characterName, profileData, 'FULL');
-      }
-      
-      // Always update in-memory cache
-      set((state) => ({
-        profiles: {
-          ...state.profiles,
-          [characterName]: profileData
-        },
-        profileRequestStatus: {
-          ...state.profileRequestStatus,
-          [characterName]: 'success'
-        },
-        profileLastRequested: {
-          ...state.profileLastRequested,
-          [characterName]: Date.now()
-        }
-      }));
-      
-      console.debug(`Profile stored for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
-    } catch (error) {
-      console.debug(`Failed to store profile for ${characterName}:`, error);
-      throw error;
-    }
-  },
-
-  getProfile: async (characterName: string) => {
-    try {
-      // First check in-memory cache
-      const cachedProfile = get().profiles[characterName];
-      if (cachedProfile) {
-        return cachedProfile;
-      }
-
-      // If not in cache and IndexedDB is available, try to load from IndexedDB
-      if (get().isIndexedDBAvailable) {
-        const profileData = await indexedDBService.getProfile(characterName, 'FULL');
-        if (profileData) {
-          // Update cache
-          set((state) => ({
-            profiles: {
-              ...state.profiles,
-              [characterName]: profileData
-            }
-          }));
-          return profileData;
-        }
-      }
-
-      return null;
-    } catch (error) {
-      console.debug(`Failed to get profile for ${characterName}:`, error);
-      return null;
-    }
-  },
-
-  hasProfile: async (characterName: string) => {
-    // Check cache first
-    if (characterName in get().profiles) {
-      return true;
-    }
-
-    // Check IndexedDB if available
-    if (get().isIndexedDBAvailable) {
-      try {
-        return await indexedDBService.hasProfile(characterName, 'FULL');
-      } catch (error) {
-        console.debug(`Failed to check if profile exists for ${characterName}:`, error);
-        return false;
-      }
-    }
-
-    return false;
-  },
-
-  deleteProfile: async (characterName: string) => {
-    try {
-      // Remove from IndexedDB if available
-      if (get().isIndexedDBAvailable) {
-        await indexedDBService.deleteProfile(characterName, 'FULL');
-      }
-      
-      // Remove from cache
-      set((state) => {
-        const newProfiles = { ...state.profiles };
-        delete newProfiles[characterName];
-        
-        const newStatus = { ...state.profileRequestStatus };
-        delete newStatus[characterName];
-        
-        const newLastRequested = { ...state.profileLastRequested };
-        delete newLastRequested[characterName];
-        
-        return {
-          profiles: newProfiles,
-          profileRequestStatus: newStatus,
-          profileLastRequested: newLastRequested
-        };
-      });
-      
-      console.debug(`Profile deleted for ${characterName}${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
-    } catch (error) {
-      console.debug(`Failed to delete profile for ${characterName}:`, error);
-      throw error;
-    }
-  },
-
-  clearAllProfiles: async () => {
-    try {
-      // Clear IndexedDB if available
-      if (get().isIndexedDBAvailable) {
-        await indexedDBService.clearAllProfiles();
-      }
-      
-      // Clear cache
-      set({
-        profiles: {},
-        profileRequestStatus: {},
-        profileLastRequested: {}
-      });
-      
-      console.debug(`All profiles cleared${get().isIndexedDBAvailable ? ' (IndexedDB)' : ' (memory only)'}`);
-    } catch (error) {
-      console.debug('Failed to clear all profiles:', error);
-      throw error;
-    }
-  },
-
-  getProfileRequestStatus: (characterName: string) => {
-    return get().profileRequestStatus[characterName] || 'idle';
-  },
-
-  setProfileRequestStatus: (characterName: string, status: 'idle' | 'requesting' | 'failed' | 'success') => {
+  addProfile: async (characterName, profileData, fetchedAt = null, isStale = false) => {
     set((state) => ({
-      profileRequestStatus: {
-        ...state.profileRequestStatus,
-        [characterName]: status
-      }
+      profiles: { ...state.profiles, [characterName]: profileData },
+      staleProfiles: { ...state.staleProfiles, [characterName]: isStale },
+      profileRequestStatus: { ...state.profileRequestStatus, [characterName]: 'success' }
+    }));
+
+    try {
+      await db.put('profiles', { name: characterName, profile: profileData, fetchedAt });
+    } catch (error) {
+      console.debug(`Failed to persist profile for ${characterName}:`, error);
+    }
+  },
+
+  getProfile: async (characterName) => {
+    const cached = get().profiles[characterName];
+    if (cached) return cached;
+
+    try {
+      const record = await db.get('profiles', characterName);
+      if (!record) return null;
+
+      set((state) => ({ profiles: { ...state.profiles, [characterName]: record.profile } }));
+      return record.profile;
+    } catch (error) {
+      console.debug(`Failed to read profile for ${characterName}:`, error);
+      return null;
+    }
+  },
+
+  hasProfile: async (characterName) => {
+    return (await get().getProfile(characterName)) !== null;
+  },
+
+  isProfileStale: (characterName) => get().staleProfiles[characterName] ?? false,
+
+  getProfileRequestStatus: (characterName) => get().profileRequestStatus[characterName] || 'idle',
+
+  setProfileRequestStatus: (characterName, status) => {
+    set((state) => ({
+      profileRequestStatus: { ...state.profileRequestStatus, [characterName]: status }
     }));
   },
 
-  isProfileStale: (characterName: string) => {
-    const lastRequested = get().profileLastRequested[characterName];
-    if (!lastRequested) return true;
-    
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-    return Date.now() - lastRequested > maxAge;
-  },
-
-  getStorageInfo: async () => {
+  cleanupOldProfiles: async (maxAge = DEFAULT_PROFILE_MAX_AGE_MS) => {
     try {
-      if (get().isIndexedDBAvailable) {
-        return await indexedDBService.getStorageInfo();
-      } else {
-        // Return memory-only stats
-        const profiles = get().profiles;
-        const count = Object.keys(profiles).length;
-        const estimatedSize = JSON.stringify(profiles).length;
-        return { count, estimatedSize };
-      }
-    } catch (error) {
-      console.error('Failed to get storage info:', error);
-      return { count: 0, estimatedSize: 0 };
-    }
-  },
+      const cutoff = Date.now() - maxAge;
+      const expired = (await db.getAll('profiles'))
+        .filter(r => !r.fetchedAt || Date.parse(r.fetchedAt) < cutoff)
+        .map(r => r.name);
 
-  cleanupOldProfiles: async (maxAge?: number) => {
-    try {
-      let deletedCount = 0;
-      
-      if (get().isIndexedDBAvailable) {
-        deletedCount = await indexedDBService.cleanupOldProfiles(maxAge);
-      }
-      
-      // Also clean up cache for deleted profiles
-      const cutoffTime = Date.now() - (maxAge || 30 * 24 * 60 * 60 * 1000);
+      await db.deleteMany('profiles', expired);
       set((state) => {
-        const newProfiles = { ...state.profiles };
-        const newStatus = { ...state.profileRequestStatus };
-        const newLastRequested = { ...state.profileLastRequested };
-        
-        Object.keys(newProfiles).forEach(characterName => {
-          const lastRequested = newLastRequested[characterName];
-          if (lastRequested && lastRequested < cutoffTime) {
-            delete newProfiles[characterName];
-            delete newStatus[characterName];
-            delete newLastRequested[characterName];
-            deletedCount++;
-          }
-        });
-        
-        return {
-          profiles: newProfiles,
-          profileRequestStatus: newStatus,
-          profileLastRequested: newLastRequested
-        };
+        const profiles = { ...state.profiles };
+        expired.forEach(name => delete profiles[name]);
+        return { profiles };
       });
-      
-      return deletedCount;
+      return expired.length;
     } catch (error) {
-      console.debug('Failed to cleanup old profiles:', error);
+      console.debug('Failed to clean up old profiles:', error);
       return 0;
     }
   }
