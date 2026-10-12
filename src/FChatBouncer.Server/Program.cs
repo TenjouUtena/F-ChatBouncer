@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Authentication.Google;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.DataProtection.StackExchangeRedis;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -415,6 +416,17 @@ var app = builder.Build();
 
 // Fail at boot, not at first use, if the credential encryption key is missing
 app.Services.GetRequiredService<IEncryptionService>();
+
+// Railway terminates TLS at its edge and forwards plain HTTP. Trust X-Forwarded-Proto/Host
+// so generated URLs (the Google OAuth redirect_uri in particular) use https and the public host.
+// The edge proxy's address is not fixed, so known networks/proxies are cleared.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost
+};
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
