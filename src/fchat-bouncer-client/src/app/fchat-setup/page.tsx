@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/authStore';
 import { FChatCredentialsRequest } from '@/types';
 
 export default function FChatSetupPage() {
@@ -13,22 +14,14 @@ export default function FChatSetupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const { token, user, setUser } = useAuthStore();
 
   useEffect(() => {
-    // Check if user is authenticated
-    const token = localStorage.getItem('auth_token');
-    if (!token) {
+    // Nothing to set up if not signed in, or if credentials already exist
+    if (!token || user?.hasFChatCredentials) {
       router.push('/');
-      return;
     }
-
-    // Check if F-Chat credentials are already set
-    const hasFChatCredentials = localStorage.getItem('has_fchat_credentials') === 'true';
-    if (hasFChatCredentials) {
-      router.push('/');
-      return;
-    }
-  }, [router]);
+  }, [router, token, user]);
 
   const handleInputChange = (field: keyof FChatCredentialsRequest) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setCredentials(prev => ({
@@ -43,15 +36,15 @@ export default function FChatSetupPage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem('auth_token');
       if (!token) {
         throw new Error('Authentication token not found');
       }
 
       await api.updateFChatCredentials(token, credentials);
-      
-      // Update local storage
-      localStorage.setItem('has_fchat_credentials', 'true');
+
+      if (user) {
+        setUser({ ...user, hasFChatCredentials: true });
+      }
       
       // Redirect to main app
       router.push('/');
