@@ -117,6 +117,16 @@ export const api = {
     }
   },
 
+  async getMe(token: string): Promise<User> {
+    const response = await fetchWithError(`${API_BASE}/auth/me`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    return response.json();
+  },
+
   async updateFChatCredentials(token: string, credentials: FChatCredentialsRequest): Promise<void> {
     await fetchWithError(`${API_BASE}/auth/update-fchat-credentials`, {
       method: 'POST',

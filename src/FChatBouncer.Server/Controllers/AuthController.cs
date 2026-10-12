@@ -335,8 +335,12 @@ public class AuthController : ControllerBase
             var token = GenerateJwtToken(user);
             var refreshToken = await GenerateRefreshTokenAsync(user);
 
-            // Redirect to frontend with tokens
-            var frontendUrl = $"/auth-success?token={token}&refreshToken={refreshToken}&userId={user.Id}&hasFChatCredentials={user.HasFChatCredentials}";
+            // Redirect to frontend with tokens. The refresh token is base64 (+, /, =), so escape everything.
+            var frontendUrl = "/auth-success" +
+                $"?token={Uri.EscapeDataString(token)}" +
+                $"&refreshToken={Uri.EscapeDataString(refreshToken)}" +
+                $"&userId={Uri.EscapeDataString(user.Id)}" +
+                $"&hasFChatCredentials={user.HasFChatCredentials}";
             return Redirect(GetFrontendRedirect(frontendUrl));
         }
         catch (Exception ex)
@@ -344,6 +348,33 @@ public class AuthController : ControllerBase
             _logger.LogError(ex, "Google OAuth callback failed");
             return Redirect(GetFrontendRedirect("/login?error=oauth_callback_failed"));
         }
+    }
+
+    /// <summary>
+    /// The signed-in user. The Google flow only hands the browser tokens, so it calls this to get the profile.
+    /// </summary>
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<ActionResult<UserDto>> Me()
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var user = userId == null ? null : await _userManager.FindByIdAsync(userId);
+        if (user == null || !user.IsActive)
+        {
+            return Unauthorized();
+        }
+
+        return Ok(new UserDto
+        {
+            Id = user.Id,
+            Username = user.UserName!,
+            Email = user.Email,
+            GoogleId = user.GoogleId,
+            GoogleEmail = user.GoogleEmail,
+            GoogleName = user.GoogleName,
+            GooglePicture = user.GooglePicture,
+            HasFChatCredentials = user.HasFChatCredentials
+        });
     }
 
     [HttpPost("update-fchat-credentials")]

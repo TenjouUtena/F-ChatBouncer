@@ -2,6 +2,8 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { api } from '@/lib/api';
+import { useAuthStore } from '@/stores/authStore';
 
 function AuthSuccessContent() {
   const [isLoading, setIsLoading] = useState(true);
@@ -14,27 +16,17 @@ function AuthSuccessContent() {
       try {
         const token = searchParams.get('token');
         const refreshToken = searchParams.get('refreshToken');
-        const userId = searchParams.get('userId');
-        const hasFChatCredentials = searchParams.get('hasFChatCredentials') === 'true';
 
-        if (!token || !refreshToken || !userId) {
+        if (!token || !refreshToken) {
           throw new Error('Missing authentication data');
         }
 
-        // Store auth data in localStorage (or your preferred storage)
-        localStorage.setItem('auth_token', token);
-        localStorage.setItem('refresh_token', refreshToken);
-        localStorage.setItem('user_id', userId);
-        localStorage.setItem('has_fchat_credentials', hasFChatCredentials.toString());
+        // Sign in through the same store the password login uses, so the main page sees it
+        const user = await api.getMe(token);
+        useAuthStore.getState().login(user, token, refreshToken);
 
-        // Redirect based on F-Chat credentials status
-        if (!hasFChatCredentials) {
-          // Redirect to F-Chat credentials setup
-          router.push('/fchat-setup');
-        } else {
-          // Redirect to main app
-          router.push('/');
-        }
+        // replace() keeps the token-bearing URL out of browser history
+        router.replace(user.hasFChatCredentials ? '/' : '/fchat-setup');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Authentication failed');
         setIsLoading(false);
