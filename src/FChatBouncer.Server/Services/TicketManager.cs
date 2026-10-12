@@ -1,6 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
-
 namespace FChatBouncer.Server.Services;
 
 /// <summary>
@@ -10,16 +7,12 @@ public class TicketManager
 {
     private readonly Dictionary<string, TicketInfo> _tickets = new();
     private readonly ILogger<TicketManager> _logger;
-    private readonly string _encryptionKey;
+    private readonly IEncryptionService _encryptionService;
 
-    public TicketManager(ILogger<TicketManager> logger, IConfiguration configuration)
+    public TicketManager(ILogger<TicketManager> logger, IEncryptionService encryptionService)
     {
         _logger = logger;
-        _encryptionKey = configuration["CREDENTIAL_ENCRYPTION_KEY"]
-            ?? Environment.GetEnvironmentVariable("CREDENTIAL_ENCRYPTION_KEY")
-            ?? configuration["Security:CredentialEncryptionKey"]
-            ?? throw new InvalidOperationException(
-                "CREDENTIAL_ENCRYPTION_KEY not configured. Set the environment variable for this service (e.g. in Railway: Service → Variables), then redeploy so the new value is loaded.");
+        _encryptionService = encryptionService;
     }
 
     /// <summary>
@@ -30,7 +23,7 @@ public class TicketManager
         var key = $"{userId}:{characterName}";
         var ticketInfo = new TicketInfo
         {
-            Ticket = EncryptTicket(ticket),
+            Ticket = _encryptionService.Encrypt(ticket),
             ExpiresAt = DateTime.UtcNow.Add(expiration),
             CharacterName = characterName,
             UserId = userId
@@ -51,7 +44,7 @@ public class TicketManager
         {
             _logger.LogDebug("Retrieved valid ticket for user {UserId}, character {CharacterName}", 
                 userId, characterName);
-            return DecryptTicket(ticketInfo.Ticket);
+            return _encryptionService.Decrypt(ticketInfo.Ticket);
         }
 
         // Remove expired ticket
@@ -96,54 +89,6 @@ public class TicketManager
         if (expiredKeys.Count > 0)
         {
             _logger.LogDebug("Cleaned up {Count} expired tickets", expiredKeys.Count);
-        }
-    }
-
-    /// <summary>
-    /// Encrypts a ticket for storage
-    /// </summary>
-    private string EncryptTicket(string ticket)
-    {
-        try
-        {
-            using var aes = Aes.Create();
-            aes.Key = Encoding.UTF8.GetBytes(_encryptionKey.PadRight(32).Substring(0, 32));
-            aes.IV = new byte[16]; // Simple IV for this use case
-
-            using var encryptor = aes.CreateEncryptor();
-            var ticketBytes = Encoding.UTF8.GetBytes(ticket);
-            var encryptedBytes = encryptor.TransformFinalBlock(ticketBytes, 0, ticketBytes.Length);
-
-            return Convert.ToBase64String(encryptedBytes);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to encrypt ticket");
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Decrypts a stored ticket
-    /// </summary>
-    private string DecryptTicket(string encryptedTicket)
-    {
-        try
-        {
-            using var aes = Aes.Create();
-            aes.Key = Encoding.UTF8.GetBytes(_encryptionKey.PadRight(32).Substring(0, 32));
-            aes.IV = new byte[16]; // Simple IV for this use case
-
-            using var decryptor = aes.CreateDecryptor();
-            var encryptedBytes = Convert.FromBase64String(encryptedTicket);
-            var decryptedBytes = decryptor.TransformFinalBlock(encryptedBytes, 0, encryptedBytes.Length);
-
-            return Encoding.UTF8.GetString(decryptedBytes);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to decrypt ticket");
-            throw;
         }
     }
 }

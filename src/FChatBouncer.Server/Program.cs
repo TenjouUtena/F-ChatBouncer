@@ -11,6 +11,9 @@ using FChatBouncer.Server.Models;
 using FChatBouncer.Server.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.StackExchangeRedis;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -305,7 +308,12 @@ if (hasGoogleOAuth)
 }
 
 // Data Protection for OAuth state
-builder.Services.AddDataProtection();
+// Keep the key ring in Redis so OAuth state cookies survive redeploys
+builder.Services.AddDataProtection()
+    .SetApplicationName("FChatBouncer");
+builder.Services.AddOptions<KeyManagementOptions>()
+    .Configure<IConnectionMultiplexer>((options, redis) =>
+        options.XmlRepository = new RedisXmlRepository(() => redis.GetDatabase(), "FChatBouncer:DataProtection-Keys"));
 
 // Session configuration for OAuth state validation (using in-memory, not Redis)
 builder.Services.AddDistributedMemoryCache();
@@ -454,17 +462,6 @@ if (builder.Environment.IsDevelopment())
 }
 
 var app = builder.Build();
-
-// Log whether CREDENTIAL_ENCRYPTION_KEY is present at startup (helps debug env/configuration issues)
-var credentialKey = app.Configuration["CREDENTIAL_ENCRYPTION_KEY"] ?? Environment.GetEnvironmentVariable("CREDENTIAL_ENCRYPTION_KEY");
-if (string.IsNullOrEmpty(credentialKey))
-{
-    app.Logger.LogWarning("CREDENTIAL_ENCRYPTION_KEY is not set at startup. Set the environment variable for this service and redeploy.");
-}
-else
-{
-    app.Logger.LogInformation("CREDENTIAL_ENCRYPTION_KEY is configured (length {Length})", credentialKey.Length);
-}
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

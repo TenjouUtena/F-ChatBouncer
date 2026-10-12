@@ -32,13 +32,6 @@ public class CharacterConnection
     public string FChatUsername { get; set; } = string.Empty;
 
     /// <summary>
-    /// Encrypted F-Chat password for this connection
-    /// </summary>
-    [Required]
-    [MaxLength(500)]
-    public string FChatPasswordEncrypted { get; set; } = string.Empty;
-
-    /// <summary>
     /// Whether this character connection is currently active (selected by user)
     /// </summary>
     public bool IsActive { get; set; } = false;

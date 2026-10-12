@@ -1235,7 +1235,7 @@ public class FChatService : IFChatService
         if (fchatUsername != null && fchatPassword != null)
         {
             // Create or update the character connection
-            await ExecuteWithCharacterService(cs => cs.CreateOrUpdateCharacterConnectionAsync(userId, characterName, fchatUsername, fchatPassword));
+            await ExecuteWithCharacterService(cs => cs.CreateOrUpdateCharacterConnectionAsync(userId, characterName, fchatUsername));
         }
         
         // Update connection status

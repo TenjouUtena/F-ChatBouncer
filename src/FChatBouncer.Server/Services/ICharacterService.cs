@@ -73,7 +73,7 @@ public interface ICharacterService
     /// <summary>
     /// Create or update a character connection for a user
     /// </summary>
-    Task<CharacterConnection> CreateOrUpdateCharacterConnectionAsync(string userId, string characterName, string fchatUsername, string fchatPassword);
+    Task<CharacterConnection> CreateOrUpdateCharacterConnectionAsync(string userId, string characterName, string fchatUsername);
 
     /// <summary>
     /// Get all character connections for a user

@@ -304,7 +304,7 @@ public class CharacterService : ICharacterService
 
     #region Character Connections
 
-    public async Task<CharacterConnection> CreateOrUpdateCharacterConnectionAsync(string userId, string characterName, string fchatUsername, string fchatPassword)
+    public async Task<CharacterConnection> CreateOrUpdateCharacterConnectionAsync(string userId, string characterName, string fchatUsername)
     {
         _logger.LogDebug("Creating or updating character connection: {UserId} -> {CharacterName}", userId, characterName);
 
@@ -324,7 +324,6 @@ public class CharacterService : ICharacterService
                 UserId = userId,
                 CharacterId = character.Id,
                 FChatUsername = fchatUsername,
-                FChatPasswordEncrypted = fchatPassword, // TODO: Encrypt password
                 CreatedAt = DateTime.UtcNow,
                 LastActivityAt = DateTime.UtcNow
             };
@@ -337,7 +336,6 @@ public class CharacterService : ICharacterService
             _logger.LogDebug("Updating existing character connection: {UserId} -> {CharacterName}. Current state: IsActive={IsActive}, IsConnected={IsConnected}",
                 userId, characterName, connection.IsActive, connection.IsConnected);
             connection.FChatUsername = fchatUsername;
-            connection.FChatPasswordEncrypted = fchatPassword; // TODO: Encrypt password
             connection.LastActivityAt = DateTime.UtcNow;
         }
 

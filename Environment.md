@@ -9,7 +9,6 @@ Environment variables used by **FChatBouncer.Server**. All can be overridden in 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `JWT__SecretKey` | Secret key for signing JWTs. Must be set or auth fails at startup. | Base64 or long hex string (e.g. 64+ chars) |
-| `CREDENTIAL_ENCRYPTION_KEY` | Key for encrypting stored F-Chat credentials and tickets. | Opaque string (e.g. 32+ chars) |
 
 ---
 
@@ -66,7 +65,7 @@ One of: URL, full connection string, or host/port/password.
 
 | Variable | Description | Fallback |
 |----------|-------------|----------|
-| `ENCRYPTION_KEY` | 256-bit key for general encryption (e.g. credential encryption). Base64 or hex. | `Security:EncryptionKey` in config; if both missing, a temporary key is generated (dev only, not for production) |
+| `ENCRYPTION_KEY` | 256-bit key for general encryption (e.g. credential encryption). Base64 or hex. | `Security:EncryptionKey` in config; required; the server refuses to start without it |
 
 ---
 
@@ -105,7 +104,6 @@ Can also be set as `Frontend:BaseUrl` in config. If empty, redirects are relativ
 ## Summary checklist (production)
 
 - [ ] `JWT__SecretKey`
-- [ ] `CREDENTIAL_ENCRYPTION_KEY`
 - [ ] `ENCRYPTION_KEY` (or set `Security:EncryptionKey` in config)
 - [ ] Database: `DATABASE_URL` or `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD` (or `ConnectionStrings__DefaultConnection`)
 - [ ] Redis: `REDIS_URL` or `REDIS_CONNECTION_STRING` or `REDIS_HOST` (+ optional `REDIS_PORT`/`REDIS_PASSWORD`)
