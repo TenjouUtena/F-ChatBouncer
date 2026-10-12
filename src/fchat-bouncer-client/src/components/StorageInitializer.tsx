@@ -6,7 +6,6 @@ import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useLightweightCharacterIndexedDBStore } from '@/stores/lightweightCharacterIndexedDBStore';
 import { useChatStore } from '@/stores/chatStore';
 import { messageIndexedDBService } from '@/lib/messageIndexedDB';
-import { checkIndexedDBSupport, logIndexedDBStatus, isPrivateMode } from '@/lib/indexeddb-utils';
 import { markIndexedDBReady, markIndexedDBFailed } from '@/lib/indexeddbReady';
 
 export default function StorageInitializer() {
@@ -22,22 +21,6 @@ export default function StorageInitializer() {
       try {
         initializedRef.current = true;
         console.log('=== Storage Initialization Started ===');
-        
-        // Check IndexedDB support first
-        const support = await checkIndexedDBSupport();
-        if (!support.isSupported) {
-          console.error('IndexedDB not supported:', support.error);
-          console.warn('Falling back to localStorage only. Some features may be limited.');
-          return;
-        }
-
-        // Check for private mode
-        if (isPrivateMode()) {
-          console.warn('Private/Incognito mode detected. IndexedDB may have limited functionality.');
-        }
-
-        // Log detailed status for debugging
-        await logIndexedDBStatus();
         
         console.log('Initializing IndexedDB stores...');
         
@@ -58,27 +41,6 @@ export default function StorageInitializer() {
         console.log('All IndexedDB stores initialized successfully');
         markIndexedDBReady();
         chatStore.handleIndexedDBReady();
-        
-        // Test IndexedDB functionality
-        try {
-          const testMessage = {
-            id: 'test-' + Date.now(),
-            content: 'Test message',
-            sender: 'TestUser',
-            channel: 'test-channel',
-            timestamp: new Date().toISOString(),
-            messageType: 'Chat'
-          };
-          
-          await messageIndexedDBService.storeMessage('TestCharacter', 'test-channel', testMessage);
-          const retrievedMessages = await messageIndexedDBService.getMessages('TestCharacter', 'test-channel', 1);
-          console.log('IndexedDB test successful:', retrievedMessages.length > 0 ? 'PASS' : 'FAIL');
-          
-          // Clean up test data
-          await messageIndexedDBService.deleteMessages('TestCharacter', 'test-channel');
-        } catch (testError) {
-          console.error('IndexedDB test failed:', testError);
-        }
         
         // Load limited messages from IndexedDB into memory for open channels only
         // Get characters with selected channels (open channels)

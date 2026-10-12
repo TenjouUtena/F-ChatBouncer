@@ -1,6 +1,5 @@
 # Use the official .NET 9.0 runtime image
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
-ARG TARGETARCH
+FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 8080
 
@@ -24,12 +23,11 @@ FROM build AS publish
 RUN dotnet publish "FChatBouncer.Server.csproj" -c Release -o /app/publish /p:UseAppHost=false -a $TARGETARCH
 
 # Final stage
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS final
+FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 
-# Create a non-root user for security
-RUN adduser --disabled-password --gecos '' appuser && chown -R appuser /app
-USER appuser
+# Run as the non-root user that ships with the .NET images
+USER $APP_UID
 
 ENTRYPOINT ["dotnet", "FChatBouncer.Server.dll"]

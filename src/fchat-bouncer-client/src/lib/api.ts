@@ -285,19 +285,6 @@ export const api = {
     return response.json();
   },
 
-  async requestProfileManually(token: string, characterName: string): Promise<any> {
-    const response = await fetchWithError(`${API_BASE}/character/diagnostic/request-profile`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ characterName }),
-    });
-
-    return response.json();
-  },
-
   async searchCharacters(token: string, searchCriteria: any): Promise<void> {
     await fetchWithError(`${API_BASE}/fchat/search`, {
       method: 'POST',

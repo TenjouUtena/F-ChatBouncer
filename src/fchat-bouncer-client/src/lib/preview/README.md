@@ -86,7 +86,7 @@ export type PreviewType = 'image' | 'discord' | 'flist' | 'mycustom' | 'generic'
 
 ## Testing
 
-The system can be tested using the BBCode test page at `/test-bbcode`. Test cases are included for:
+Test cases are included for:
 
 - Image URLs
 - Discord URLs  

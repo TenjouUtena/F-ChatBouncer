@@ -79,20 +79,6 @@ public class ProfileService : IProfileService
 
             // Notify the frontend that a new profile is available
             await NotifyProfileAvailableAsync(userId, profileData.CharacterName);
-
-            // Refresh memo data when profile is updated (disabled for now)
-            //_ = Task.Run(async () =>
-            //{
-            //    try
-            //    {
-            //        await _memoService.RefreshMemoAsync(userId, profileData.CharacterName);
-            //    }
-            //    catch (Exception ex)
-            //    {
-            //        _logger.LogWarning(ex, "Failed to refresh memo for character {CharacterName} (User: {UserId})",
-            //            profileData.CharacterName, userId);
-            //    }
-            //});
         }
         catch (Exception ex)
         {
@@ -383,101 +369,6 @@ public class ProfileService : IProfileService
         }
     }
 
-    private ProfileData ConvertCharacterDataToProfileData(CharacterDataResponse characterData)
-    {
-        var profileData = new ProfileData
-        {
-            CharacterName = characterData.Name,
-            Description = characterData.Description ?? string.Empty,
-            Timestamp = DateTime.UtcNow
-        };
-
-        // Convert infotags to info dictionary (keys should already be human-readable after mapping)
-        foreach (var infotag in characterData.Infotags)
-        {
-            if (!string.IsNullOrEmpty(infotag.Value))
-            {
-                profileData.Info[infotag.Key] = infotag.Value;
-            }
-        }
-
-        // Convert kinks to structured kink list (keys should already be human-readable after mapping)
-        foreach (var kink in characterData.Kinks)
-        {
-            if (!string.IsNullOrEmpty(kink.Value))
-            {
-                var kinkInfo = new KinkInfo
-                {
-                    KinkId = kink.Key, // This will be the human-readable name after mapping
-                    KinkName = kink.Key,
-                    KinkPreference = kink.Value,
-                    IsCustom = false
-                };
-                profileData.Kinks.Add(kinkInfo);
-            }
-        }
-
-        // Add custom kinks
-        foreach (var customKinkEntry in characterData.CustomKinks)
-        {
-            var customKink = customKinkEntry.Value;
-            var kinkInfo = new KinkInfo
-            {
-                KinkId = customKinkEntry.Key,
-                KinkName = customKink.Name,
-                KinkPreference = customKink.Choice,
-                IsCustom = true,
-                Description = customKink.Description
-            };
-            profileData.Kinks.Add(kinkInfo);
-        }
-
-        // Add view count
-        profileData.Info["View Count"] = characterData.ViewCount.ToString();
-
-        // Add images
-        if (characterData.Images.Any())
-        {
-            var imageIds = string.Join(", ", characterData.Images.Select(img => img.ImageId));
-            profileData.Info["Images"] = imageIds;
-            
-            // Add detailed image information for frontend
-            foreach (var image in characterData.Images)
-            {
-                var imageKey = $"Image_{image.ImageId}";
-                var imageInfo = $"{image.ImageId}.{image.Extension}|{image.Width}x{image.Height}";
-                if (!string.IsNullOrEmpty(image.Description))
-                {
-                    imageInfo += $"|{image.Description}";
-                }
-                profileData.Info[imageKey] = imageInfo;
-            }
-
-            // Populate the images array with structured data
-            foreach (var image in characterData.Images)
-            {
-                profileData.Images.Add(new ProfileImage
-                {
-                    ImageId = image.ImageId,
-                    ImageExt = image.Extension,
-                    ImageDescription = image.Description
-                });
-            }
-        }
-
-        // Add inlines
-        if (characterData.Inlines.Any())
-        {
-            var inlineHashes = string.Join(", ", characterData.Inlines.Select(inline => inline.Value.Hash));
-            profileData.Info["Inlines"] = inlineHashes;
-        }
-
-        // Extract gender from the profile data
-        profileData.ExtractGender();
-
-        return profileData;
-    }
-
     public async Task<ProfileData?> GetCharacterDataAsync(string userId, string characterName)
     {
         using var scope = _serviceProvider.CreateScope();
@@ -527,32 +418,6 @@ public class ProfileService : IProfileService
         {
             _logger.LogError(ex, "Failed to get character data for {CharacterName} (User: {UserId})", characterName, userId);
             throw;
-        }
-    }
-
-    private Task<FChatWebSocketClient?> GetWebSocketClientAsync(string userId, string characterName)
-    {
-        try
-        {
-            // Use reflection to access the private _connections field from FChatService
-            var fChatServiceType = _fChatService.GetType();
-            var connectionsField = fChatServiceType.GetField("_connections", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            
-            if (connectionsField?.GetValue(_fChatService) is Dictionary<string, Dictionary<string, FChatWebSocketClient>> connections)
-            {
-                if (connections.TryGetValue(userId, out var userConnections) &&
-                    userConnections.TryGetValue(characterName, out var client))
-                {
-                    return Task.FromResult<FChatWebSocketClient?>(client);
-                }
-            }
-
-            return Task.FromResult<FChatWebSocketClient?>(null);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get WebSocket client for user {UserId}, character {CharacterName}", userId, characterName);
-            return Task.FromResult<FChatWebSocketClient?>(null);
         }
     }
 
