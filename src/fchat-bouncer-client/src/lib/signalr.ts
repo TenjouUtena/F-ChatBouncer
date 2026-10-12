@@ -677,6 +677,10 @@ this.onSearchResultsReceived = callback;
     this.addUniqueListener('StatusUpdated', callback);
   }
 
+  onChannelMetadata(callback: (data: { characterName: string; channels: { id: string; name: string; title?: string }[] }) => void): void {
+    this.addUniqueListener('ChannelMetadata', callback);
+  }
+
   onCharacterInfo(callback: (infos: CharacterInfo[]) => void): void {
     this.addUniqueListener('CharacterInfo', callback);
   }

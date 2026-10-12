@@ -63,7 +63,7 @@ interface ChatStore extends ChatState {
   getJoinedChannelsForCharacter: (characterName: string) => string[];
   getConnectionStatusForCharacter: (characterName: string) => ConnectionStatus;
   clearMessagesForCharacter: (characterName: string) => void;
-  setChannelMetadata: (channels: Channel[], characterName?: string) => void;
+  setChannelMetadata: (channels: Pick<Channel, 'id' | 'name' | 'title'>[], characterName?: string) => void;
   getChannelDisplayName: (channelId: string, characterName?: string) => string;
   mergeHistoryMessages: (messages: Message[], characterName?: string) => void;
   getLastMessageTime: (channel?: string, characterName?: string) => Date | null;
@@ -712,27 +712,35 @@ export const useChatStore = create<ChatStore>()(
         }));
       },
 
-      setChannelMetadata: (channels: Channel[], characterName?: string) => {
-        if (!characterName) return;
+      setChannelMetadata: (channels: Pick<Channel, 'id' | 'name' | 'title'>[], characterName?: string) => {
+        if (!characterName || channels.length === 0) return;
 
-        const metadata = channels.reduce((acc, channel) => {
-          acc[channel.id] = channel;
-          return acc;
-        }, {} as Record<string, Channel>);
-
-        set((state) => ({
-          characterChannelMetadata: {
-            ...state.characterChannelMetadata,
-            [characterName]: metadata
+        // Merge: titles arrive one channel at a time (JCH) as well as in bulk (reconnect)
+        set((state) => {
+          const existing = state.characterChannelMetadata[characterName] || {};
+          const merged = { ...existing };
+          for (const channel of channels) {
+            merged[channel.id] = { ...existing[channel.id], ...channel } as Channel;
           }
-        }));
+          return {
+            characterChannelMetadata: {
+              ...state.characterChannelMetadata,
+              [characterName]: merged
+            }
+          };
+        });
       },
 
       getChannelDisplayName: (channelId: string, characterName?: string) => {
-        if (!characterName) return channelId;
+        const allMetadata = get().characterChannelMetadata;
+        const candidates = characterName ? [allMetadata[characterName] || {}] : Object.values(allMetadata);
 
-        const characterMetadata = get().characterChannelMetadata[characterName] || {};
-        return characterMetadata[channelId]?.title || characterMetadata[channelId]?.name || channelId;
+        // A channel's title is the same whichever of our characters is in it
+        for (const metadata of candidates) {
+          const title = metadata[channelId]?.title;
+          if (title) return title;
+        }
+        return channelId;
       },
 
       mergeHistoryMessages: (messages: Message[], characterName?: string) => {

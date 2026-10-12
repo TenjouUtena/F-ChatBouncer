@@ -50,6 +50,7 @@ public class FChatWebSocketClient : IDisposable
     public event Action<string, string, string>? UserOnline; // characterName, status, gender
     public event Action<string>? UserOffline; // characterName
     public event Action<string, List<string>, ChannelMode>? InitialChannelDataReceived; // channelId, users, mode
+    public event Action<string, string>? ChannelTitleReceived; // channelId, title (from our own JCH)
     public event Action<List<Friend>>? FriendsListReceived; // friends list with online status
     public event Action<List<FChatCharacter>>? OnlineCharactersListReceived; // online characters list with status
     public event Action<string?, string>? CharacterError; // characterName, errorMessage
@@ -2263,6 +2264,23 @@ public class FChatWebSocketClient : IDisposable
             // Remove existing entry if present (in case of rejoin)
             _channelCharacters[channelId].RemoveAll(c => c.CharacterName == characterName);
             _channelCharacters[channelId].Add(character);
+
+            // Our own JCH carries the channel's friendly title (private ADH- rooms are not in
+            // the public channel lists, so this is the only place we learn it)
+            if (string.Equals(characterName, _selectedCharacter, StringComparison.OrdinalIgnoreCase) &&
+                data.TryGetProperty("title", out var titleElement) &&
+                titleElement.GetString() is { Length: > 0 } title)
+            {
+                if (_joinedChannelDetails.TryGetValue(channelId, out var details))
+                {
+                    details.Title = title;
+                }
+                else
+                {
+                    _joinedChannelDetails[channelId] = new FChatChannel { Id = channelId, Name = channelId, Title = title };
+                }
+                ChannelTitleReceived?.Invoke(channelId, title);
+            }
 
             // Character joined channel - logging removed
             CharacterJoinedChannel?.Invoke(channelId, character);

@@ -573,6 +573,20 @@ public class FChatService : IFChatService
                 await OnConnectionStatusChanged(userId, characterName, status);
             };
 
+            client.InitialChannelDataReceived += async (channelId, users, mode) =>
+            {
+                await OnInitialChannelData(userId, characterName, channelId);
+            };
+
+            client.ChannelTitleReceived += async (channelId, title) =>
+            {
+                await _hubContext.Clients.Group($"user-{userId}").SendAsync("ChannelMetadata", new
+                {
+                    CharacterName = characterName,
+                    Channels = new[] { new { Id = channelId, Name = channelId, Title = title } }
+                });
+            };
+
             client.CharacterJoinedChannel += async (channelId, character) =>
             {
                 await OnCharacterJoinedChannel(userId, characterName, channelId, character);
@@ -1764,6 +1778,37 @@ public class FChatService : IFChatService
         return Task.FromResult(false);
     }
 
+    /// <summary>
+    /// ICH: F-Chat sent the full member list after we joined a channel. Push it to the
+    /// browser, plus gender/status for every member so names can be coloured.
+    /// </summary>
+    private async Task OnInitialChannelData(string userId, string characterName, string channelId)
+    {
+        try
+        {
+            var client = GetClient(userId, characterName);
+            if (client == null) return;
+
+            var members = await client.GetChannelCharactersAsync(channelId);
+            var group = _hubContext.Clients.Group($"user-{userId}");
+
+            await group.SendAsync("ReceiveChannelCharacters", ChannelCharactersDto.From(channelId, characterName, members));
+
+            var infos = members.Select(m => client.GetOnlineCharacter(m.CharacterName))
+                .Where(c => c != null)
+                .Select(c => CharacterInfoDto.From(c!));
+            foreach (var chunk in infos.Chunk(CharacterInfoChunkSize))
+            {
+                await group.SendAsync("CharacterInfo", chunk);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending initial member list for channel {ChannelId} ({CharacterName}, user {UserId})",
+                channelId, characterName, userId);
+        }
+    }
+
     private async Task OnCharacterJoinedChannel(string userId, string characterName, string channelId, ChannelCharacter character)
     {
         try
@@ -2039,20 +2084,8 @@ public class FChatService : IFChatService
                     var channelCharacters = await client2.GetChannelCharactersAsync(channelId);
                     if (channelCharacters.Any())
                     {
-                        await _hubContext.Clients.Group($"user-{userId}").SendAsync("ChannelCharactersUpdated", new
-                        {
-                            ChannelId = channelId,
-                            Characters = channelCharacters.Select(cc => new
-                            {
-                                CharacterName = cc.CharacterName,
-                                Status = cc.Status.ToString().ToLower(),
-                                StatusMessage = cc.StatusMessage,
-                                Gender = cc.Gender,
-                                LastSeenAt = cc.LastSeenAt,
-                                JoinedAt = cc.JoinedAt
-                            }).ToArray(),
-                            Timestamp = DateTime.UtcNow
-                        });
+                        await _hubContext.Clients.Group($"user-{userId}").SendAsync("ReceiveChannelCharacters",
+                            ChannelCharactersDto.From(channelId, characterName, channelCharacters));
                     }
                 }
             }

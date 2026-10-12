@@ -157,6 +157,12 @@ export default function Home() {
     signalRService.onBouncerReconnected(async (data) => {
       console.log('Bouncer reconnected with state:', data);
 
+      // SignalR payloads are camelCase; keep the friendly titles of joined channels
+      const restored = data as unknown as { character?: { name: string }; joinedChannels?: { id: string; name: string; title?: string }[] };
+      if (restored.character && restored.joinedChannels) {
+        useChatStore.getState().setChannelMetadata(restored.joinedChannels, restored.character.name);
+      }
+
       if (data.Character) {
         // Add character connection to character store
         addConnection({
@@ -324,6 +330,11 @@ export default function Home() {
         // Don't immediately request updated character data as it can cause race conditions
         // The backend will send the updated state when it's ready
         console.log('Character switch completed, not requesting immediate data refresh to avoid race condition');
+      });
+
+      // Friendly channel titles, sent when one of our characters joins a channel
+      signalRService.onChannelMetadata((data) => {
+        useChatStore.getState().setChannelMetadata(data.channels, data.characterName);
       });
 
       // Gender/status pushes for characters in our channels and friends/bookmarks

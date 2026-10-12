@@ -49,11 +49,12 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
   const isMobile = screenWidth < 1280;
   const shouldShowExpanded = !isMobile || (isMobile && (isExpanded || isHovered));
 
+  // Load the member list whenever the channel changes (the server also pushes it on join)
   useEffect(() => {
-    if (channelId && isExpanded) {
+    if (channelId) {
       loadCharacters();
     }
-  }, [channelId, isExpanded]);
+  }, [channelId, signalRService.connectionState]);
 
   // Track screen width for responsive behavior
   useEffect(() => {
@@ -141,13 +142,13 @@ export default function ChannelCharacterList({ channelId, className = '', onOpen
     signalRService.onStatusUpdated(handleStatusUpdate);
 
     return () => {
-      // Cleanup listeners
-      signalRService.removeListener('CharacterJoinedChannel');
-      signalRService.removeListener('CharacterLeftChannel');
-      signalRService.removeListener('ReceiveChannelCharacters');
-      signalRService.removeListener('ChannelCharactersRefreshed');
-      signalRService.removeListener('ChannelCharacterError');
-      signalRService.removeListener('StatusUpdated');
+      // Remove only our own handlers; other components listen to some of these events too
+      signalRService.removeListener('CharacterJoinedChannel', handleCharacterJoined);
+      signalRService.removeListener('CharacterLeftChannel', handleCharacterLeft);
+      signalRService.removeListener('ReceiveChannelCharacters', handleChannelCharacters);
+      signalRService.removeListener('ChannelCharactersRefreshed', handleChannelCharactersRefreshed);
+      signalRService.removeListener('ChannelCharacterError', handleChannelCharacterError);
+      signalRService.removeListener('StatusUpdated', handleStatusUpdate);
     };
   }, [channelId, signalRService.connectionState, signalRService.connection?.connectionId]);
 

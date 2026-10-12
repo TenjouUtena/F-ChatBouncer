@@ -1,8 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace FChatBouncer.Server.Models;
 
 /// <summary>
 /// Represents the connection status of the backend to F-List servers
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum BackendConnectionStatus
 {
     /// <summary>

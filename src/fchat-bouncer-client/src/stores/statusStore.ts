@@ -32,6 +32,8 @@ interface StatusStore extends StatusState {
   initializeStatusTracking: () => void;
 }
 
+const BACKEND_STATUS_POLL_MS = 30_000;
+
 const getDefaultBackendStatus = (): BackendStatusInfo => ({
   status: 'not-connected',
   isConnectedToFChat: false,
@@ -158,12 +160,16 @@ export const useStatusStore = create<StatusStore>((set, get) => ({
   },
 
   initializeStatusTracking: () => {
-    // Track SignalR connection state
+    // Track SignalR connection state, and poll the backend status while connected
     const updateSignalRStatus = () => {
       const state = signalRService.connection?.state;
       
       if (state === signalR.HubConnectionState.Connected) {
         get().setSignalRStatus('ready');
+        const { lastRefresh } = get();
+        if (!lastRefresh || Date.now() - lastRefresh.getTime() >= BACKEND_STATUS_POLL_MS) {
+          get().refreshStatus();
+        }
       } else if (state === signalR.HubConnectionState.Connecting || state === signalR.HubConnectionState.Reconnecting) {
         get().setSignalRStatus('loading');
       } else {

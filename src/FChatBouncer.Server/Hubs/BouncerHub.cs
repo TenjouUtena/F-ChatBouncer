@@ -816,18 +816,8 @@ public class BouncerHub : Hub
         {
             var characters = await _fChatService.GetChannelCharactersAsync(userId, activeCharacter, channelId);
 
-            await Clients.Caller.SendAsync("ReceiveChannelCharacters", new
-            {
-                ChannelId = channelId,
-                Characters = characters.Select(c => new
-                {
-                    CharacterName = c.CharacterName,
-                    JoinedAt = c.JoinedAt,
-                    LastSeenAt = c.LastSeenAt,
-                    Status = c.Status.ToString()
-                }).ToArray(),
-                RequestingCharacter = activeCharacter
-            });
+            await Clients.Caller.SendAsync("ReceiveChannelCharacters",
+                ChannelCharactersDto.From(channelId, activeCharacter, characters));
         }
         catch (Exception ex)
         {
