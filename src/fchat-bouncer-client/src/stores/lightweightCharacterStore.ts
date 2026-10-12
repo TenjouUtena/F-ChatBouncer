@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { LightweightCharacterData } from '@/types';
+import { LightweightCharacterData, CharacterInfo } from '@/types';
 import { useLightweightCharacterIndexedDBStore } from './lightweightCharacterIndexedDBStore';
 
 interface LightweightCharacterStore {
@@ -10,6 +10,7 @@ interface LightweightCharacterStore {
   // Methods - now delegated to IndexedDB store
   initialize: () => Promise<void>;
   addCharacter: (character: string, gender: string, species: string) => Promise<void>;
+  upsertMany: (infos: CharacterInfo[]) => Promise<void>;
   getCharacter: (character: string) => LightweightCharacterData | null;
   hasCharacter: (character: string) => boolean;
   updateLastSeen: (character: string) => Promise<void>;
@@ -122,6 +123,12 @@ export const useLightweightCharacterStore = create<LightweightCharacterStore>()(
         });
       },
       
+      upsertMany: async (infos: CharacterInfo[]) => {
+        const indexedDBStore = useLightweightCharacterIndexedDBStore.getState();
+        await indexedDBStore.upsertMany(infos);
+        set({ characters: useLightweightCharacterIndexedDBStore.getState().characters });
+      },
+
       getCharacter: (character: string) => {
         return get().characters[character] || null;
       },

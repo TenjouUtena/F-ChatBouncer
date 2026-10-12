@@ -326,6 +326,11 @@ export default function Home() {
         console.log('Character switch completed, not requesting immediate data refresh to avoid race condition');
       });
 
+      // Gender/status pushes for characters in our channels and friends/bookmarks
+      signalRService.onCharacterInfo((infos) => {
+        useLightweightCharacterStore.getState().upsertMany(infos);
+      });
+
       // Set up friends status event listeners
       signalRService.onStatusUpdated((data) => {
         // Update status in lightweight character store for all characters

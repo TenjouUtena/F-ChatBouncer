@@ -22,7 +22,6 @@ import { useChatStore } from '@/stores/chatStore';
 import { useAuthStore } from '@/stores/authStore';
 import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
 import { useFriendsStore } from '@/stores/friendsStore';
-import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
 import { signalRService } from '@/lib/signalr';
 import { Message, ProfileData } from '@/types';
 import { getAppVersion } from '@/lib/version';
@@ -155,17 +154,11 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     getChannelDisplayName,
     addProfile,
     getProfile,
-    getCharacterGender,
     getCharacterSpecies,
-    hasCharacterData,
     isProfileStale,
-    requestProfileForCharacter,
-    refreshProfile,
     getMessagesForCharacter,
     getSelectedChannelsForCharacter,
     isCharacterKnown,
-    getProfileRequestStatus,
-    markCharacterKnown,
     openPMChannel,
     getUnknownChannelsForCharacter,
     getUnknownChannelCountsForCharacter,
@@ -216,7 +209,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [activeMobileTab, setActiveMobileTab] = useState<string | null>(null);
   const [typingToast, setTypingToast] = useState<{ fromCharacter: string; status: 'typing' | 'paused' | 'clear'; isPM: boolean } | null>(null);
-  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
   const messageListRef = useRef<{ scrollToBottom: () => void; scrollToBottomFast: () => void; isNearBottom: (thresholdPx?: number) => boolean; scrollToMessage: (messageId: string) => void }>(null);
   const pendingRecentMessagesRef = useRef<Record<string, Message[]>>({});
   const requestedRecentCharactersRef = useRef<Record<string, boolean>>({});
@@ -278,27 +270,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
   // Stable callback functions to prevent unnecessary re-renders
   const handleReceiveMessage = useCallback(async (message: Message) => {
     console.log('Received message:', message, 'for character:', message.characterName, 'isActive:', message.isActiveCharacter);
-
-    // Check if we have gender data for the sender - if not, request basic info
-    const senderGender = await getCharacterGender(message.sender);
-    if (!senderGender && message.sender && message.sender !== activeCharacter) {
-      console.log(`No gender data for ${message.sender}, requesting basic info...`);
-      try {
-        const basicInfo = await signalRService.getBasicInfo(message.sender);
-        if (basicInfo.HasData) {
-          console.log(`Retrieved basic info for ${message.sender}:`, basicInfo);
-          // Store the basic info in lightweight character store
-          const { addCharacter } = useLightweightCharacterStore.getState();
-          await addCharacter(
-            message.sender,
-            basicInfo.Gender || 'Unknown',
-            basicInfo.Species || 'Unknown'
-          );
-        }
-      } catch (error) {
-        console.warn(`Failed to get basic info for ${message.sender}:`, error);
-      }
-    }
 
     // Always store the message regardless of which character received it
     // The character context helps us organize messages properly
@@ -371,27 +342,7 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       }
     }
 
-    // Only request profile if we don't know the sender's gender
-    try {
-      const sender = message.sender;
-      if (sender) {
-        const requestStatus = getProfileRequestStatus(sender);
-        const hasData = await hasCharacterData(sender);
-        const knownGender = await getCharacterGender(sender);
-        
-        if (!hasData && requestStatus !== 'requesting') {
-          // We don't have any data for this character, so request profile to get gender info
-          markCharacterKnown(sender);
-          requestProfileForCharacter(sender);
-        } else if (hasData && (!knownGender || knownGender === 'None') && requestStatus !== 'requesting') {
-          // We have data but gender is unknown/None, refresh profile
-          refreshProfile(sender);
-        }
-      }
-    } catch (e) {
-      console.debug('Profile fetch attempt failed:', e);
-    }
-   }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, notificationChannel, hasCharacterData, getCharacterGender, getProfileRequestStatus, markCharacterKnown, requestProfileForCharacter, refreshProfile, isNotificationReady, showPMNotification, openPMChannel, setSelectedChannel]);
+   }, [addMessage, activeCharacter, selectedChannel, clearUnreadCountForChannel, addToSelectedChannels, getSelectedChannelsForCharacter, notificationChannel, isNotificationReady, showPMNotification, openPMChannel, setSelectedChannel]);
 
   const flushPendingRecentMessages = useCallback((characterName?: string) => {
     const targetCharacter = characterName || activeCharacter;
@@ -903,27 +854,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
     setSelectedProfileCharacter('');
   };
 
-  // Load profile data when selectedProfileCharacter changes
-  useEffect(() => {
-    const loadProfileData = async () => {
-      if (selectedProfileCharacter && showProfileModal) {
-        setIsLoadingProfile(true);
-        try {
-          // Request profile if not already available
-          const hasData = await hasCharacterData(selectedProfileCharacter);
-          if (!hasData) {
-            requestProfileForCharacter(selectedProfileCharacter);
-          }
-        } catch (error) {
-          console.debug('Failed to load profile:', error);
-        } finally {
-          setIsLoadingProfile(false);
-        }
-      }
-    };
-
-    loadProfileData();
-  }, [selectedProfileCharacter, showProfileModal, hasCharacterData, requestProfileForCharacter]);
 
   const handleClearAllHistory = async () => {
     if (confirm('Are you sure you want to clear ALL message history? This will clear both frontend and backend history and cannot be undone.')) {

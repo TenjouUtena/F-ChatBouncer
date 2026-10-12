@@ -682,6 +682,30 @@ public class FChatWebSocketClient : IDisposable
             friendsUpdated, friendsMarkedOnline, bookmarksUpdated, bookmarksMarkedOnline);
     }
 
+    /// <summary>
+    /// Names the browser cares about for this connection: everyone in a joined channel,
+    /// plus friends and bookmarks. The receive loop mutates these collections, so a
+    /// concurrent modification yields an empty set rather than an exception.
+    /// </summary>
+    public HashSet<string> GetRelevantCharacterNames()
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            names.UnionWith(_friendsList);
+            names.UnionWith(_bookmarksList);
+            foreach (var characters in _channelCharacters.Values.ToList())
+            {
+                names.UnionWith(characters.Select(c => c.CharacterName));
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            names.Clear();
+        }
+        return names;
+    }
+
     public List<string> GetBookmarksList()
     {
         if (string.IsNullOrEmpty(_username))

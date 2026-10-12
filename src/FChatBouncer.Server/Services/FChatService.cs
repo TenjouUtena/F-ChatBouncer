@@ -588,14 +588,14 @@ public class FChatService : IFChatService
                 await OnStatusUpdated(userId, characterName, statusCharacterName, status, statusMessage);
             };
 
-            client.UserOnline += async (characterName, status, gender) =>
+            client.UserOnline += async (onlineCharacterName, status, gender) =>
             {
-                await OnUserOnline(userId, characterName, status, gender);
+                await OnUserOnline(userId, characterName, onlineCharacterName, status, gender);
             };
 
-            client.UserOffline += async (characterName) =>
+            client.UserOffline += async (offlineCharacterName) =>
             {
-                await OnUserOffline(userId, characterName);
+                await OnUserOffline(userId, characterName, offlineCharacterName);
             };
 
             client.TypingNotificationReceived += async (receivingCharacterName, fromCharacter, status) =>
@@ -1092,6 +1092,33 @@ public class FChatService : IFChatService
         using var scope = _serviceProvider.CreateScope();
         var characterService = scope.ServiceProvider.GetRequiredService<ICharacterService>();
         return await operation(characterService);
+    }
+
+    private const int CharacterInfoChunkSize = 500;
+
+    private FChatWebSocketClient? GetClient(string userId, string characterName)
+    {
+        return _connections.TryGetValue(userId, out var userConnections) &&
+               userConnections.TryGetValue(characterName, out var client)
+            ? client
+            : null;
+    }
+
+    private static string NormalizeGender(string? gender) => string.IsNullOrEmpty(gender) ? "None" : gender;
+
+    /// <summary>
+    /// Push one character's info to the user's browser, but only if the user shares a
+    /// channel with them or has them as a friend/bookmark. Everything else is noise.
+    /// </summary>
+    private async Task SendCharacterInfoIfRelevantAsync(string userId, string viaCharacter, CharacterInfoDto info)
+    {
+        var client = GetClient(userId, viaCharacter);
+        if (client == null || !client.GetRelevantCharacterNames().Contains(info.Name))
+        {
+            return;
+        }
+
+        await _hubContext.Clients.Group($"user-{userId}").SendAsync("CharacterInfo", new[] { info });
     }
 
     private async Task ExecuteWithCharacterService(Func<ICharacterService, Task> operation)
@@ -1794,6 +1821,10 @@ public class FChatService : IFChatService
             // Update character status in unified character store (batched)
             await BatchUpdateCharacterStatus(statusCharacterName, status, statusMessage, true);
 
+            var gender = GetClient(userId, characterName)?.GetOnlineCharacter(statusCharacterName)?.Gender;
+            await SendCharacterInfoIfRelevantAsync(userId, characterName,
+                new CharacterInfoDto(statusCharacterName, NormalizeGender(gender), status, statusMessage, true));
+
             // Broadcast status update to SignalR clients
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("StatusUpdated", new
             {
@@ -1811,10 +1842,13 @@ public class FChatService : IFChatService
         }
     }
 
-    private async Task OnUserOnline(string userId, string characterName, string status, string gender)
+    private async Task OnUserOnline(string userId, string viaCharacter, string characterName, string status, string gender)
     {
         try
         {
+            await SendCharacterInfoIfRelevantAsync(userId, viaCharacter,
+                new CharacterInfoDto(characterName, NormalizeGender(gender), status, null, true));
+
             // Broadcast user online status to SignalR clients FIRST (don't block on batch update)
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("UserOnline", new
             {
@@ -1851,10 +1885,14 @@ public class FChatService : IFChatService
         }
     }
 
-    private async Task OnUserOffline(string userId, string characterName)
+    private async Task OnUserOffline(string userId, string viaCharacter, string characterName)
     {
         try
         {
+            var gender = GetClient(userId, viaCharacter)?.GetOnlineCharacter(characterName)?.Gender;
+            await SendCharacterInfoIfRelevantAsync(userId, viaCharacter,
+                new CharacterInfoDto(characterName, NormalizeGender(gender), "offline", null, false));
+
             // Broadcast user offline status to SignalR clients FIRST (don't block on batch update)
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("UserOffline", new
             {
@@ -1978,19 +2016,18 @@ public class FChatService : IFChatService
                 _logger.LogWarning("Could not find client connection for user {UserId} character {CharacterName}", userId, characterName);
             }
 
-            // Broadcast updated online characters to SignalR clients
-            await _hubContext.Clients.Group($"user-{userId}").SendAsync("OnlineCharactersUpdated", new
+            // Send gender/status for the characters this user can actually see, in chunks
+            var relevant = GetClient(userId, characterName)?.GetRelevantCharacterNames();
+            if (relevant is { Count: > 0 })
             {
-                Characters = onlineCharacters.Select(c => new
+                var infos = onlineCharacters
+                    .Where(c => relevant.Contains(c.Name))
+                    .Select(CharacterInfoDto.From);
+                foreach (var chunk in infos.Chunk(CharacterInfoChunkSize))
                 {
-                    Name = c.Name,
-                    Status = c.Status,
-                    StatusMessage = c.StatusMessage,
-                    Gender = c.Gender,
-                    LastSeen = c.LastSeen
-                }).ToArray(),
-                Timestamp = DateTime.UtcNow
-            });
+                    await _hubContext.Clients.Group($"user-{userId}").SendAsync("CharacterInfo", chunk);
+                }
+            }
 
             // Also broadcast updated channel characters if client has any joined channels
             if (_connections.TryGetValue(userId, out var userConnections2) && 

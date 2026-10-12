@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import { Message, ConnectionStatus } from '@/types';
+import { Message, ConnectionStatus, CharacterInfo } from '@/types';
 import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 
@@ -677,6 +677,10 @@ this.onSearchResultsReceived = callback;
     this.addUniqueListener('StatusUpdated', callback);
   }
 
+  onCharacterInfo(callback: (infos: CharacterInfo[]) => void): void {
+    this.addUniqueListener('CharacterInfo', callback);
+  }
+
   onUserOnline(callback: (data: { characterName: string; status: string; gender: string; timestamp: string; isOnline: boolean }) => void): void {
     this.addUniqueListener('UserOnline', callback);
   }
@@ -869,36 +873,11 @@ this.onSearchResultsReceived = callback;
     }
   }
 
-  async getBasicInfo(characterName: string): Promise<any> {
+  async getCharacterInfo(names: string[]): Promise<CharacterInfo[]> {
     if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
       throw new Error('SignalR connection not available');
     }
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.removeListener('ReceiveBasicInfo');
-        this.removeListener('BasicInfoError');
-        reject(new Error('GetBasicInfo request timed out'));
-      }, 10000); // 10 second timeout
-
-      const handleBasicInfo = (data: any) => {
-        clearTimeout(timeout);
-        this.removeListener('ReceiveBasicInfo');
-        this.removeListener('BasicInfoError');
-        resolve(data);
-      };
-
-      const handleError = (error: string) => {
-        clearTimeout(timeout);
-        this.removeListener('ReceiveBasicInfo');
-        this.removeListener('BasicInfoError');
-        reject(new Error(error));
-      };
-
-      this.addUniqueListener('ReceiveBasicInfo', handleBasicInfo);
-      this.addUniqueListener('BasicInfoError', handleError);
-      this.connection!.invoke('GetBasicInfo', characterName).catch(reject);
-    });
+    return await this.connection.invoke<CharacterInfo[]>('GetCharacterInfo', names);
   }
 
   async getCharacters(): Promise<any[]> {

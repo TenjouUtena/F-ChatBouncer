@@ -27,6 +27,7 @@ public class BouncerHub : Hub
     private static readonly Dictionary<string, CredentialRequest> _pendingCredentialRequests = new();
     private const string AgentIdContextKey = "MessageQueueAgentId";
     private const string AgentIdGeneratedKey = "MessageQueueAgentIdGenerated";
+    private const int MaxCharacterInfoNames = 500;
 
     public BouncerHub(
         IUserService userService,
@@ -381,31 +382,15 @@ public class BouncerHub : Hub
         }
     }
 
-    public async Task GetBasicInfo(string characterName)
+    /// <summary>
+    /// On-demand gender/status lookup for names the browser has not seen in a CharacterInfo push
+    /// </summary>
+    public async Task<CharacterInfoDto[]> GetCharacterInfo(string[] names)
     {
-        var userId = Context.UserIdentifier;
-        if (userId == null) return;
+        if (Context.UserIdentifier == null || names.Length == 0) return [];
 
-        try
-        {
-            // Gender and status come from LIS/NLN/STA, not from the profile
-            var character = await _characterService.GetCharacterAsync(characterName);
-
-            await Clients.Caller.SendAsync("ReceiveBasicInfo", new
-            {
-                CharacterName = characterName,
-                Gender = character?.Gender,
-                Status = character?.Status,
-                CustomStatus = character?.StatusMessage,
-                LastSeen = character?.LastSeen,
-                HasData = character != null
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get basic info for character {CharacterName} (User: {UserId})", characterName, userId);
-            await Clients.Caller.SendAsync("BasicInfoError", $"Failed to get basic info for {characterName}");
-        }
+        var characters = await _characterService.GetCharactersAsync(names.Take(MaxCharacterInfoNames));
+        return characters.Select(CharacterInfoDto.From).ToArray();
     }
 
     #region Multi-Character Management Methods

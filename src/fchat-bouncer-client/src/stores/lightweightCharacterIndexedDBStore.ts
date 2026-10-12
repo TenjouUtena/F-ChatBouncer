@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { characterIndexedDBService, LightweightCharacterData } from '@/lib/characterIndexedDB';
-import { LightweightCharacterData as LightweightCharacterDataType } from '@/types';
+import { LightweightCharacterData as LightweightCharacterDataType, CharacterInfo } from '@/types';
 
 interface LightweightCharacterIndexedDBStore {
   // In-memory cache for quick access
@@ -9,6 +9,7 @@ interface LightweightCharacterIndexedDBStore {
   // Methods
   initialize: () => Promise<void>;
   addCharacter: (character: string, gender: string, species: string) => Promise<void>;
+  upsertMany: (infos: CharacterInfo[]) => Promise<void>;
   getCharacter: (character: string) => LightweightCharacterDataType | null;
   hasCharacter: (character: string) => boolean;
   updateLastSeen: (character: string) => Promise<void>;
@@ -90,6 +91,34 @@ export const useLightweightCharacterIndexedDBStore = create<LightweightCharacter
     } catch (error) {
       console.error(`Failed to store lightweight character ${character}:`, error);
       throw error;
+    }
+  },
+
+  upsertMany: async (infos: CharacterInfo[]) => {
+    if (infos.length === 0) return;
+
+    const existing = get().characters;
+    const updated: Record<string, LightweightCharacterDataType> = {};
+    for (const info of infos) {
+      const previous = existing[info.name];
+      updated[info.name] = {
+        character: info.name,
+        // A "None" gender from STA/FLN means "not known here", not "changed to None"
+        gender: info.gender && info.gender !== 'None' ? info.gender : previous?.gender ?? 'None',
+        species: previous?.species ?? 'Unknown',
+        lastSeen: Date.now(),
+        status: info.status as 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline',
+        statusMessage: info.statusMessage ?? undefined,
+        isOnline: info.isOnline
+      };
+    }
+
+    set((state) => ({ characters: { ...state.characters, ...updated } }));
+
+    try {
+      await Promise.all(Object.values(updated).map(data => characterIndexedDBService.storeLightweightCharacter(data)));
+    } catch (error) {
+      console.error('Failed to persist character info:', error);
     }
   },
 

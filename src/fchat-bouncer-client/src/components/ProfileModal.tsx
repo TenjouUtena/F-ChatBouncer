@@ -88,7 +88,14 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
     }
   };
 
-  // Load profile data when characterName changes
+  // Opening the modal is the only thing that fetches a profile
+  useEffect(() => {
+    if (characterName && isOpen) {
+      requestProfileForCharacter(characterName);
+    }
+  }, [characterName, isOpen, requestProfileForCharacter]);
+
+  // Load from the local cache on open and again whenever a request completes
   useEffect(() => {
     const loadProfileData = async () => {
       if (characterName && isOpen) {
@@ -103,7 +110,7 @@ export default function ProfileModal({ isOpen, onClose, characterName }: Profile
     };
 
     loadProfileData();
-  }, [characterName, isOpen, getProfile]);
+  }, [characterName, isOpen, getProfile, profileStatus]);
 
   if (!isOpen) return null;
 

@@ -111,6 +111,15 @@ export interface CharacterInline {
   nsfw: boolean;
 }
 
+/** Gender and presence pushed by the server (CharacterInfo) or fetched via GetCharacterInfo */
+export interface CharacterInfo {
+  name: string;
+  gender: string;
+  status: string;
+  statusMessage?: string | null;
+  isOnline: boolean;
+}
+
 export interface LightweightCharacterData {
   character: string;
   gender: string;

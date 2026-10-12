@@ -5,6 +5,7 @@ import { generateMessageId } from '@/lib/messages/messageUtils';
 import { api, setTokenRefreshCallback } from '@/lib/api';
 import { useAuthStore } from './authStore';
 import { useLightweightCharacterStore } from './lightweightCharacterStore';
+import { signalRService } from '@/lib/signalr';
 import { useProfileStore } from './profileStore';
 import { messageIndexedDBService } from '@/lib/messageIndexedDB';
 
@@ -229,6 +230,29 @@ function persistMessagesToIndexedDB(messages: Message[], characterName: string):
   });
 }
 
+// Senders not yet in the character store are collected and looked up in one
+// GetCharacterInfo call, debounced so a burst of messages costs one round trip.
+const CHARACTER_INFO_DEBOUNCE_MS = 100;
+const pendingCharacterInfo = new Set<string>();
+let characterInfoTimer: ReturnType<typeof setTimeout> | null = null;
+
+function queueCharacterInfoLookup(name: string): void {
+  pendingCharacterInfo.add(name);
+  if (characterInfoTimer) return;
+
+  characterInfoTimer = setTimeout(async () => {
+    characterInfoTimer = null;
+    const names = Array.from(pendingCharacterInfo);
+    pendingCharacterInfo.clear();
+    try {
+      const infos = await signalRService.getCharacterInfo(names);
+      await useLightweightCharacterStore.getState().upsertMany(infos);
+    } catch (error) {
+      console.debug('Character info lookup failed:', error);
+    }
+  }, CHARACTER_INFO_DEBOUNCE_MS);
+}
+
 // A profile request waits for the server's ProfileAvailable notification. If the fetch
 // fails server-side no notification comes, so clear the spinner after a while.
 const PROFILE_REQUEST_TIMEOUT_MS = 30_000;
@@ -431,21 +455,9 @@ export const useChatStore = create<ChatStore>()(
             };
           }
 
-          // Only request profile if we don't know the sender's gender
-          if (messageWithId.sender) {
-            const profileStore = useProfileStore.getState();
-            const status = profileStore.getProfileRequestStatus(messageWithId.sender);
-            
-            if (status === 'idle') {
-              // Check if we have a profile and if it's stale
-              profileStore.hasProfile(messageWithId.sender).then(hasProfile => {
-                if (!hasProfile || profileStore.isProfileStale(messageWithId.sender)) {
-                  setTimeout(() => {
-                    get().requestProfileForCharacter(messageWithId.sender);
-                  }, 0);
-                }
-              });
-            }
+          // Look up gender/status for senders we have never seen (never a full profile)
+          if (messageWithId.sender && !useLightweightCharacterStore.getState().hasCharacter(messageWithId.sender)) {
+            queueCharacterInfoLookup(messageWithId.sender);
           }
 
           return newState;
@@ -791,28 +803,24 @@ export const useChatStore = create<ChatStore>()(
       },
 
       getCharacterGender: async (characterName: string) => {
-        // First try full profile, then lightweight storage
-        const profileStore = useProfileStore.getState();
-        const fullProfile = await profileStore.getProfile(characterName);
-        if (fullProfile) {
-          return fullProfile.gender;
+        // Character store first; fall back to a cached profile, never request one
+        const lightweightData = useLightweightCharacterStore.getState().getCharacter(characterName);
+        if (lightweightData?.gender && lightweightData.gender !== 'None') {
+          return lightweightData.gender;
         }
-        
-        const lightweightStore = useLightweightCharacterStore.getState();
-        const lightweightData = lightweightStore.getCharacter(characterName);
-        return lightweightData?.gender || null;
+
+        const fullProfile = await useProfileStore.getState().getProfile(characterName);
+        return fullProfile?.gender || lightweightData?.gender || null;
       },
 
       getCharacterSpecies: async (characterName: string) => {
-        // First try full profile, then lightweight storage
-        const profileStore = useProfileStore.getState();
-        const fullProfile = await profileStore.getProfile(characterName);
+        // Species only exists in profiles; use a cached one if present, never request one
+        const fullProfile = await useProfileStore.getState().getProfile(characterName);
         if (fullProfile) {
           return fullProfile.info?.species || fullProfile.info?.Species || 'Unknown';
         }
-        
-        const lightweightStore = useLightweightCharacterStore.getState();
-        const lightweightData = lightweightStore.getCharacter(characterName);
+
+        const lightweightData = useLightweightCharacterStore.getState().getCharacter(characterName);
         return lightweightData?.species || null;
       },
 
