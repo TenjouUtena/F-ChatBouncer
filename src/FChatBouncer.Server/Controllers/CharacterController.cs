@@ -45,8 +45,7 @@ public class CharacterController : ControllerBase
                 Gender = character.Gender,
                 IsOnline = character.IsOnline,
                 LastSeen = character.LastSeen,
-                FirstSeen = character.FirstSeen,
-                LastUpdated = character.LastUpdated
+                FirstSeen = character.FirstSeen
             });
         }
         catch (Exception ex)
@@ -83,8 +82,7 @@ public class CharacterController : ControllerBase
                     Gender = c.Gender,
                     IsOnline = c.IsOnline,
                     LastSeen = c.LastSeen,
-                    FirstSeen = c.FirstSeen,
-                    LastUpdated = c.LastUpdated
+                    FirstSeen = c.FirstSeen
                 }).ToArray(),
                 TotalCount = characters.Count
             });
@@ -117,8 +115,7 @@ public class CharacterController : ControllerBase
                     Gender = c.Gender,
                     IsOnline = c.IsOnline,
                     LastSeen = c.LastSeen,
-                    FirstSeen = c.FirstSeen,
-                    LastUpdated = c.LastUpdated
+                    FirstSeen = c.FirstSeen
                 }).ToArray(),
                 TotalCount = characters.Count
             });
@@ -151,8 +148,7 @@ public class CharacterController : ControllerBase
                     Gender = c.Gender,
                     IsOnline = c.IsOnline,
                     LastSeen = c.LastSeen,
-                    FirstSeen = c.FirstSeen,
-                    LastUpdated = c.LastUpdated
+                    FirstSeen = c.FirstSeen
                 }).ToArray(),
                 TotalCount = characters.Count
             });
@@ -172,7 +168,8 @@ public class CharacterController : ControllerBase
     {
         try
         {
-            var profile = await _characterService.GetCharacterProfileAsync(characterName);
+            var character = await _characterService.GetCharacterAsync(characterName);
+            var profile = character?.Profile;
             if (profile == null)
             {
                 return NotFound(new { message = $"No profile data found for character '{characterName}'" });
@@ -182,7 +179,7 @@ public class CharacterController : ControllerBase
             {
                 CharacterName = characterName,
                 ProfileData = profile,
-                Timestamp = profile.Timestamp
+                Timestamp = character!.ProfileFetchedAt ?? profile.Timestamp
             });
         }
         catch (Exception ex)
@@ -260,8 +257,7 @@ public class CharacterController : ControllerBase
                 Gender = activeCharacter.Gender,
                 IsOnline = activeCharacter.IsOnline,
                 LastSeen = activeCharacter.LastSeen,
-                FirstSeen = activeCharacter.FirstSeen,
-                LastUpdated = activeCharacter.LastUpdated
+                FirstSeen = activeCharacter.FirstSeen
             });
         }
         catch (Exception ex)
@@ -307,188 +303,6 @@ public class CharacterController : ControllerBase
             return StatusCode(500, new { message = "Failed to get character channels" });
         }
     }
-
-    #region Diagnostic Endpoints
-
-    /// <summary>
-    /// Get comprehensive character diagnostic information
-    /// </summary>
-    [HttpGet("diagnostic/{characterName}")]
-    public async Task<ActionResult<CharacterDiagnosticResponse>> GetCharacterDiagnostic(string characterName)
-    {
-        try
-        {
-            var character = await _characterService.GetCharacterAsync(characterName);
-            if (character == null)
-            {
-                return NotFound(new { message = $"Character '{characterName}' not found" });
-            }
-
-            var profile = character.GetStructuredProfile();
-            var connections = await _characterService.GetCharacterConnectionsAsync(characterName);
-            var channels = await _characterService.GetCharacterChannelsAsync(characterName);
-
-            return Ok(new CharacterDiagnosticResponse
-            {
-                Character = new DetailedCharacterDto
-                {
-                    Id = character.Id,
-                    Name = character.Name,
-                    Status = character.Status,
-                    StatusMessage = character.StatusMessage,
-                    Gender = character.Gender,
-                    IsOnline = character.IsOnline,
-                    LastSeen = character.LastSeen,
-                    FirstSeen = character.FirstSeen,
-                    LastUpdated = character.LastUpdated,
-                    ProfileData = character.ProfileData,
-                    StructuredProfileData = character.StructuredProfileData,
-                    RawProData = character.RawProData
-                },
-                Profile = profile,
-                Connections = connections.Select(c => new CharacterConnectionDto
-                {
-                    Id = c.Id,
-                    CharacterName = c.Character.Name,
-                    FChatUsername = c.FChatUsername,
-                    IsActive = c.IsActive,
-                    IsConnected = c.IsConnected,
-                    ConnectedAt = c.ConnectedAt,
-                    LastActivityAt = c.LastActivityAt,
-                    CreatedAt = c.CreatedAt
-                }).ToArray(),
-                Channels = channels.ToArray(),
-                HasProfileData = !string.IsNullOrEmpty(character.ProfileData),
-                HasStructuredProfile = profile != null,
-                ProfileAge = character.LastUpdated,
-                ConnectionCount = connections.Count,
-                ChannelCount = channels.Count
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get diagnostic information for character {CharacterName}", characterName);
-            return StatusCode(500, new { message = "Failed to get character diagnostic information" });
-        }
-    }
-
-    /// <summary>
-    /// Search characters with diagnostic information
-    /// </summary>
-    [HttpGet("diagnostic/search")]
-    public async Task<ActionResult<CharacterDiagnosticSearchResponse>> SearchCharactersDiagnostic([FromQuery] string q, [FromQuery] int limit = 50)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(q))
-            {
-                return BadRequest(new { message = "Search query is required" });
-            }
-
-            var characters = await _characterService.SearchCharactersAsync(q, limit);
-            var diagnosticResults = new List<CharacterDiagnosticSummary>();
-
-            foreach (var character in characters)
-            {
-                var profile = character.GetStructuredProfile();
-                var connections = await _characterService.GetCharacterConnectionsAsync(character.Name);
-                var channels = await _characterService.GetCharacterChannelsAsync(character.Name);
-
-                diagnosticResults.Add(new CharacterDiagnosticSummary
-                {
-                    Id = character.Id,
-                    Name = character.Name,
-                    Status = character.Status,
-                    StatusMessage = character.StatusMessage,
-                    Gender = character.Gender,
-                    IsOnline = character.IsOnline,
-                    LastSeen = character.LastSeen,
-                    FirstSeen = character.FirstSeen,
-                    LastUpdated = character.LastUpdated,
-                    HasProfileData = !string.IsNullOrEmpty(character.ProfileData),
-                    HasStructuredProfile = profile != null,
-                    ProfileFieldCount = profile != null ? profile.Info.Count + profile.Kinks.Count : 0,
-                    ConnectionCount = connections.Count,
-                    ChannelCount = channels.Count,
-                    ProfileAge = character.LastUpdated
-                });
-            }
-
-            return Ok(new CharacterDiagnosticSearchResponse
-            {
-                Query = q,
-                Characters = diagnosticResults.ToArray(),
-                TotalCount = diagnosticResults.Count
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to search characters with diagnostic information for query {Query}", q);
-            return StatusCode(500, new { message = "Failed to search characters" });
-        }
-    }
-
-    /// <summary>
-    /// Get character database statistics
-    /// </summary>
-    [HttpGet("diagnostic/stats")]
-    public async Task<ActionResult<CharacterStatsResponse>> GetCharacterStats()
-    {
-        try
-        {
-            var totalCharacters = await _characterService.GetTotalCharacterCountAsync();
-            var onlineCharacters = await _characterService.GetOnlineCharactersAsync();
-            var charactersWithProfiles = await _characterService.GetCharactersWithProfilesAsync();
-            var recentCharacters = await _characterService.GetRecentlyUpdatedCharactersAsync(24); // Last 24 hours
-
-            return Ok(new CharacterStatsResponse
-            {
-                TotalCharacters = totalCharacters,
-                OnlineCharacters = onlineCharacters.Count,
-                CharactersWithProfiles = charactersWithProfiles.Count,
-                RecentlyUpdated = recentCharacters.Count,
-                ProfileCoverage = totalCharacters > 0 ? (double)charactersWithProfiles.Count / totalCharacters * 100 : 0,
-                OnlinePercentage = totalCharacters > 0 ? (double)onlineCharacters.Count / totalCharacters * 100 : 0
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get character statistics");
-            return StatusCode(500, new { message = "Failed to get character statistics" });
-        }
-    }
-
-    /// <summary>
-    /// Manually request a profile update from F-Chat
-    /// </summary>
-    [HttpPost("diagnostic/request-profile")]
-    public Task<ActionResult> RequestProfileManually([FromBody] RequestProfileRequest request)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(request.CharacterName))
-            {
-                return Task.FromResult<ActionResult>(BadRequest(new { message = "Character name is required" }));
-            }
-
-            // This would need to be implemented in the FChatService
-            // For now, we'll return a placeholder response
-            _logger.LogInformation("Manual profile request for character {CharacterName}", request.CharacterName);
-            
-            return Task.FromResult<ActionResult>(Ok(new { 
-                message = $"Profile request submitted for character '{request.CharacterName}'",
-                characterName = request.CharacterName,
-                timestamp = DateTime.UtcNow
-            }));
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to request profile for character {CharacterName}", request.CharacterName);
-            return Task.FromResult<ActionResult>(StatusCode(500, new { message = "Failed to request profile" }));
-        }
-    }
-
-    #endregion
 }
 
 // DTOs
@@ -502,7 +316,6 @@ public class UnifiedCharacterDto
     public bool IsOnline { get; set; }
     public DateTime LastSeen { get; set; }
     public DateTime FirstSeen { get; set; }
-    public DateTime LastUpdated { get; set; }
 }
 
 public class UnifiedCharacterListResponse
@@ -556,75 +369,4 @@ public class CharacterChannelsResponse
     public string[] Channels { get; set; } = [];
     public CharacterChannelMembershipDto[] Memberships { get; set; } = [];
     public int TotalCount { get; set; }
-}
-
-// Diagnostic DTOs
-public class DetailedCharacterDto
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
-    public string? StatusMessage { get; set; }
-    public string Gender { get; set; } = string.Empty;
-    public bool IsOnline { get; set; }
-    public DateTime LastSeen { get; set; }
-    public DateTime FirstSeen { get; set; }
-    public DateTime LastUpdated { get; set; }
-    public string? ProfileData { get; set; }
-    public string? StructuredProfileData { get; set; }
-    public string? RawProData { get; set; }
-}
-
-public class CharacterDiagnosticResponse
-{
-    public DetailedCharacterDto Character { get; set; } = new();
-    public ProfileData? Profile { get; set; }
-    public CharacterConnectionDto[] Connections { get; set; } = [];
-    public string[] Channels { get; set; } = [];
-    public bool HasProfileData { get; set; }
-    public bool HasStructuredProfile { get; set; }
-    public DateTime ProfileAge { get; set; }
-    public int ConnectionCount { get; set; }
-    public int ChannelCount { get; set; }
-}
-
-public class CharacterDiagnosticSummary
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public string Status { get; set; } = string.Empty;
-    public string? StatusMessage { get; set; }
-    public string Gender { get; set; } = string.Empty;
-    public bool IsOnline { get; set; }
-    public DateTime LastSeen { get; set; }
-    public DateTime FirstSeen { get; set; }
-    public DateTime LastUpdated { get; set; }
-    public bool HasProfileData { get; set; }
-    public bool HasStructuredProfile { get; set; }
-    public int ProfileFieldCount { get; set; }
-    public int ConnectionCount { get; set; }
-    public int ChannelCount { get; set; }
-    public DateTime ProfileAge { get; set; }
-}
-
-public class CharacterDiagnosticSearchResponse
-{
-    public string Query { get; set; } = string.Empty;
-    public CharacterDiagnosticSummary[] Characters { get; set; } = [];
-    public int TotalCount { get; set; }
-}
-
-public class CharacterStatsResponse
-{
-    public int TotalCharacters { get; set; }
-    public int OnlineCharacters { get; set; }
-    public int CharactersWithProfiles { get; set; }
-    public int RecentlyUpdated { get; set; }
-    public double ProfileCoverage { get; set; }
-    public double OnlinePercentage { get; set; }
-}
-
-public class RequestProfileRequest
-{
-    public string CharacterName { get; set; } = string.Empty;
 }

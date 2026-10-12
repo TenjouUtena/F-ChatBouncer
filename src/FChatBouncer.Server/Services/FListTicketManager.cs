@@ -7,14 +7,14 @@ namespace FChatBouncer.Server.Services;
 /// </summary>
 public class FListTicketManager : IFListTicketManager
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FListTicketManager> _logger;
     private readonly Dictionary<string, FListTicketInfo> _tickets = new();
     private readonly object _lock = new();
 
-    public FListTicketManager(HttpClient httpClient, ILogger<FListTicketManager> logger)
+    public FListTicketManager(IHttpClientFactory httpClientFactory, ILogger<FListTicketManager> logger)
     {
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -77,7 +77,7 @@ public class FListTicketManager : IFListTicketManager
                 new KeyValuePair<string, string>("password", password)
             });
 
-            var response = await _httpClient.PostAsync("https://www.f-list.net/json/getApiTicket.php", authData);
+            var response = await _httpClientFactory.CreateClient().PostAsync("https://www.f-list.net/json/getApiTicket.php", authData);
             var content = await response.Content.ReadAsStringAsync();
 
             _logger.LogDebug("Received response from F-List API. Status: {StatusCode}, Content length: {ContentLength}",

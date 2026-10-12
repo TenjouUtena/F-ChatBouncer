@@ -17,15 +17,6 @@ public interface IFListCharacterDataService
     Task<CharacterDataResponse> GetCharacterDataAsync(string characterName, string ticket, string account);
 
     /// <summary>
-    /// Get character data with human-readable names using mapping service
-    /// </summary>
-    /// <param name="characterName">Name of the character to get data for</param>
-    /// <param name="ticket">Authentication ticket from active WebSocket connection</param>
-    /// <param name="account">F-Chat account username</param>
-    /// <returns>Character data response with human-readable names</returns>
-    Task<CharacterDataResponse> GetCharacterDataWithMappingAsync(string characterName, string ticket, string account);
-
-    /// <summary>
     /// Get character data with automatic ticket renewal on expiration
     /// </summary>
     /// <param name="characterName">Name of the character to get data for</param>

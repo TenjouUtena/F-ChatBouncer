@@ -36,8 +36,9 @@ export CORS__AllowedOrigins__0="http://localhost:3000"
 export ASPNETCORE_ENVIRONMENT="Development"
 export ASPNETCORE_URLS="http://localhost:5001"
 
-# Optional: Credential encryption key (if used elsewhere in the app)
-export CREDENTIAL_ENCRYPTION_KEY="b736923bcf38dgfe0230dfe7239vcde3902"
+# Encryption key for stored F-Chat credentials and tickets (base64, 32 bytes).
+# Dev only. Changing it makes every stored credential unreadable.
+export ENCRYPTION_KEY="m89XOXmMIcwdUGInvKb7IjdWv9XPB+RSR/Kx+UMgoPM="
 
 # Optional: Ticket expiration
 export TICKET_EXPIRATION_MINUTES="60"

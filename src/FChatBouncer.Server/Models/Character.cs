@@ -6,7 +6,6 @@ namespace FChatBouncer.Server.Models;
 
 /// <summary>
 /// Unified Character model that consolidates all character information across connections.
-/// This replaces the fragmented approach of ChannelCharacter, FChatCharacter, Profile, and ProfileData.
 /// Characters are shared across connections - the same character in Blazon's connection is the same character in Kredden's connection.
 /// </summary>
 public class Character
@@ -52,40 +51,26 @@ public class Character
     public DateTime FirstSeen { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// When this character's information was last updated
-    /// </summary>
-    public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
-
-    /// <summary>
-    /// Raw profile data from F-Chat (JSON format)
-    /// </summary>
-    public string? ProfileData { get; set; }
-
-    /// <summary>
-    /// Structured profile data (parsed from ProfileData)
-    /// </summary>
-    public string? StructuredProfileData { get; set; }
-
-    /// <summary>
-    /// Raw PRO command payload for debugging
-    /// </summary>
-    public string? RawProData { get; set; }
-
-    /// <summary>
     /// Whether this character is currently online (across any connection)
     /// </summary>
     public bool IsOnline { get; set; } = false;
 
     /// <summary>
-    /// User's memo/note for this character (from F-List)
+    /// Cached F-List profile, serialized ProfileData (jsonb). Null until first fetched.
     /// </summary>
-    [MaxLength(1000)]
-    public string? Memo { get; set; }
+    public string? ProfileJson { get; set; }
 
     /// <summary>
-    /// When the memo was last updated
+    /// When ProfileJson was last fetched from F-List. Staleness is decided from this column only.
     /// </summary>
-    public DateTime? MemoLastUpdated { get; set; }
+    public DateTime? ProfileFetchedAt { get; set; }
+
+    [NotMapped]
+    public ProfileData? Profile
+    {
+        get => ProfileJson is null ? null : JsonSerializer.Deserialize<ProfileData>(ProfileJson);
+        set => ProfileJson = value is null ? null : JsonSerializer.Serialize(value);
+    }
 
     /// <summary>
     /// List of connections where this character has been seen
@@ -96,60 +81,6 @@ public class Character
     /// List of channels this character is currently in
     /// </summary>
     public virtual ICollection<CharacterChannel> Channels { get; set; } = new List<CharacterChannel>();
-
-    /// <summary>
-    /// Get the structured profile data as a ProfileData object
-    /// </summary>
-    public ProfileData? GetStructuredProfile()
-    {
-        if (string.IsNullOrEmpty(StructuredProfileData))
-            return null;
-
-        try
-        {
-            var profileData = JsonSerializer.Deserialize<ProfileData>(StructuredProfileData);
-            // Console logging removed
-            return profileData;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Set the structured profile data from a ProfileData object
-    /// </summary>
-    public void SetStructuredProfile(ProfileData profileData)
-    {
-        if (profileData == null)
-        {
-            StructuredProfileData = null;
-            return;
-        }
-
-        // Update character properties from profile data
-        Name = profileData.CharacterName;
-        
-        // Extract gender from profile data first
-        profileData.ExtractGender();
-        
-        // Update gender if we have a valid value from profile data
-        if (!string.IsNullOrEmpty(profileData.Gender) && profileData.Gender != "None")
-        {
-            Gender = profileData.Gender;
-        }
-
-        // Serialize the structured data
-        StructuredProfileData = JsonSerializer.Serialize(profileData, new JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
-
-        // Console logging removed
-
-        LastUpdated = DateTime.UtcNow;
-    }
 
     /// <summary>
     /// Update character status information
@@ -165,17 +96,6 @@ public class Character
         IsOnline = statusLower != "offline";
         
         LastSeen = DateTime.UtcNow;
-        LastUpdated = DateTime.UtcNow;
-    }
-
-    /// <summary>
-    /// Get a summary of the character for logging/debugging
-    /// </summary>
-    public string GetSummary()
-    {
-        var profile = GetStructuredProfile();
-        var profileSummary = profile?.GetSummary() ?? "No profile data";
-        return $"Character: {Name}, Status: {Status}, Gender: {Gender}, Online: {IsOnline}, Profile: {profileSummary}";
     }
 }
 

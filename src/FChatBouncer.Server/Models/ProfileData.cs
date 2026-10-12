@@ -87,6 +87,12 @@ public class ProfileData
     public Dictionary<string, CharacterInline> Inlines { get; set; } = new();
 
     /// <summary>
+    /// Profile view count reported by F-List
+    /// </summary>
+    [JsonPropertyName("views")]
+    public int ViewCount { get; set; }
+
+    /// <summary>
     /// When this profile data was built/received
     /// </summary>
     [JsonPropertyName("timestamp")]

@@ -111,14 +111,13 @@ export interface CharacterInline {
   nsfw: boolean;
 }
 
-export interface LightweightCharacterData {
-  character: string;
+/** Gender and presence pushed by the server (CharacterInfo) or fetched via GetCharacterInfo */
+export interface CharacterInfo {
+  name: string;
   gender: string;
-  species: string;
-  lastSeen: number;
-  status?: 'online' | 'looking' | 'busy' | 'away' | 'dnd' | 'offline';
-  statusMessage?: string;
-  isOnline?: boolean;
+  status: string;
+  statusMessage?: string | null;
+  isOnline: boolean;
 }
 
 export interface ProfileData {
@@ -132,25 +131,12 @@ export interface ProfileData {
   timestamp: string;
 }
 
-export interface ProfileReceivedEvent {
-  characterName: string;
-  profileData: ProfileData | string;
-  message: string;
-  requestingCharacter?: string;
-  onlineStatus?: {
-    isOnline: boolean;
-    status: string;
-    gender?: string;
-    lastSeen: string;
-  };
-}
-
 export interface ProfileResponse {
   characterName: string;
   profileData: ProfileData | null;
-  isCached: boolean;
-  age?: { totalHours: number };
-  message?: string;
+  fetchedAt: string | null;
+  isStale: boolean;
+  refreshQueued: boolean;
 }
 
 export interface Friend {

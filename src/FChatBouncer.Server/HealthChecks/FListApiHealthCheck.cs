@@ -10,7 +10,8 @@ public class FListApiHealthCheck : IHealthCheck
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FListApiHealthCheck> _logger;
-    private const string FListApiUrl = "https://www.f-list.net/json/api/";
+    // The bare /json/api/ directory answers 403 to .NET clients; probe a real endpoint (headers only)
+    private const string FListApiUrl = "https://www.f-list.net/json/api/mapping-list.php";
     private const int TimeoutSeconds = 10;
 
     public FListApiHealthCheck(IHttpClientFactory httpClientFactory, ILogger<FListApiHealthCheck> logger)
@@ -30,7 +31,7 @@ public class FListApiHealthCheck : IHealthCheck
             
             // Try to HEAD the F-List API endpoint to check connectivity
             // We don't need a valid response, just checking if the API is reachable
-            var response = await httpClient.GetAsync(FListApiUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var response = await httpClient.GetAsync(FListApiUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             
             var duration = DateTime.UtcNow - startTime;
 

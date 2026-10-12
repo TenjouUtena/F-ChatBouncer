@@ -3,10 +3,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
-import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
+import { useConnectionStore } from '@/stores/connectionStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
 import { useFriendsStore } from '@/stores/friendsStore';
-import { useLightweightCharacterStore } from '@/stores/lightweightCharacterStore';
+import { useCharacterStore } from '@/stores/characterStore';
 import AuthFlow from '@/components/AuthFlow';
 import CharacterSelection from '@/components/CharacterSelection';
 import ChannelSelection from '@/components/ChannelSelection';
@@ -31,7 +31,7 @@ export default function Home() {
     setToken
   } = useAuthStore();
   const { setConnected, setSelectedChannels, setJoinedChannels, mergeHistoryMessages, getLastMessageTime } = useChatStore();
-  const { activeCharacter, setActiveCharacter, addConnection, clearActiveCharacter } = useCharacterIndexedDBStore();
+  const { activeCharacter, setActiveCharacter, addConnection, clearActiveCharacter } = useConnectionStore();
   const { initialize, hasStoredCredentials, retrieveCredentials } = useCredentialsStore();
   const { updateFriendStatus, setFriendOnline, isFriendOrBookmark, addBookmark, removeBookmark } = useFriendsStore();
   const [isLoading, setIsLoading] = useState(false);
@@ -223,7 +223,7 @@ export default function Home() {
     signalRService.onCharacterDisconnected((data) => {
       console.log('Character disconnected:', data);
       // Update character connection status in store
-      const { updateConnection } = useCharacterIndexedDBStore.getState();
+      const { updateConnection } = useConnectionStore.getState();
       updateConnection(data.CharacterName, {
         isConnected: false,
         status: 'disconnected',
@@ -262,7 +262,7 @@ export default function Home() {
       // Set up the ReceiveActiveCharacters listener after connection is established
       signalRService.onReceiveActiveCharacters(async (data) => {
         // Update character store with all character connections from backend
-        const { setConnections, activeCharacter: currentActiveCharacter } = useCharacterIndexedDBStore.getState();
+        const { setConnections, activeCharacter: currentActiveCharacter } = useConnectionStore.getState();
         
         // Preserve the current active character if it exists and is still valid, otherwise use the one from backend
         const characterToSet = data.activeCharacter || currentActiveCharacter;
@@ -307,11 +307,11 @@ export default function Home() {
           }
           
           // Update the character connection status in the store to reflect the switch
-          const { updateConnection } = useCharacterIndexedDBStore.getState();
+          const { updateConnection } = useConnectionStore.getState();
           updateConnection(characterName, { isActive: true });
           
           // Set all other characters as inactive
-          const { connections } = useCharacterIndexedDBStore.getState();
+          const { connections } = useConnectionStore.getState();
           connections.forEach(conn => {
             if (conn.characterName !== characterName) {
               updateConnection(conn.characterName, { isActive: false });
@@ -326,12 +326,13 @@ export default function Home() {
         console.log('Character switch completed, not requesting immediate data refresh to avoid race condition');
       });
 
+      // Gender/status pushes for characters in our channels and friends/bookmarks
+      signalRService.onCharacterInfo((infos) => {
+        useCharacterStore.getState().upsertMany(infos);
+      });
+
       // Set up friends status event listeners
       signalRService.onStatusUpdated((data) => {
-        // Update status in lightweight character store for all characters
-        const { updateStatus } = useLightweightCharacterStore.getState();
-        updateStatus(data.characterName, data.status as any, data.statusMessage);
-        
         // Also update friends store if this character is a friend or bookmark
         if (isFriendOrBookmark(data.characterName)) {
           updateFriendStatus(data.characterName, data.status as any, data.statusMessage);
@@ -412,13 +413,13 @@ export default function Home() {
         
         try {
           // Fetch the profile via REST API
-          const profileResponse = await api.getProfile(token!, data.characterName, true);
+          const profileResponse = await api.getProfile(token!, data.characterName);
           console.debug('Successfully fetched profile after notification:', profileResponse);
           
           // Update the profile in the chat store
           const { addProfile } = useChatStore.getState();
           if (profileResponse.profileData) {
-            addProfile(data.characterName, profileResponse.profileData);
+            addProfile(data.characterName, profileResponse.profileData, profileResponse.fetchedAt, profileResponse.isStale);
             console.debug(`Added profile for ${data.characterName} to chat store`);
           }
         } catch (error) {

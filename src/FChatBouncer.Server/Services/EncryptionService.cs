@@ -23,33 +23,28 @@ public class EncryptionService : IEncryptionService
         var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
             ?? configuration.GetValue<string>("Security:EncryptionKey");
         
+        // A generated key would make every stored credential unreadable after a restart
         if (string.IsNullOrEmpty(encryptionKey))
         {
-            _logger.LogWarning("ENCRYPTION_KEY not set, generating temporary key (NOT FOR PRODUCTION)");
-            // Generate a temporary key for development
-            _key = new byte[32]; // 256 bits
-            using var rng = RandomNumberGenerator.Create();
-            rng.GetBytes(_key);
-            _logger.LogWarning("Generated temporary encryption key: {Key}", Convert.ToBase64String(_key));
+            throw new InvalidOperationException(
+                "ENCRYPTION_KEY is not configured. Set it to a base64-encoded 32-byte key (openssl rand -base64 32).");
         }
-        else
+
+        try
         {
-            try
+            // Try to decode as base64 first
+            _key = Convert.FromBase64String(encryptionKey);
+            if (_key.Length != 32)
             {
-                // Try to decode as base64 first
-                _key = Convert.FromBase64String(encryptionKey);
-                if (_key.Length != 32)
-                {
-                    throw new InvalidOperationException("Encryption key must be 32 bytes (256 bits)");
-                }
+                throw new InvalidOperationException("Encryption key must be 32 bytes (256 bits)");
             }
-            catch (FormatException)
-            {
-                // If not base64, use the string itself and hash it to get 32 bytes
-                _logger.LogWarning("Encryption key is not valid base64, deriving key from string");
-                using var sha256 = SHA256.Create();
-                _key = sha256.ComputeHash(Encoding.UTF8.GetBytes(encryptionKey));
-            }
+        }
+        catch (FormatException)
+        {
+            // If not base64, use the string itself and hash it to get 32 bytes
+            _logger.LogWarning("Encryption key is not valid base64, deriving key from string");
+            using var sha256 = SHA256.Create();
+            _key = sha256.ComputeHash(Encoding.UTF8.GetBytes(encryptionKey));
         }
     }
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '@/stores/authStore';
 import { useChatStore } from '@/stores/chatStore';
-import { useCharacterIndexedDBStore } from '@/stores/characterIndexedDBStore';
+import { useConnectionStore } from '@/stores/connectionStore';
 import { signalRService } from '@/lib/signalr';
 import { Channel } from '@/types';
 
@@ -35,7 +35,7 @@ export default function ChannelSelection({
   className = ''
 }: ChannelSelectionProps) {
   const { user } = useAuthStore();
-  const { activeCharacter } = useCharacterIndexedDBStore();
+  const { activeCharacter } = useConnectionStore();
   const { setSelectedChannels, getSelectedChannelsForCharacter, setChannelMetadata } = useChatStore();
   const [availableChannels, setAvailableChannels] = useState<Channel[]>([]);
   const [selectedChannels, setLocalSelectedChannels] = useState<string[]>([]);

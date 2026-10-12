@@ -37,21 +37,6 @@ public interface ICharacterService
     Task UpdateCharacterGenderAsync(string characterName, string gender);
 
     /// <summary>
-    /// Update character profile information
-    /// </summary>
-    Task UpdateCharacterProfileAsync(string characterName, ProfileData profileData);
-
-    /// <summary>
-    /// Update character profile from raw data
-    /// </summary>
-    Task UpdateCharacterProfileAsync(string characterName, string profileData, string? rawProData = null);
-
-    /// <summary>
-    /// Get character profile data
-    /// </summary>
-    Task<ProfileData?> GetCharacterProfileAsync(string characterName);
-
-    /// <summary>
     /// Search for characters by name (partial match)
     /// </summary>
     Task<List<Character>> SearchCharactersAsync(string searchTerm, int limit = 50);
@@ -73,7 +58,7 @@ public interface ICharacterService
     /// <summary>
     /// Create or update a character connection for a user
     /// </summary>
-    Task<CharacterConnection> CreateOrUpdateCharacterConnectionAsync(string userId, string characterName, string fchatUsername, string fchatPassword);
+    Task<CharacterConnection> CreateOrUpdateCharacterConnectionAsync(string userId, string characterName, string fchatUsername);
 
     /// <summary>
     /// Get all character connections for a user
@@ -139,19 +124,9 @@ public interface ICharacterService
     #region Character Discovery
 
     /// <summary>
-    /// Discover a character from F-Chat data (status, profile, etc.)
+    /// Record a character's presence (status, gender, last seen) reported by F-Chat
     /// </summary>
-    Task<Character> DiscoverCharacterAsync(string characterName, string status = "online", string? statusMessage = null, string gender = "None");
-
-    /// <summary>
-    /// Update character information from F-Chat character data
-    /// </summary>
-    Task UpdateCharacterFromFChatDataAsync(string characterName, FChatCharacter fchatCharacter);
-
-    /// <summary>
-    /// Update character information from channel character data
-    /// </summary>
-    Task UpdateCharacterFromChannelDataAsync(string characterName, ChannelCharacter channelCharacter);
+    Task UpdateCharacterPresenceAsync(string characterName, string status, string? statusMessage, string? gender, DateTime lastSeen);
 
     #endregion
 
@@ -161,45 +136,6 @@ public interface ICharacterService
     /// Get multiple characters by name
     /// </summary>
     Task<List<Character>> GetCharactersAsync(IEnumerable<string> characterNames);
-
-    /// <summary>
-    /// Update multiple character statuses
-    /// </summary>
-    Task UpdateCharacterStatusesAsync(Dictionary<string, (string status, string? statusMessage, bool isOnline)> characterUpdates);
-
-    /// <summary>
-    /// Clean up orphaned character data
-    /// </summary>
-    Task CleanupOrphanedCharactersAsync();
-
-    #endregion
-
-    #region Diagnostic Methods
-
-    /// <summary>
-    /// Get total count of characters in the database
-    /// </summary>
-    Task<int> GetTotalCharacterCountAsync();
-
-    /// <summary>
-    /// Get characters that have profile data
-    /// </summary>
-    Task<List<Character>> GetCharactersWithProfilesAsync();
-
-    /// <summary>
-    /// Get characters updated within the last N hours
-    /// </summary>
-    Task<List<Character>> GetRecentlyUpdatedCharactersAsync(int hours);
-
-    /// <summary>
-    /// Get all character connections for a specific character
-    /// </summary>
-    Task<List<CharacterConnection>> GetCharacterConnectionsAsync(string characterName);
-
-    /// <summary>
-    /// Get all channels for a specific character
-    /// </summary>
-    Task<List<string>> GetCharacterChannelsAsync(string characterName);
 
     #endregion
 }

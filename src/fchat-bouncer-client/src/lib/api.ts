@@ -188,8 +188,8 @@ export const api = {
     });
   },
 
-  async getProfile(token: string, characterName: string, allowStale: boolean = true): Promise<ProfileResponse> {
-    const response = await fetchWithError(`${API_BASE}/fchat/profile/${encodeURIComponent(characterName)}?allowStale=${allowStale}`, {
+  async getProfile(token: string, characterName: string): Promise<ProfileResponse> {
+    const response = await fetchWithError(`${API_BASE}/fchat/profile/${encodeURIComponent(characterName)}`, {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
@@ -198,43 +198,8 @@ export const api = {
     return response.json();
   },
 
-  async getProfileWithRetry(token: string, characterName: string, allowStale: boolean = true, maxRetries: number = 3): Promise<ProfileResponse> {
-    let lastError: Error | null = null;
-    
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        return await this.getProfile(token, characterName, allowStale);
-      } catch (error) {
-        lastError = error as Error;
-        
-        // Check if it's a rate limiting error (server now returns 429 for rate limiting)
-        const isRateLimited = error instanceof ApiError && 
-          (error.status === 429 || (error.status === 500 && error.message.includes('Rate limited')));
-        
-        // If it's a rate limit error or server error (5xx), retry with exponential backoff
-        if (error instanceof ApiError && (error.status === 429 || error.status >= 500 || isRateLimited)) {
-          const delay = Math.pow(2, attempt) * 10000; // Exponential backoff: 10s, 20s, 40s
-          
-          if (isRateLimited) {
-            console.debug(`Profile request rate limited (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
-          } else {
-            console.debug(`Profile request failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${delay}ms...`);
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        
-        // For other errors (like 401), don't retry
-        throw error;
-      }
-    }
-    
-    throw lastError || new Error('Max retries exceeded');
-  },
-
-  async requestProfile(token: string, characterName: string): Promise<void> {
-    await fetchWithError(`${API_BASE}/fchat/profile/request`, {
+  async requestProfile(token: string, characterName: string): Promise<{ queued: boolean }> {
+    const response = await fetchWithError(`${API_BASE}/fchat/profile/request`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -242,6 +207,8 @@ export const api = {
       },
       body: JSON.stringify({ characterName }),
     });
+
+    return response.json();
   },
 
   async getFriends(token: string): Promise<FriendsResponse> {
@@ -255,49 +222,6 @@ export const api = {
   },
 
   // Character Diagnostic API methods
-  async getCharacterDiagnostic(token: string, characterName: string): Promise<any> {
-    const response = await fetchWithError(`${API_BASE}/character/diagnostic/${encodeURIComponent(characterName)}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    return response.json();
-  },
-
-  async searchCharactersDiagnostic(token: string, query: string, limit: number = 50): Promise<any> {
-    const response = await fetchWithError(`${API_BASE}/character/diagnostic/search?q=${encodeURIComponent(query)}&limit=${limit}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    return response.json();
-  },
-
-  async getCharacterStats(token: string): Promise<any> {
-    const response = await fetchWithError(`${API_BASE}/character/diagnostic/stats`, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-
-    return response.json();
-  },
-
-  async requestProfileManually(token: string, characterName: string): Promise<any> {
-    const response = await fetchWithError(`${API_BASE}/character/diagnostic/request-profile`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-      },
-      body: JSON.stringify({ characterName }),
-    });
-
-    return response.json();
-  },
-
   async searchCharacters(token: string, searchCriteria: any): Promise<void> {
     await fetchWithError(`${API_BASE}/fchat/search`, {
       method: 'POST',
@@ -411,12 +335,4 @@ export const api = {
     return response.json();
   },
 
-  async refreshMemo(token: string, characterName: string): Promise<void> {
-    await fetchWithError(`${API_BASE}/fchat/memo/${encodeURIComponent(characterName)}/refresh`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-    });
-  },
 };

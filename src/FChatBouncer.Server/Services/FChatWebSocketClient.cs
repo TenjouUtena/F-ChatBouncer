@@ -42,14 +42,8 @@ public class FChatWebSocketClient : IDisposable
     private readonly Dictionary<string, List<ChannelCharacter>> _channelCharacters = new();
     private readonly Dictionary<string, List<string>> _channelOperators = new();
 
-    // Profile building state for PRD command sequence
-    private string? _lastRequestedCharacter;
-    private readonly Dictionary<string, ProfileData> _buildingProfiles = new();
-    private bool _profileBuildInProgress = false;
-
     public event Action<FChatMessage>? MessageReceived;
     public event Action<string>? ConnectionStatusChanged;
-    public event Action<string, string>? ProfileReceived; // characterName, profileData
     public event Action<string, ChannelCharacter>? CharacterJoinedChannel; // channelId, character
     public event Action<string, string>? CharacterLeftChannel; // channelId, characterName
     public event Action<string, string, string>? StatusUpdated; // characterName, status, statusMessage
@@ -686,6 +680,30 @@ public class FChatWebSocketClient : IDisposable
         _logger.LogInformation("=== UpdateFriendsListFromCache COMPLETE ===");
         _logger.LogInformation("Updated {FriendsUpdated} friends ({FriendsOnline} online) and {BookmarksUpdated} bookmarks ({BookmarksOnline} online) from cache", 
             friendsUpdated, friendsMarkedOnline, bookmarksUpdated, bookmarksMarkedOnline);
+    }
+
+    /// <summary>
+    /// Names the browser cares about for this connection: everyone in a joined channel,
+    /// plus friends and bookmarks. The receive loop mutates these collections, so a
+    /// concurrent modification yields an empty set rather than an exception.
+    /// </summary>
+    public HashSet<string> GetRelevantCharacterNames()
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            names.UnionWith(_friendsList);
+            names.UnionWith(_bookmarksList);
+            foreach (var characters in _channelCharacters.Values.ToList())
+            {
+                names.UnionWith(characters.Select(c => c.CharacterName));
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            names.Clear();
+        }
+        return names;
     }
 
     public List<string> GetBookmarksList()
@@ -1465,29 +1483,6 @@ public class FChatWebSocketClient : IDisposable
         }
     }
 
-    public async Task RequestProfileAsync(string characterName)
-    {
-        if (!IsConnected || !_isAuthenticated)
-        {
-            throw new InvalidOperationException("Not connected or not authenticated");
-        }
-
-        _logger.LogInformation("Requesting profile for character: {CharacterName}", characterName);
-
-        // Track the last requested character for PRD sequence handling
-        _lastRequestedCharacter = characterName;
-        _profileBuildInProgress = false;
-
-        // Clear any existing building profile data for this character
-        if (_buildingProfiles.ContainsKey(characterName))
-        {
-            _buildingProfiles.Remove(characterName);
-        }
-
-        var proData = new { character = characterName };
-        await SendCommandAsync("PRO", proData);
-    }
-
     public async Task<bool> AddBookmarkAsync(string characterName)
     {
         if (string.IsNullOrEmpty(_ticket) || string.IsNullOrEmpty(_username))
@@ -1741,12 +1736,6 @@ public class FChatWebSocketClient : IDisposable
 
             var data = JsonSerializer.Deserialize<JsonElement>(jsonData);
 
-            // Log all commands for debugging profile issues
-            if (command == "PRO" || command == "PRD" || command.StartsWith("PR"))
-            {
-                _logger.LogInformation("F-Chat command received: {Command} with data: {Data}", command, jsonData);
-            }
-
             // Log character list related commands for debugging
             if (command == "USR" || command == "JCH" || command == "LCH" || command == "COL" || command == "ICH")
             {
@@ -1882,11 +1871,6 @@ public class FChatWebSocketClient : IDisposable
                     }
                     break;
 
-                case "PRD":
-                    // Profile response data - handle the start/info/select/end sequence
-                    HandlePRDCommandAsync(data, jsonData);
-                    break;
-
                 case "STA":
                     // Status update
                     // STA command received - logging removed
@@ -1965,134 +1949,6 @@ public class FChatWebSocketClient : IDisposable
         }
 
         return;
-    }
-
-    private void HandlePRDCommandAsync(JsonElement data, string rawJsonData)
-    {
-        try
-        {
-            // Extract character name and type from PRD data
-            if (!data.TryGetProperty("character", out var charElement))
-            {
-                _logger.LogWarning("Received PRD command without character property. Data: {Data}", rawJsonData);
-                return;
-            }
-
-            var characterName = charElement.GetString() ?? "";
-            if (string.IsNullOrEmpty(characterName))
-            {
-                _logger.LogWarning("Received PRD command with empty character name. Data: {Data}", rawJsonData);
-                return;
-            }
-
-            // Check if this is for the character we requested
-            if (_lastRequestedCharacter != characterName)
-            {
-                _logger.LogWarning("Received PRD for character {ReceivedCharacter} but last requested was {RequestedCharacter}. Ignoring.",
-                    characterName, _lastRequestedCharacter ?? "none");
-                return;
-            }
-
-            // Extract type to determine the PRD sequence step
-            var type = "unknown";
-            if (data.TryGetProperty("type", out var typeElement))
-            {
-                type = typeElement.GetString() ?? "unknown";
-            }
-
-            _logger.LogInformation("Handling PRD command for character {CharacterName}, type: {Type}", characterName, type);
-
-            switch (type.ToLower())
-            {
-                case "start":
-                    // Begin profile building sequence
-                    _profileBuildInProgress = true;
-                    _buildingProfiles[characterName] = new ProfileData { CharacterName = characterName };
-                    _logger.LogInformation("Started profile building for character {CharacterName}", characterName);
-                    break;
-
-                case "info":
-                case "select":
-                    // Add profile information to building profile
-                    if (!_profileBuildInProgress || !_buildingProfiles.ContainsKey(characterName))
-                    {
-                        _logger.LogWarning("Received PRD {Type} for {CharacterName} but no profile build in progress", type, characterName);
-                        return;
-                    }
-
-                    var buildingProfile = _buildingProfiles[characterName];
-
-                    // Store the profile field data
-                    if (data.TryGetProperty("key", out var keyElement) && data.TryGetProperty("value", out var valueElement))
-                    {
-                        var key = keyElement.GetString() ?? "";
-                        var value = valueElement.GetString() ?? "";
-
-                        if (!string.IsNullOrEmpty(key))
-                        {
-                            // Store in appropriate section based on type
-                            if (type.ToLower() == "info")
-                            {
-                                buildingProfile.Info[key] = value;
-                            }
-                            else if (type.ToLower() == "select")
-                            {
-                                buildingProfile.Info[key] = value;
-                            }
-
-                            _logger.LogDebug("Added profile {Type} field for {CharacterName}: {Key} = {Value}",
-                                type, characterName, key, value.Length > 50 ? $"{value.Substring(0, 50)}..." : value);
-                        }
-                    }
-                    else
-                    {
-                        // If no key/value structure, store the entire data object in Info
-                        buildingProfile.Info[type] = data.ToString();
-                        _logger.LogDebug("Added profile section for {CharacterName}: {Type}", characterName, type);
-                    }
-                    break;
-
-                case "end":
-                    // Complete profile building sequence
-                    if (!_profileBuildInProgress || !_buildingProfiles.ContainsKey(characterName))
-                    {
-                        _logger.LogWarning("Received PRD end for {CharacterName} but no profile build in progress", characterName);
-                        return;
-                    }
-
-                    _profileBuildInProgress = false;
-                    var completedProfile = _buildingProfiles[characterName];
-
-                    // Extract gender from the completed profile data
-                    completedProfile.ExtractGender();
-
-                    // Convert built profile to JSON for the ProfileReceived event
-                    var profileJson = JsonSerializer.Serialize(completedProfile, new JsonSerializerOptions
-                    {
-                        WriteIndented = true
-                    });
-
-                    _logger.LogInformation("Completed profile building for character {CharacterName}: {Summary}",
-                        characterName, completedProfile.GetSummary());
-
-                    // Invoke the ProfileReceived event with the structured profile data
-                    ProfileReceived?.Invoke(characterName, profileJson);
-
-                    // Clean up building state
-                    _buildingProfiles.Remove(characterName);
-                    _lastRequestedCharacter = null;
-                    break;
-
-                default:
-                    _logger.LogWarning("Received PRD with unknown type '{Type}' for character {CharacterName}. Data: {Data}",
-                        type, characterName, rawJsonData);
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling PRD command. Data: {Data}", rawJsonData);
-        }
     }
 
     private FChatMessage? ParseMessage(JsonElement data)
@@ -3278,12 +3134,6 @@ public class FChatWebSocketClient : IDisposable
             if (match.Success)
             {
                 return match.Groups[1].Value.Trim();
-            }
-            
-            // Pattern 3: Look for the last requested character if we have it
-            if (!string.IsNullOrEmpty(_lastRequestedCharacter))
-            {
-                return _lastRequestedCharacter;
             }
             
             return null;

@@ -53,7 +53,7 @@ function MessageComponent({
   isHovered = false
 }: MessageComponentProps) {
   // Get profile to determine gender for color coding
-  const { getCharacterGender, getProfile, getProfileRequestStatus, isProfileStale, refreshProfile, requestProfileForCharacter } = useChatStore();
+  const { getCharacterGender, getProfile, getProfileRequestStatus, isProfileStale } = useChatStore();
   const [senderGender, setSenderGender] = useState<string>('None');
   const [senderProfile, setSenderProfile] = useState<any>(null);
   const profileStatus = getProfileRequestStatus(message.sender);
@@ -130,17 +130,8 @@ function MessageComponent({
   const handleSenderClick = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
 
-    // Handle cache miss scenarios
-    if (senderGender === 'None' && profileStatus === 'idle') {
-      // No gender data and no request in progress - request it
-      requestProfileForCharacter(message.sender);
-    } else if (senderGender !== 'None' && isStale && profileStatus !== 'requesting') {
-      // Profile exists but is stale - refresh it
-      await refreshProfile(message.sender);
-    }
-
     onSenderClick?.(message.sender, e);
-  }, [message.sender, onSenderClick, senderGender, profileStatus, isStale, requestProfileForCharacter, refreshProfile]);
+  }, [message.sender, onSenderClick]);
 
   // Handle sender right-click
   const handleSenderRightClick = useCallback((e: React.MouseEvent) => {

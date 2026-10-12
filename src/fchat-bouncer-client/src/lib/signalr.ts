@@ -1,5 +1,5 @@
 import * as signalR from '@microsoft/signalr';
-import { Message, ConnectionStatus } from '@/types';
+import { Message, ConnectionStatus, CharacterInfo } from '@/types';
 import { api } from '@/lib/api';
 import { config } from '@/lib/config';
 
@@ -142,7 +142,6 @@ class SignalRService {
     this.connection.off('QueuedMessagesProcessed');
     this.connection.off('ProfileRequested');
     this.connection.off('ProfileError');
-    this.connection.off('ProfileReceived');
     this.connection.off('ProfileAvailable');
     // Multi-character event listeners
     this.connection.off('CharacterConnected');
@@ -603,10 +602,6 @@ this.onSearchResultsReceived = callback;
     this.addUniqueListener('ProfileError', callback);
   }
 
-  onProfileReceived(callback: (data: { CharacterName: string; ProfileData: string; Message: string }) => void): void {
-    this.addUniqueListener('ProfileReceived', callback);
-  }
-
   // Multi-character event listeners
   onCharacterConnected(callback: (data: { CharacterName: string; Message: string }) => void): void {
     this.addUniqueListener('CharacterConnected', callback);
@@ -680,6 +675,10 @@ this.onSearchResultsReceived = callback;
   // Friends status event listeners
   onStatusUpdated(callback: (data: { characterName: string; status: string; statusMessage: string; timestamp: string; viaCharacter: string }) => void): void {
     this.addUniqueListener('StatusUpdated', callback);
+  }
+
+  onCharacterInfo(callback: (infos: CharacterInfo[]) => void): void {
+    this.addUniqueListener('CharacterInfo', callback);
   }
 
   onUserOnline(callback: (data: { characterName: string; status: string; gender: string; timestamp: string; isOnline: boolean }) => void): void {
@@ -817,8 +816,8 @@ this.onSearchResultsReceived = callback;
     if (!targetCharacter) {
       // Get active character from store
       try {
-        const { useCharacterIndexedDBStore } = await import('@/stores/characterIndexedDBStore');
-        targetCharacter = useCharacterIndexedDBStore.getState().activeCharacter || '';
+        const { useConnectionStore } = await import('@/stores/connectionStore');
+        targetCharacter = useConnectionStore.getState().activeCharacter || '';
       } catch (error) {
         console.error('Failed to get active character:', error);
       }
@@ -874,36 +873,11 @@ this.onSearchResultsReceived = callback;
     }
   }
 
-  async getBasicInfo(characterName: string): Promise<any> {
+  async getCharacterInfo(names: string[]): Promise<CharacterInfo[]> {
     if (!this.connection || this.connection.state !== signalR.HubConnectionState.Connected) {
       throw new Error('SignalR connection not available');
     }
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.removeListener('ReceiveBasicInfo');
-        this.removeListener('BasicInfoError');
-        reject(new Error('GetBasicInfo request timed out'));
-      }, 10000); // 10 second timeout
-
-      const handleBasicInfo = (data: any) => {
-        clearTimeout(timeout);
-        this.removeListener('ReceiveBasicInfo');
-        this.removeListener('BasicInfoError');
-        resolve(data);
-      };
-
-      const handleError = (error: string) => {
-        clearTimeout(timeout);
-        this.removeListener('ReceiveBasicInfo');
-        this.removeListener('BasicInfoError');
-        reject(new Error(error));
-      };
-
-      this.addUniqueListener('ReceiveBasicInfo', handleBasicInfo);
-      this.addUniqueListener('BasicInfoError', handleError);
-      this.connection!.invoke('GetBasicInfo', characterName).catch(reject);
-    });
+    return await this.connection.invoke<CharacterInfo[]>('GetCharacterInfo', names);
   }
 
   async getCharacters(): Promise<any[]> {
@@ -995,12 +969,6 @@ this.onSearchResultsReceived = callback;
   async sendMessageFromCharacter(characterName: string, channel: string, content: string): Promise<void> {
     if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
       await this.connection.invoke('SendMessageFromCharacter', characterName, channel, content);
-    }
-  }
-
-  async requestProfileFromCharacter(characterName: string, requestingCharacter: string): Promise<void> {
-    if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
-      await this.connection.invoke('RequestProfileFromCharacter', characterName, requestingCharacter);
     }
   }
 

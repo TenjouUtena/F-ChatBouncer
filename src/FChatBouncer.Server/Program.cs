@@ -11,6 +11,9 @@ using FChatBouncer.Server.Models;
 using FChatBouncer.Server.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection.StackExchangeRedis;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -56,23 +59,8 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
     
     if (!string.IsNullOrEmpty(databaseUrl))
     {
-        // Use Railway's DATABASE_URL if available
-        try
-        {
-            // Validate the connection string format
-            if (databaseUrl.StartsWith("postgresql://") || databaseUrl.StartsWith("postgres://"))
-            {
-                finalConnectionString = databaseUrl;
-            }
-            else
-            {
-                throw new InvalidOperationException($"Invalid DATABASE_URL format: {databaseUrl}");
-            }
-        }
-        catch
-        {
-            throw;
-        }
+        // Railway's DATABASE_URL is a URI; Npgsql needs key=value form
+        finalConnectionString = PostgresConnectionString.FromUrl(databaseUrl);
     }
     else if (!string.IsNullOrEmpty(connectionString))
     {
@@ -117,6 +105,10 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
 
 // Redis Configuration (supports Railway/production environment variables)
 var redisSettingsSnapshot = RedisEnvironmentConfiguration.CreateFromConfiguration(builder.Configuration);
+if (!builder.Environment.IsDevelopment() && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("REDIS_URL")))
+{
+    throw new InvalidOperationException("REDIS_URL environment variable is not set");
+}
 
 builder.Services.Configure<RedisSettings>(builder.Configuration.GetSection("Redis"));
 builder.Services.PostConfigure<RedisSettings>(RedisEnvironmentConfiguration.ApplyEnvironmentOverrides);
@@ -305,7 +297,12 @@ if (hasGoogleOAuth)
 }
 
 // Data Protection for OAuth state
-builder.Services.AddDataProtection();
+// Keep the key ring in Redis so OAuth state cookies survive redeploys
+builder.Services.AddDataProtection()
+    .SetApplicationName("FChatBouncer");
+builder.Services.AddOptions<KeyManagementOptions>()
+    .Configure<IConnectionMultiplexer>((options, redis) =>
+        options.XmlRepository = new RedisXmlRepository(() => redis.GetDatabase(), "FChatBouncer:DataProtection-Keys"));
 
 // Session configuration for OAuth state validation (using in-memory, not Redis)
 builder.Services.AddDistributedMemoryCache();
@@ -344,12 +341,12 @@ builder.Services.AddScoped<ICharacterService, CharacterService>();
 builder.Services.AddScoped<IMemoService, MemoService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddSingleton<IFChatService, FChatService>();
-builder.Services.AddSingleton<IProfileRateLimiter, ProfileRateLimiter>();
 builder.Services.AddSingleton<TicketManager>();
 
-// Profile Queue Services
-builder.Services.AddScoped<IProfileQueueService, ProfileQueueService>();
-builder.Services.AddHostedService<ProfileQueueProcessor>();
+// Profile fetch worker: in-process queue, single instance
+builder.Services.AddSingleton<ProfileFetchWorker>();
+builder.Services.AddSingleton<IProfileFetchQueue>(sp => sp.GetRequiredService<ProfileFetchWorker>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ProfileFetchWorker>());
 
 // Background Services
 builder.Services.AddHostedService<MetricsCollectionService>();
@@ -359,14 +356,12 @@ builder.Services.AddHostedService<StreamMonitoringService>();
 builder.Services.AddHostedService<PendingEntryListProcessor>();
 
 // HTTP Client for external API calls
-builder.Services.AddHttpClient<MemoService>();
-builder.Services.AddHttpClient<FListMappingService>();
+builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<FListCharacterDataService>();
 builder.Services.AddHttpClient<FListImageService>();
-builder.Services.AddHttpClient<FListTicketManager>();
 
 // F-List API Services
-builder.Services.AddScoped<IFListMappingService, FListMappingService>();
+builder.Services.AddSingleton<IFListMappingService, FListMappingService>();
 builder.Services.AddScoped<IFListCharacterDataService, FListCharacterDataService>();
 builder.Services.AddScoped<FListImageService>();
 builder.Services.AddSingleton<IFListTicketManager, FListTicketManager>();
@@ -387,28 +382,13 @@ builder.Services.AddCors(options =>
     }
     else
     {
-        // Production: Strict CORS policy
-        var allowedOrigins = new List<string>();
-        
-        // Check for CORS__AllowedOrigins__0 environment variable (Railway format)
-        var corsOrigin0 = Environment.GetEnvironmentVariable("CORS__AllowedOrigins__0");
-        if (!string.IsNullOrEmpty(corsOrigin0))
-        {
-            allowedOrigins.Add(corsOrigin0);
-        }
-        
-        // Fallback to configuration
-        if (allowedOrigins.Count == 0)
-        {
-            var configOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
-                ?? new[] { "https://fchat.proactiveapathy.com" };
-            allowedOrigins.AddRange(configOrigins);
-        }
-        
-        
+        // Production: Strict CORS policy. CORS__AllowedOrigins__0, __1, ... map onto this section.
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            ?? throw new InvalidOperationException("Cors:AllowedOrigins must be configured");
+
         options.AddPolicy("AllowClient", policy =>
         {
-            policy.WithOrigins(allowedOrigins.ToArray())
+            policy.WithOrigins(allowedOrigins)
                   .WithHeaders("Authorization", "Content-Type", "X-Requested-With", 
                               "x-signalr-user-agent", "x-requested-with", "x-signalr-connection-token")
                   .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
@@ -419,29 +399,7 @@ builder.Services.AddCors(options =>
 
 // Add Health Checks
 builder.Services.AddHealthChecks()
-    .AddCheck("database", () => 
-    {
-        try
-        {
-#pragma warning disable ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' in 'ConfigureServices'
-            using var scope = builder.Services.BuildServiceProvider().CreateScope();
-#pragma warning restore ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' in 'ConfigureServices'
-            var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
-            
-            // Test basic connection synchronously
-            var canConnect = context.Database.CanConnect();
-            if (!canConnect)
-            {
-                return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Cannot connect to database");
-            }
-            
-            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Database connection is working");
-        }
-        catch (Exception ex)
-        {
-            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy($"Database connection failed: {ex.Message}", ex);
-        }
-    })
+    .AddDbContextCheck<BouncerDbContext>("database")
     .AddCheck<RedisHealthCheck>("redis")
     .AddCheck<FChatWebSocketHealthCheck>("fchat_websocket")
     .AddCheck<FListApiHealthCheck>("flist_api");
@@ -455,16 +413,8 @@ if (builder.Environment.IsDevelopment())
 
 var app = builder.Build();
 
-// Log whether CREDENTIAL_ENCRYPTION_KEY is present at startup (helps debug env/configuration issues)
-var credentialKey = app.Configuration["CREDENTIAL_ENCRYPTION_KEY"] ?? Environment.GetEnvironmentVariable("CREDENTIAL_ENCRYPTION_KEY");
-if (string.IsNullOrEmpty(credentialKey))
-{
-    app.Logger.LogWarning("CREDENTIAL_ENCRYPTION_KEY is not set at startup. Set the environment variable for this service and redeploy.");
-}
-else
-{
-    app.Logger.LogInformation("CREDENTIAL_ENCRYPTION_KEY is configured (length {Length})", credentialKey.Length);
-}
+// Fail at boot, not at first use, if the credential encryption key is missing
+app.Services.GetRequiredService<IEncryptionService>();
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())
