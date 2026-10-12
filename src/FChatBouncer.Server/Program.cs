@@ -59,23 +59,8 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
     
     if (!string.IsNullOrEmpty(databaseUrl))
     {
-        // Use Railway's DATABASE_URL if available
-        try
-        {
-            // Validate the connection string format
-            if (databaseUrl.StartsWith("postgresql://") || databaseUrl.StartsWith("postgres://"))
-            {
-                finalConnectionString = databaseUrl;
-            }
-            else
-            {
-                throw new InvalidOperationException($"Invalid DATABASE_URL format: {databaseUrl}");
-            }
-        }
-        catch
-        {
-            throw;
-        }
+        // Railway's DATABASE_URL is a URI; Npgsql needs key=value form
+        finalConnectionString = PostgresConnectionString.FromUrl(databaseUrl);
     }
     else if (!string.IsNullOrEmpty(connectionString))
     {
@@ -120,6 +105,10 @@ builder.Services.AddDbContext<BouncerDbContext>(options =>
 
 // Redis Configuration (supports Railway/production environment variables)
 var redisSettingsSnapshot = RedisEnvironmentConfiguration.CreateFromConfiguration(builder.Configuration);
+if (!builder.Environment.IsDevelopment() && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("REDIS_URL")))
+{
+    throw new InvalidOperationException("REDIS_URL environment variable is not set");
+}
 
 builder.Services.Configure<RedisSettings>(builder.Configuration.GetSection("Redis"));
 builder.Services.PostConfigure<RedisSettings>(RedisEnvironmentConfiguration.ApplyEnvironmentOverrides);
@@ -393,28 +382,13 @@ builder.Services.AddCors(options =>
     }
     else
     {
-        // Production: Strict CORS policy
-        var allowedOrigins = new List<string>();
-        
-        // Check for CORS__AllowedOrigins__0 environment variable (Railway format)
-        var corsOrigin0 = Environment.GetEnvironmentVariable("CORS__AllowedOrigins__0");
-        if (!string.IsNullOrEmpty(corsOrigin0))
-        {
-            allowedOrigins.Add(corsOrigin0);
-        }
-        
-        // Fallback to configuration
-        if (allowedOrigins.Count == 0)
-        {
-            var configOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
-                ?? new[] { "https://fchat.proactiveapathy.com" };
-            allowedOrigins.AddRange(configOrigins);
-        }
-        
-        
+        // Production: Strict CORS policy. CORS__AllowedOrigins__0, __1, ... map onto this section.
+        var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+            ?? throw new InvalidOperationException("Cors:AllowedOrigins must be configured");
+
         options.AddPolicy("AllowClient", policy =>
         {
-            policy.WithOrigins(allowedOrigins.ToArray())
+            policy.WithOrigins(allowedOrigins)
                   .WithHeaders("Authorization", "Content-Type", "X-Requested-With", 
                               "x-signalr-user-agent", "x-requested-with", "x-signalr-connection-token")
                   .WithMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
@@ -425,29 +399,7 @@ builder.Services.AddCors(options =>
 
 // Add Health Checks
 builder.Services.AddHealthChecks()
-    .AddCheck("database", () => 
-    {
-        try
-        {
-#pragma warning disable ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' in 'ConfigureServices'
-            using var scope = builder.Services.BuildServiceProvider().CreateScope();
-#pragma warning restore ASP0000 // Do not call 'IServiceCollection.BuildServiceProvider' in 'ConfigureServices'
-            var context = scope.ServiceProvider.GetRequiredService<BouncerDbContext>();
-            
-            // Test basic connection synchronously
-            var canConnect = context.Database.CanConnect();
-            if (!canConnect)
-            {
-                return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Cannot connect to database");
-            }
-            
-            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Database connection is working");
-        }
-        catch (Exception ex)
-        {
-            return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy($"Database connection failed: {ex.Message}", ex);
-        }
-    })
+    .AddDbContextCheck<BouncerDbContext>("database")
     .AddCheck<RedisHealthCheck>("redis")
     .AddCheck<FChatWebSocketHealthCheck>("fchat_websocket")
     .AddCheck<FListApiHealthCheck>("flist_api");
@@ -460,6 +412,9 @@ if (builder.Environment.IsDevelopment())
 }
 
 var app = builder.Build();
+
+// Fail at boot, not at first use, if the credential encryption key is missing
+app.Services.GetRequiredService<IEncryptionService>();
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

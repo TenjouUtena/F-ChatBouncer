@@ -25,6 +25,7 @@ RUN dotnet publish "FChatBouncer.Server.csproj" -c Release -o /app/publish /p:Us
 # Final stage
 FROM base AS final
 WORKDIR /app
+ENV ASPNETCORE_HTTP_PORTS=8080
 COPY --from=publish /app/publish .
 
 # Run as the non-root user that ships with the .NET images
