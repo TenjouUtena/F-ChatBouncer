@@ -1,59 +1,54 @@
 # F-Chat Bouncer
 
-A modern bouncer system for F-Chat that provides persistent connections, message logging, and multi-user support.
+A bouncer for [F-Chat](https://www.f-list.net/chat3/): the server holds your characters' F-Chat connections open while you are away, and a web client connects to it to read and send messages.
 
-## Architecture
+## How it fits together
 
-- **Backend**: ASP.NET Core 8 with SignalR for real-time communication
-- **Frontend**: Next.js 14 with TypeScript and Tailwind CSS
-- **Database**: PostgreSQL for data storage
-- **Cache**: In-memory caching for session management and real-time messaging
+| Piece | Path | What it does |
+|---|---|---|
+| Backend | `src/FChatBouncer.Server` | ASP.NET Core 9. Holds the F-Chat websockets, fetches F-List profiles, stores users, characters and messages in PostgreSQL, queues messages in Redis streams, and talks to browsers over SignalR. |
+| Frontend | `src/fchat-bouncer-client` | Next.js 14. Login, chat UI, profile viewer. Caches characters, profiles and messages in the browser's IndexedDB. |
 
-## Prerequisites
+The backend runs as **exactly one instance**. F-Chat connections, the F-List ticket cache and the profile fetch queue all live in that process.
 
-- .NET 8 SDK
-- Node.js 18+
-- Docker and Docker Compose (for databases)
+Character profiles are fetched from F-List only when someone opens a profile, one at a time, and cached in `Characters.ProfileJson`. Name colours come from the gender and status that F-Chat already broadcasts (LIS/NLN/STA/FLN), which the backend pushes to the browser as `CharacterInfo`.
 
-## Quick Start
+## Local development
 
-### 1. Start Database Services
+Prerequisites: .NET 9 SDK, Node.js 18+, and either Docker or a local PostgreSQL and Redis.
 
 ```bash
-docker-compose up -d
-```
+# 1. Postgres and Redis
+docker compose up -d
 
-### 2. Run Backend
-
-```bash
+# 2. Backend (http://localhost:5001). Creates the schema on first start.
 cd src/FChatBouncer.Server
-dotnet restore
+source ./set-dev-env.sh
 dotnet run
-```
 
-Backend will be available at `http://localhost:5000`
-
-### 3. Run Frontend
-
-```bash
+# 3. Frontend (http://localhost:3000)
 cd src/fchat-bouncer-client
 npm install
 npm run dev
 ```
 
-Frontend will be available at `http://localhost:3000`
+`set-dev-env.sh` contains a fixed development `ENCRYPTION_KEY`. Changing it makes every stored F-Chat credential unreadable.
 
-## Development
+### Schema changes
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed system design and implementation details.
+There is a single EF Core migration, `Initial`. When the model changes, regenerate it rather than adding a second one:
 
-## Project Structure
-
+```bash
+cd src/FChatBouncer.Server
+rm -rf Migrations
+dotnet ef migrations add Initial
+dotnet ef database drop --force
+dotnet run
 ```
-├── src/
-│   ├── FChatBouncer.Server/     # ASP.NET Core backend
-│   └── fchat-bouncer-client/    # Next.js frontend
-├── ARCHITECTURE.md              # System architecture documentation
-├── docker-compose.yml           # Development databases
-└── README.md                    # This file
-```
+
+## Deployment
+
+- Backend: Railway, built from `src/FChatBouncer.Server/Dockerfile`, with Railway Postgres and Redis. One replica.
+- Frontend: Vercel, root directory `src/fchat-bouncer-client`, with `NEXT_PUBLIC_API_URL` set to the backend URL.
+
+Environment variables are listed in [Environment.md](./Environment.md). The full rebuild procedure is Phase 6 of [v2 Implementation Plan.md](./v2%20Implementation%20Plan.md).
