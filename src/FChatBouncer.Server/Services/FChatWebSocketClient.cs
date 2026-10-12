@@ -31,6 +31,7 @@ public class FChatWebSocketClient : IDisposable
     private readonly Dictionary<string, FChatChannel> _joinedChannelDetails = new();
     private readonly Dictionary<string, TaskCompletionSource<object?>> _pendingRequests = new();
     private readonly TicketManager _ticketManager;
+    private readonly IFListTicketManager _flistTicketManager;
     private int _onlineCharacterCount = 0;
     private int _receivedCharacterCount = 0;
 
@@ -57,10 +58,11 @@ public class FChatWebSocketClient : IDisposable
     public event Action<string, string, string>? TypingNotificationReceived; // characterName, fromCharacter, status
     public event Action<List<SearchResult>>? SearchResultsReceived; // search results
 
-    public FChatWebSocketClient(ILogger<FChatWebSocketClient> logger, TicketManager ticketManager)
+    public FChatWebSocketClient(ILogger<FChatWebSocketClient> logger, TicketManager ticketManager, IFListTicketManager flistTicketManager)
     {
         _logger = logger;
         _ticketManager = ticketManager;
+        _flistTicketManager = flistTicketManager;
     }
 
     public async Task<bool> ConnectAsync(string username, string password)
@@ -214,6 +216,13 @@ public class FChatWebSocketClient : IDisposable
             {
                 var ticket = ticketElement.GetString();
                 _logger.LogInformation("Authentication ticket retrieved successfully for user: {Username}", username);
+
+                // Each getApiTicket login replaces the account's previous ticket, so make this
+                // the one profile fetches use too
+                if (!string.IsNullOrEmpty(ticket))
+                {
+                    _flistTicketManager.StoreTicket(username, ticket);
+                }
 
                 // Extract characters from the same response (support array of strings or array of objects with "name")
                 var characters = new List<FChatCharacter>();

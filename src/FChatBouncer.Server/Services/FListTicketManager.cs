@@ -7,6 +7,10 @@ namespace FChatBouncer.Server.Services;
 /// </summary>
 public class FListTicketManager : IFListTicketManager
 {
+    // F-List API tickets last 30 minutes. Stay a little under that; an "invalid ticket"
+    // error from the API clears the ticket early anyway.
+    private static readonly TimeSpan TicketLifetime = TimeSpan.FromMinutes(25);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<FListTicketManager> _logger;
     private readonly Dictionary<string, FListTicketInfo> _tickets = new();
@@ -52,7 +56,7 @@ public class FListTicketManager : IFListTicketManager
                 _tickets[account] = new FListTicketInfo
                 {
                     Ticket = newTicket,
-                    ExpiresAt = DateTime.UtcNow.AddMinutes(5), // F-List tickets expire in 5 minutes
+                    ExpiresAt = DateTime.UtcNow.Add(TicketLifetime),
                     Account = account
                 };
             }
@@ -135,6 +139,23 @@ public class FListTicketManager : IFListTicketManager
     }
 
     /// <summary>
+    /// Records a ticket obtained elsewhere (the F-Chat websocket login), so API calls
+    /// reuse it instead of logging in to getApiTicket again.
+    /// </summary>
+    public void StoreTicket(string account, string ticket)
+    {
+        lock (_lock)
+        {
+            _tickets[account] = new FListTicketInfo
+            {
+                Ticket = ticket,
+                ExpiresAt = DateTime.UtcNow.Add(TicketLifetime),
+                Account = account
+            };
+        }
+    }
+
+    /// <summary>
     /// Clears the ticket for a specific account
     /// </summary>
     public void ClearTicket(string account)
@@ -189,6 +210,7 @@ public class FListTicketInfo
 public interface IFListTicketManager
 {
     Task<string?> GetValidTicketAsync(string account, string password);
+    void StoreTicket(string account, string ticket);
     void ClearTicket(string account);
     void CleanupExpiredTickets();
 }

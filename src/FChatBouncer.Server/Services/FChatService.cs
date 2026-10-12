@@ -18,6 +18,7 @@ public class FChatService : IFChatService
     private readonly IHubContext<BouncerHub> _hubContext;
     private readonly IEncryptionService _encryptionService;
     private readonly TicketManager _ticketManager;
+    private readonly IFListTicketManager _flistTicketManager;
 
     // Multi-character connection management: userId -> characterName -> FChatWebSocketClient
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, FChatWebSocketClient>> _connections = new();
@@ -32,13 +33,15 @@ public class FChatService : IFChatService
         IServiceProvider serviceProvider,
         IHubContext<BouncerHub> hubContext,
         IEncryptionService encryptionService,
-        TicketManager ticketManager)
+        TicketManager ticketManager,
+        IFListTicketManager flistTicketManager)
     {
         _logger = logger;
         _serviceProvider = serviceProvider;
         _hubContext = hubContext;
         _encryptionService = encryptionService;
         _ticketManager = ticketManager;
+        _flistTicketManager = flistTicketManager;
         
         // Start timer to process pending character updates every 5 seconds
         _characterUpdateTimer = new Timer(async _ => await ProcessPendingCharacterUpdates(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
@@ -97,7 +100,7 @@ public class FChatService : IFChatService
             using var scope2 = _serviceProvider.CreateScope();
             var loggerFactory = scope2.ServiceProvider.GetRequiredService<ILoggerFactory>();
             var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager);
+            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager, _flistTicketManager);
             var connected = await tempClient.ConnectAsync(username, password);
             
             if (!connected)
@@ -307,7 +310,7 @@ public class FChatService : IFChatService
             // Create a temporary client to get the ticket and extract characters
             using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole());
             var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager);
+            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager, _flistTicketManager);
             var success = await tempClient.ConnectAsync(username, password);
             
             if (!success)
@@ -380,7 +383,7 @@ public class FChatService : IFChatService
             using var scope = _serviceProvider.CreateScope();
             var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
             var tempLogger = loggerFactory.CreateLogger<FChatWebSocketClient>();
-            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager);
+            using var tempClient = new FChatWebSocketClient(tempLogger, _ticketManager, _flistTicketManager);
 
             var connected = await tempClient.ConnectAsync(username, password);
             if (!connected)
@@ -558,7 +561,7 @@ public class FChatService : IFChatService
 
             // Create a new F-Chat WebSocket client
             var logger = _serviceProvider.GetRequiredService<ILogger<FChatWebSocketClient>>();
-            var client = new FChatWebSocketClient(logger, _ticketManager);
+            var client = new FChatWebSocketClient(logger, _ticketManager, _flistTicketManager);
 
             // Set up event handlers with character context
             client.MessageReceived += async (message) =>
