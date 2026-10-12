@@ -352,12 +352,12 @@ builder.Services.AddScoped<ICharacterService, CharacterService>();
 builder.Services.AddScoped<IMemoService, MemoService>();
 builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddSingleton<IFChatService, FChatService>();
-builder.Services.AddSingleton<IProfileRateLimiter, ProfileRateLimiter>();
 builder.Services.AddSingleton<TicketManager>();
 
-// Profile Queue Services
-builder.Services.AddScoped<IProfileQueueService, ProfileQueueService>();
-builder.Services.AddHostedService<ProfileQueueProcessor>();
+// Profile fetch worker: in-process queue, single instance
+builder.Services.AddSingleton<ProfileFetchWorker>();
+builder.Services.AddSingleton<IProfileFetchQueue>(sp => sp.GetRequiredService<ProfileFetchWorker>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ProfileFetchWorker>());
 
 // Background Services
 builder.Services.AddHostedService<MetricsCollectionService>();
@@ -367,14 +367,12 @@ builder.Services.AddHostedService<StreamMonitoringService>();
 builder.Services.AddHostedService<PendingEntryListProcessor>();
 
 // HTTP Client for external API calls
-builder.Services.AddHttpClient<MemoService>();
-builder.Services.AddHttpClient<FListMappingService>();
+builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<FListCharacterDataService>();
 builder.Services.AddHttpClient<FListImageService>();
-builder.Services.AddHttpClient<FListTicketManager>();
 
 // F-List API Services
-builder.Services.AddScoped<IFListMappingService, FListMappingService>();
+builder.Services.AddSingleton<IFListMappingService, FListMappingService>();
 builder.Services.AddScoped<IFListCharacterDataService, FListCharacterDataService>();
 builder.Services.AddScoped<FListImageService>();
 builder.Services.AddSingleton<IFListTicketManager, FListTicketManager>();

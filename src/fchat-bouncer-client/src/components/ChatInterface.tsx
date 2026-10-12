@@ -649,46 +649,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       }
     });
 
-    signalRService.onProfileReceived((data: any) => {
-      // Handle both naming conventions (camelCase and PascalCase)
-      const profileData = data.profileData || data.ProfileData;
-      const characterName = data.characterName || data.CharacterName;
-      const onlineStatus = data.onlineStatus || data.OnlineStatus;
-
-      try {
-        // Check if profileData is structured or raw
-        if (typeof profileData === 'object' && profileData !== null) {
-          // It's already a structured ProfileData object
-          addProfile(characterName, profileData);
-        } else if (typeof profileData === 'string') {
-          // Try to parse it as JSON
-          const parsedProfile = JSON.parse(profileData) as ProfileData;
-          addProfile(characterName, parsedProfile);
-        } else {
-          console.debug('Unexpected profileData format:', typeof profileData, profileData);
-        }
-
-        // Update friend/bookmark status if online status is provided
-        if (onlineStatus && characterName) {
-          console.debug('Updating online status for character:', characterName, onlineStatus);
-          
-          // Update the friend status in the store
-          const { updateFriendStatus, setFriendOnline } = useFriendsStore.getState();
-          
-          if (onlineStatus.isOnline) {
-            setFriendOnline(characterName, true);
-            // Update status and gender separately
-            updateFriendStatus(characterName, onlineStatus.status, onlineStatus.gender);
-          } else {
-            setFriendOnline(characterName, false);
-            updateFriendStatus(characterName, 'offline', undefined);
-          }
-        }
-      } catch (error) {
-        console.debug('Failed to process profile data:', error);
-      }
-    });
-
     // Update connection status for active character
     if (activeCharacter) {
       setConnected(signalRService.isConnected, activeCharacter);
@@ -704,7 +664,6 @@ export default function ChatInterface({ isCharacterRestoring = false }: ChatInte
       signalRService.removeListener('QueuedMessagesProcessed');
       signalRService.removeListener('ProfileRequested');
       signalRService.removeListener('ProfileError');
-      signalRService.removeListener('ProfileReceived');
       signalRService.removeListener('ChannelsSubscribed', handleChannelsSubscribed);
     };
   }, [handleReceiveMessage, handleReceiveRecentMessages, handleReceiveHistory, handleChannelsSubscribed, addProfile, setConnected, isNotificationReady, showTypingNotification, signalRService.connectionState, signalRService.connection?.connectionId]); // Re-run when callbacks change or SignalR connection changes

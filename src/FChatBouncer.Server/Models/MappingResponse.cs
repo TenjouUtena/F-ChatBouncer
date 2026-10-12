@@ -163,28 +163,3 @@ public class ListItem
     public string Value { get; set; } = string.Empty;
 }
 
-/// <summary>
-/// Cached mapping data with timestamp
-/// </summary>
-public class CachedMappingData
-{
-    /// <summary>
-    /// The mapping data
-    /// </summary>
-    public MappingResponse Data { get; set; } = new();
-
-    /// <summary>
-    /// When this mapping was cached
-    /// </summary>
-    public DateTime CachedAt { get; set; } = DateTime.UtcNow;
-
-    /// <summary>
-    /// How long this mapping is valid (default: 7 days)
-    /// </summary>
-    public TimeSpan CacheDuration { get; set; } = TimeSpan.FromDays(7);
-
-    /// <summary>
-    /// Check if the cached mapping is still valid
-    /// </summary>
-    public bool IsValid => DateTime.UtcNow - CachedAt < CacheDuration;
-}

@@ -30,7 +30,6 @@ public interface IFChatService
     Task SendPRIMessageAsync(string userId, string characterName, string recipient, string content);
     Task SendStatusUpdateAsync(string userId, string characterName, string status, string? statusMessage = null);
     Task ProcessQueuedMessagesAsync(string userId, string characterName);
-    Task RequestProfileAsync(string userId, string characterName, string requestingCharacter);
     Task<List<CharacterConnection>> GetUserCharacterConnectionsAsync(string userId);
     Task<CharacterConnection?> GetCharacterConnectionAsync(string userId, string characterName);
     Task SetActiveCharacterAsync(string userId, string characterName);

@@ -74,41 +74,13 @@ namespace FChatBouncer.Server.Migrations
                     Gender = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
                     LastSeen = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     FirstSeen = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    LastUpdated = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    ProfileData = table.Column<string>(type: "text", nullable: true),
-                    StructuredProfileData = table.Column<string>(type: "text", nullable: true),
-                    RawProData = table.Column<string>(type: "text", nullable: true),
                     IsOnline = table.Column<bool>(type: "boolean", nullable: false),
-                    Memo = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
-                    MemoLastUpdated = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                    ProfileJson = table.Column<string>(type: "jsonb", nullable: true),
+                    ProfileFetchedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Characters", x => x.Id);
-                });
-
-            migrationBuilder.CreateTable(
-                name: "ProfileQueueItems",
-                columns: table => new
-                {
-                    Id = table.Column<int>(type: "integer", nullable: false)
-                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    UserId = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: false),
-                    CharacterName = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
-                    RequestedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    ProcessedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
-                    RequestType = table.Column<int>(type: "integer", nullable: false),
-                    Priority = table.Column<int>(type: "integer", nullable: false),
-                    RetryCount = table.Column<int>(type: "integer", nullable: false),
-                    MaxRetries = table.Column<int>(type: "integer", nullable: false),
-                    ErrorMessage = table.Column<string>(type: "text", nullable: true),
-                    Status = table.Column<int>(type: "integer", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_ProfileQueueItems", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -400,6 +372,32 @@ namespace FChatBouncer.Server.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "UserCharacterNotes",
+                columns: table => new
+                {
+                    UserId = table.Column<string>(type: "character varying(450)", maxLength: 450, nullable: false),
+                    CharacterId = table.Column<int>(type: "integer", nullable: false),
+                    Memo = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: true),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_UserCharacterNotes", x => new { x.UserId, x.CharacterId });
+                    table.ForeignKey(
+                        name: "FK_UserCharacterNotes_AspNetUsers_UserId",
+                        column: x => x.UserId,
+                        principalTable: "AspNetUsers",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_UserCharacterNotes_Characters_CharacterId",
+                        column: x => x.CharacterId,
+                        principalTable: "Characters",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "CharacterChannels",
                 columns: table => new
                 {
@@ -565,24 +563,14 @@ namespace FChatBouncer.Server.Migrations
                 columns: new[] { "UserId", "Timestamp" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProfileQueueItems_Status_Priority_Requested",
-                table: "ProfileQueueItems",
-                columns: new[] { "Status", "Priority", "RequestedAt" });
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ProfileQueueItems_UpdatedAt",
-                table: "ProfileQueueItems",
-                column: "UpdatedAt");
-
-            migrationBuilder.CreateIndex(
-                name: "IX_ProfileQueueItems_User_Character_Status",
-                table: "ProfileQueueItems",
-                columns: new[] { "UserId", "CharacterName", "Status" });
-
-            migrationBuilder.CreateIndex(
                 name: "IX_QueuedMessages_UserId",
                 table: "QueuedMessages",
                 column: "UserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_UserCharacterNotes_CharacterId",
+                table: "UserCharacterNotes",
+                column: "CharacterId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_UserSessions_UserId",
@@ -621,10 +609,10 @@ namespace FChatBouncer.Server.Migrations
                 name: "Messages");
 
             migrationBuilder.DropTable(
-                name: "ProfileQueueItems");
+                name: "QueuedMessages");
 
             migrationBuilder.DropTable(
-                name: "QueuedMessages");
+                name: "UserCharacterNotes");
 
             migrationBuilder.DropTable(
                 name: "UserSessions");

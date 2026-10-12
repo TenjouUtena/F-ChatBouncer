@@ -21,8 +21,7 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
     public DbSet<CharacterConnection> CharacterConnections { get; set; }
     public DbSet<CharacterChannel> CharacterChannels { get; set; }
     
-    // Profile queue models
-    public DbSet<ProfileQueueItem> ProfileQueueItems { get; set; }
+    public DbSet<UserCharacterNote> UserCharacterNotes { get; set; }
     
     // Audit log models
     public DbSet<AuditLog> AuditLogs { get; set; }
@@ -62,6 +61,10 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
             .HasForeignKey(qm => qm.UserId);
 
         // Character relationships
+        builder.Entity<Character>()
+            .Property(c => c.ProfileJson)
+            .HasColumnType("jsonb");
+
         builder.Entity<Character>()
             .HasIndex(c => c.Name)
             .IsUnique()
@@ -130,18 +133,19 @@ public class BouncerDbContext : IdentityDbContext<BouncerUser>
             .HasIndex(cc => cc.IsConnected)
             .HasDatabaseName("IX_CharacterConnections_IsConnected");
 
-        // ProfileQueueItem indexes
-        builder.Entity<ProfileQueueItem>()
-            .HasIndex(q => new { q.UserId, q.CharacterName, q.Status })
-            .HasDatabaseName("IX_ProfileQueueItems_User_Character_Status");
+        // UserCharacterNote: one memo per user per character
+        builder.Entity<UserCharacterNote>()
+            .HasKey(n => new { n.UserId, n.CharacterId });
 
-        builder.Entity<ProfileQueueItem>()
-            .HasIndex(q => new { q.Status, q.Priority, q.RequestedAt })
-            .HasDatabaseName("IX_ProfileQueueItems_Status_Priority_Requested");
+        builder.Entity<UserCharacterNote>()
+            .HasOne<BouncerUser>()
+            .WithMany()
+            .HasForeignKey(n => n.UserId);
 
-        builder.Entity<ProfileQueueItem>()
-            .HasIndex(q => q.UpdatedAt)
-            .HasDatabaseName("IX_ProfileQueueItems_UpdatedAt");
+        builder.Entity<UserCharacterNote>()
+            .HasOne<Character>()
+            .WithMany()
+            .HasForeignKey(n => n.CharacterId);
         
         // AuditLog indexes
         builder.Entity<AuditLog>()

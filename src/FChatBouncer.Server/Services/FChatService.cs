@@ -468,15 +468,6 @@ public class FChatService : IFChatService
         await ProcessQueuedMessagesAsync(userId, activeCharacter);
     }
 
-    public async Task RequestProfileAsync(string userId, string characterName)
-    {
-        var activeCharacter = await GetActiveCharacterAsync(userId);
-        if (activeCharacter == null)
-            throw new InvalidOperationException("No active character for user");
-        
-        await RequestProfileAsync(userId, characterName, activeCharacter);
-    }
-
     public Task<string?> GetTicketAsync(string userId, string characterName)
     {
         if (_connections.TryGetValue(userId, out var userConnections) &&
@@ -580,11 +571,6 @@ public class FChatService : IFChatService
             client.ConnectionStatusChanged += async (status) =>
             {
                 await OnConnectionStatusChanged(userId, characterName, status);
-            };
-
-            client.ProfileReceived += async (profileCharacterName, profileData) =>
-            {
-                await OnProfileReceived(userId, characterName, profileCharacterName, profileData);
             };
 
             client.CharacterJoinedChannel += async (channelId, character) =>
@@ -1040,21 +1026,6 @@ public class FChatService : IFChatService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing queued messages for character {CharacterName} of user {UserId}", characterName, userId);
-        }
-    }
-
-    public async Task RequestProfileAsync(string userId, string characterName, string requestingCharacter)
-    {
-        _logger.LogInformation("Requesting profile for character {CharacterName} from character {RequestingCharacter} of user {UserId}", characterName, requestingCharacter, userId);
-
-        if (_connections.TryGetValue(userId, out var userConnections) &&
-            userConnections.TryGetValue(requestingCharacter, out var client))
-        {
-            await client.RequestProfileAsync(characterName);
-        }
-        else
-        {
-            throw new InvalidOperationException($"Character {requestingCharacter} is not connected");
         }
     }
 
@@ -1736,77 +1707,6 @@ public class FChatService : IFChatService
         }
     }
 
-    private async Task OnProfileReceived(string userId, string characterName, string profileCharacterName, string profileData)
-    {
-        try
-        {
-            // Profile received - logging removed
-
-            // Save profile data using ProfileService
-            using var scope = _serviceProvider.CreateScope();
-            var profileService = scope.ServiceProvider.GetRequiredService<IProfileService>();
-
-            try
-            {
-                // Try to parse the profile data as structured ProfileData
-                var structuredProfile = JsonSerializer.Deserialize<ProfileData>(profileData);
-                if (structuredProfile != null)
-                {
-                    // Saving structured profile - logging removed
-
-                    // Save the structured profile data
-                    await profileService.SaveStructuredProfileAsync(userId, structuredProfile);
-
-                    // Update bookmark status if this character is bookmarked
-                    var bookmarkUpdateResult = await UpdateBookmarkFromProfile(userId, characterName, profileCharacterName, structuredProfile);
-
-                    // Notify the client that structured profile was received
-                    await _hubContext.Clients.Group($"user-{userId}").SendAsync("ProfileReceived", new
-                    {
-                        CharacterName = profileCharacterName,
-                        ProfileData = structuredProfile, // Send the structured object
-                        Message = $"Profile data received for {profileCharacterName} ({structuredProfile.GetSummary()})",
-                        RequestingCharacter = characterName, // Add character context
-                        OnlineStatus = bookmarkUpdateResult // Include online status information
-                    });
-                }
-                else
-                {
-                    _logger.LogWarning("Failed to parse structured profile data for {ProfileCharacterName}, falling back to raw storage", profileCharacterName);
-                    throw new JsonException("ProfileData deserialization returned null");
-                }
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "Profile data for {ProfileCharacterName} is not in structured format, saving as raw data", profileCharacterName);
-
-                // Fall back to saving raw profile data
-                await profileService.SaveProfileAsync(userId, profileCharacterName, profileData, profileData);
-
-                // Update bookmark status if this character is bookmarked (with null structured profile)
-                var bookmarkUpdateResult = await UpdateBookmarkFromProfile(userId, characterName, profileCharacterName, null);
-
-                // Notify the client that raw profile was received
-                await _hubContext.Clients.Group($"user-{userId}").SendAsync("ProfileReceived", new
-                {
-                    CharacterName = profileCharacterName,
-                    ProfileData = profileData,
-                    Message = $"Profile data received for {profileCharacterName} (raw format)",
-                    RequestingCharacter = characterName, // Add character context
-                    OnlineStatus = bookmarkUpdateResult // Include online status information
-                });
-            }
-
-            _logger.LogInformation("Profile data saved and broadcasted for {ProfileCharacterName} by character {CharacterName} (User: {UserId})", 
-                profileCharacterName, characterName, userId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error handling profile received for character {ProfileCharacterName} by character {CharacterName} (User: {UserId})", 
-                profileCharacterName, characterName, userId);
-        }
-    }
-
     public Task<bool> HasWebSocketConnectionAsync(string userId, string characterName)
     {
         _logger.LogInformation("Checking WebSocket connection for user {UserId}, character {CharacterName}", userId, characterName);
@@ -1844,7 +1744,7 @@ public class FChatService : IFChatService
             // Character joined channel - logging removed
 
             // Update character information in unified character store
-            await ExecuteWithCharacterService(cs => cs.UpdateCharacterFromChannelDataAsync(character.CharacterName, character));
+            await ExecuteWithCharacterService(cs => cs.UpdateCharacterPresenceAsync(character.CharacterName, character.Status.ToString().ToLower(), character.StatusMessage, character.Gender, character.LastSeenAt));
 
             // Broadcast to SignalR clients
             await _hubContext.Clients.Group($"user-{userId}").SendAsync("CharacterJoinedChannel", new
@@ -1908,93 +1808,6 @@ public class FChatService : IFChatService
         {
             _logger.LogError(ex, "Error handling status update for character {StatusCharacterName} via {CharacterName} of user {UserId}", 
                 statusCharacterName, characterName, userId);
-        }
-    }
-
-    private async Task<object?> UpdateBookmarkFromProfile(string userId, string characterName, string profileCharacterName, ProfileData? structuredProfile)
-    {
-        try
-        {
-            var connection = await GetCharacterConnectionAsync(userId, characterName);
-            if (connection != null && _connections.TryGetValue(userId, out var userConnections) &&
-                userConnections.TryGetValue(characterName, out var client))
-            {
-                var bookmarks = client.GetBookmarksList();
-                if (bookmarks.Contains(profileCharacterName))
-                {
-                    _logger.LogInformation("Updating bookmark status for {ProfileCharacterName} after profile received", profileCharacterName);
-                    
-                    // Extract gender and status from profile data if available
-                    string? gender = null;
-                    string? status = null;
-                    bool isOnline = false;
-                    
-                    if (structuredProfile != null)
-                    {
-                        gender = structuredProfile.Gender;
-                        // Try to extract status from profile data
-                        if (structuredProfile.Info.TryGetValue("status", out var statusValue))
-                        {
-                            status = statusValue;
-                        }
-                    }
-                    
-                    // Check online status from the online characters cache
-                    var onlineCharacter = client.GetOnlineCharacter(profileCharacterName);
-                    if (onlineCharacter != null)
-                    {
-                        isOnline = true;
-                        status = onlineCharacter.Status;
-                        gender = onlineCharacter.Gender ?? gender; // Use online character gender if available
-                        _logger.LogInformation("Character {ProfileCharacterName} is online with status: {Status}", profileCharacterName, status);
-                    }
-                    else
-                    {
-                        // Check if we have status from profile data
-                        if (!string.IsNullOrEmpty(status))
-                        {
-                            isOnline = status.ToLower() != "offline";
-                        }
-                        _logger.LogInformation("Character {ProfileCharacterName} is offline or status unknown", profileCharacterName);
-                    }
-                    
-                    // Update the bookmark with the new information
-                    var bookmarksWithStatus = client.GetBookmarksWithStatus();
-                    if (bookmarksWithStatus.Any(b => b.Name == profileCharacterName))
-                    {
-                        var bookmark = bookmarksWithStatus.First(b => b.Name == profileCharacterName);
-                        if (!string.IsNullOrEmpty(gender))
-                        {
-                            bookmark.Gender = gender;
-                        }
-                        if (!string.IsNullOrEmpty(status))
-                        {
-                            bookmark.Status = status;
-                        }
-                        bookmark.IsOnline = isOnline;
-                        
-                        _logger.LogInformation("Updated bookmark {ProfileCharacterName} with gender: {Gender}, status: {Status}, isOnline: {IsOnline}", 
-                            profileCharacterName, gender ?? "unknown", status ?? "unknown", isOnline);
-                    }
-                    
-                    // Return online status information for the frontend
-                    return new
-                    {
-                        IsOnline = isOnline,
-                        Status = status ?? "offline",
-                        Gender = gender,
-                        LastSeen = DateTime.UtcNow
-                    };
-                }
-            }
-            
-            return null;
-        }
-        catch (Exception bookmarkEx)
-        {
-            _logger.LogWarning(bookmarkEx, "Failed to update bookmark status for {ProfileCharacterName}", profileCharacterName);
-            // Don't fail the profile processing if bookmark update fails
-            return null;
         }
     }
 
@@ -2143,7 +1956,7 @@ public class FChatService : IFChatService
             foreach (var fchatCharacter in onlineCharacters)
             {
                 //_logger.LogInformation("Updating character in database: {Name}", fchatCharacter.Name);
-                await ExecuteWithCharacterService(cs => cs.UpdateCharacterFromFChatDataAsync(fchatCharacter.Name, fchatCharacter));
+                await ExecuteWithCharacterService(cs => cs.UpdateCharacterPresenceAsync(fchatCharacter.Name, fchatCharacter.Status, fchatCharacter.StatusMessage, fchatCharacter.Gender, fchatCharacter.LastSeen));
             }
 
             // Update friends list with online status from LIS data
@@ -2410,18 +2223,6 @@ public class FChatService : IFChatService
             {
                 _logger.LogInformation("Successfully added bookmark {BookmarkCharacterName} for user {UserId}, character {CharacterName}", 
                     bookmarkCharacterName, userId, characterName);
-                
-                // Request profile data for the newly bookmarked character to get online status, gender, etc.
-                try
-                {
-                    _logger.LogInformation("Requesting profile data for newly bookmarked character {BookmarkCharacterName}", bookmarkCharacterName);
-                    await client.RequestProfileAsync(bookmarkCharacterName);
-                }
-                catch (Exception profileEx)
-                {
-                    _logger.LogWarning(profileEx, "Failed to request profile for newly bookmarked character {BookmarkCharacterName}", bookmarkCharacterName);
-                    // Don't fail the bookmark operation if profile request fails
-                }
                 
                 // Broadcast bookmark added event to SignalR clients
                 await _hubContext.Clients.Group($"user-{userId}").SendAsync("BookmarkAdded", new

@@ -229,6 +229,19 @@ function persistMessagesToIndexedDB(messages: Message[], characterName: string):
   });
 }
 
+// A profile request waits for the server's ProfileAvailable notification. If the fetch
+// fails server-side no notification comes, so clear the spinner after a while.
+const PROFILE_REQUEST_TIMEOUT_MS = 30_000;
+
+function expireProfileRequest(characterName: string): void {
+  setTimeout(() => {
+    const profileStore = useProfileStore.getState();
+    if (profileStore.getProfileRequestStatus(characterName) === 'requesting') {
+      profileStore.setProfileRequestStatus(characterName, 'idle');
+    }
+  }, PROFILE_REQUEST_TIMEOUT_MS);
+}
+
 export const useChatStore = create<ChatStore>()(
   persist(
     (set, get) => ({
@@ -840,10 +853,13 @@ export const useChatStore = create<ChatStore>()(
         profileStore.setProfileRequestStatus(characterName, 'requesting');
 
         try {
-          const profileResponse = await api.getProfileWithRetry(useAuthStore.getState().token!, characterName, true);
+          const profileResponse = await api.getProfile(useAuthStore.getState().token!, characterName);
           
           if (profileResponse.profileData) {
             await get().addProfile(characterName, profileResponse.profileData);
+          } else if (profileResponse.isStale) {
+            // The server is fetching it; ProfileAvailable will deliver it
+            expireProfileRequest(characterName);
           } else {
             profileStore.setProfileRequestStatus(characterName, 'idle');
           }
@@ -864,15 +880,10 @@ export const useChatStore = create<ChatStore>()(
         profileStore.setProfileRequestStatus(characterName, 'requesting');
 
         try {
-          const profileResponse = await api.getProfileWithRetry(useAuthStore.getState().token!, characterName, false);
-          
-          if (profileResponse.profileData) {
-            await get().addProfile(characterName, profileResponse.profileData);
-            return profileResponse.profileData;
-          } else {
-            profileStore.setProfileRequestStatus(characterName, 'idle');
-            return null;
-          }
+          // The refreshed profile arrives via the ProfileAvailable notification
+          await api.requestProfile(useAuthStore.getState().token!, characterName);
+          expireProfileRequest(characterName);
+          return null;
         } catch (error) {
           console.debug(`Failed to refresh profile for character: ${characterName}`, error);
           profileStore.setProfileRequestStatus(characterName, 'failed');

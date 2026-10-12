@@ -132,25 +132,12 @@ export interface ProfileData {
   timestamp: string;
 }
 
-export interface ProfileReceivedEvent {
-  characterName: string;
-  profileData: ProfileData | string;
-  message: string;
-  requestingCharacter?: string;
-  onlineStatus?: {
-    isOnline: boolean;
-    status: string;
-    gender?: string;
-    lastSeen: string;
-  };
-}
-
 export interface ProfileResponse {
   characterName: string;
   profileData: ProfileData | null;
-  isCached: boolean;
-  age?: { totalHours: number };
-  message?: string;
+  fetchedAt: string | null;
+  isStale: boolean;
+  refreshQueued: boolean;
 }
 
 export interface Friend {

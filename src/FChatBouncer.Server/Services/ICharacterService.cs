@@ -37,21 +37,6 @@ public interface ICharacterService
     Task UpdateCharacterGenderAsync(string characterName, string gender);
 
     /// <summary>
-    /// Update character profile information
-    /// </summary>
-    Task UpdateCharacterProfileAsync(string characterName, ProfileData profileData);
-
-    /// <summary>
-    /// Update character profile from raw data
-    /// </summary>
-    Task UpdateCharacterProfileAsync(string characterName, string profileData, string? rawProData = null);
-
-    /// <summary>
-    /// Get character profile data
-    /// </summary>
-    Task<ProfileData?> GetCharacterProfileAsync(string characterName);
-
-    /// <summary>
     /// Search for characters by name (partial match)
     /// </summary>
     Task<List<Character>> SearchCharactersAsync(string searchTerm, int limit = 50);
@@ -139,19 +124,9 @@ public interface ICharacterService
     #region Character Discovery
 
     /// <summary>
-    /// Discover a character from F-Chat data (status, profile, etc.)
+    /// Record a character's presence (status, gender, last seen) reported by F-Chat
     /// </summary>
-    Task<Character> DiscoverCharacterAsync(string characterName, string status = "online", string? statusMessage = null, string gender = "None");
-
-    /// <summary>
-    /// Update character information from F-Chat character data
-    /// </summary>
-    Task UpdateCharacterFromFChatDataAsync(string characterName, FChatCharacter fchatCharacter);
-
-    /// <summary>
-    /// Update character information from channel character data
-    /// </summary>
-    Task UpdateCharacterFromChannelDataAsync(string characterName, ChannelCharacter channelCharacter);
+    Task UpdateCharacterPresenceAsync(string characterName, string status, string? statusMessage, string? gender, DateTime lastSeen);
 
     #endregion
 
@@ -161,11 +136,6 @@ public interface ICharacterService
     /// Get multiple characters by name
     /// </summary>
     Task<List<Character>> GetCharactersAsync(IEnumerable<string> characterNames);
-
-    /// <summary>
-    /// Update multiple character statuses
-    /// </summary>
-    Task UpdateCharacterStatusesAsync(Dictionary<string, (string status, string? statusMessage, bool isOnline)> characterUpdates);
 
     #endregion
 }

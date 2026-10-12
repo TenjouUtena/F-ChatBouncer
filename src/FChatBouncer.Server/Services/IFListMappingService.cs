@@ -8,20 +8,7 @@ namespace FChatBouncer.Server.Services;
 public interface IFListMappingService
 {
     /// <summary>
-    /// Get mapping data for infotags, kinks, and list items
+    /// Get mapping data for infotags, kinks, and list items (cached for 24 hours)
     /// </summary>
-    /// <returns>Mapping response with human-readable names</returns>
-    Task<MappingResponse> GetMappingAsync();
-
-    /// <summary>
-    /// Get cached mapping data if available and valid
-    /// </summary>
-    /// <returns>Cached mapping data or null if not available/expired</returns>
-    Task<MappingResponse?> GetCachedMappingAsync();
-
-    /// <summary>
-    /// Refresh the mapping cache
-    /// </summary>
-    /// <returns>Updated mapping response</returns>
-    Task<MappingResponse> RefreshMappingCacheAsync();
+    Task<MappingResponse> GetMappingAsync(CancellationToken ct = default);
 }

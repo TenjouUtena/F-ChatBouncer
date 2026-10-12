@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace FChatBouncer.Server.Migrations
 {
     [DbContext(typeof(BouncerDbContext))]
-    [Migration("20261012151240_Initial")]
+    [Migration("20261012151923_Initial")]
     partial class Initial
     {
         /// <inheritdoc />
@@ -257,26 +257,16 @@ namespace FChatBouncer.Server.Migrations
                     b.Property<DateTime>("LastSeen")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<DateTime>("LastUpdated")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Memo")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<DateTime?>("MemoLastUpdated")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
-                    b.Property<string>("ProfileData")
-                        .HasColumnType("text");
+                    b.Property<DateTime?>("ProfileFetchedAt")
+                        .HasColumnType("timestamp with time zone");
 
-                    b.Property<string>("RawProData")
-                        .HasColumnType("text");
+                    b.Property<string>("ProfileJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -286,9 +276,6 @@ namespace FChatBouncer.Server.Migrations
                     b.Property<string>("StatusMessage")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
-
-                    b.Property<string>("StructuredProfileData")
-                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -454,68 +441,6 @@ namespace FChatBouncer.Server.Migrations
                     b.ToTable("Messages");
                 });
 
-            modelBuilder.Entity("FChatBouncer.Server.Models.ProfileQueueItem", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("CharacterName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasColumnType("text");
-
-                    b.Property<int>("MaxRetries")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Priority")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("ProcessedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("RequestType")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("RequestedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("RetryCount")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UpdatedAt")
-                        .HasDatabaseName("IX_ProfileQueueItems_UpdatedAt");
-
-                    b.HasIndex("Status", "Priority", "RequestedAt")
-                        .HasDatabaseName("IX_ProfileQueueItems_Status_Priority_Requested");
-
-                    b.HasIndex("UserId", "CharacterName", "Status")
-                        .HasDatabaseName("IX_ProfileQueueItems_User_Character_Status");
-
-                    b.ToTable("ProfileQueueItems");
-                });
-
             modelBuilder.Entity("FChatBouncer.Server.Models.QueuedMessage", b =>
                 {
                     b.Property<int>("Id")
@@ -559,6 +484,29 @@ namespace FChatBouncer.Server.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("QueuedMessages");
+                });
+
+            modelBuilder.Entity("FChatBouncer.Server.Models.UserCharacterNote", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("character varying(450)");
+
+                    b.Property<int>("CharacterId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Memo")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("UserId", "CharacterId");
+
+                    b.HasIndex("CharacterId");
+
+                    b.ToTable("UserCharacterNotes");
                 });
 
             modelBuilder.Entity("FChatBouncer.Server.Models.UserSession", b =>
@@ -826,6 +774,21 @@ namespace FChatBouncer.Server.Migrations
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("FChatBouncer.Server.Models.UserCharacterNote", b =>
+                {
+                    b.HasOne("FChatBouncer.Server.Models.Character", null)
+                        .WithMany()
+                        .HasForeignKey("CharacterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("FChatBouncer.Server.Models.BouncerUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("FChatBouncer.Server.Models.UserSession", b =>

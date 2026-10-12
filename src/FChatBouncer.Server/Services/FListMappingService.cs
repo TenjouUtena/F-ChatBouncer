@@ -4,49 +4,36 @@ using System.Text.Json;
 namespace FChatBouncer.Server.Services;
 
 /// <summary>
-/// Service for interacting with F-List mapping API to get human-readable names
+/// Fetches F-List's kink and infotag mapping and caches it in-process for 24 hours.
+/// Registered as a singleton so the cache is shared across requests.
 /// </summary>
 public class FListMappingService : IFListMappingService
 {
-    private readonly HttpClient _httpClient;
-    private readonly ILogger<FListMappingService> _logger;
-    private CachedMappingData? _cachedMapping;
+    private static readonly TimeSpan Ttl = TimeSpan.FromHours(24);
 
-    public FListMappingService(HttpClient httpClient, ILogger<FListMappingService> logger)
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<FListMappingService> _logger;
+    private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private MappingResponse? _cached;
+    private DateTime _cachedAt;
+
+    public FListMappingService(IHttpClientFactory httpClientFactory, ILogger<FListMappingService> logger)
     {
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
-    public async Task<MappingResponse> GetMappingAsync()
+    public async Task<MappingResponse> GetMappingAsync(CancellationToken ct = default)
     {
-        // Try to get cached mapping first
-        var cachedMapping = await GetCachedMappingAsync();
-        if (cachedMapping != null)
-        {
-            _logger.LogDebug("Using cached mapping data");
-            return cachedMapping;
-        }
+        if (_cached is not null && DateTime.UtcNow - _cachedAt < Ttl) return _cached;
 
-        // Cache is expired or doesn't exist, fetch new data
-        return await RefreshMappingCacheAsync();
-    }
-
-    public Task<MappingResponse?> GetCachedMappingAsync()
-    {
-        if (_cachedMapping?.IsValid == true)
-        {
-            return Task.FromResult<MappingResponse?>(_cachedMapping.Data);
-        }
-
-        return Task.FromResult<MappingResponse?>(null);
-    }
-
-    public async Task<MappingResponse> RefreshMappingCacheAsync()
-    {
+        await _refreshLock.WaitAsync(ct);
         try
         {
-            var response = await _httpClient.GetAsync("https://www.f-list.net/json/api/mapping-list.php");
+            if (_cached is not null && DateTime.UtcNow - _cachedAt < Ttl) return _cached;
+
+            var client = _httpClientFactory.CreateClient();
+            var response = await client.GetAsync("https://www.f-list.net/json/api/mapping-list.php", ct);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -54,39 +41,27 @@ public class FListMappingService : IFListMappingService
                 throw new HttpRequestException($"Failed to fetch mapping data. Status: {response.StatusCode}");
             }
 
-            var content = await response.Content.ReadAsStringAsync();
-            _logger.LogDebug("Received mapping data: {Content}", content);
+            var content = await response.Content.ReadAsStringAsync(ct);
 
-            var mappingResponse = JsonSerializer.Deserialize<MappingResponse>(content, new JsonSerializerOptions
+            var mapping = JsonSerializer.Deserialize<MappingResponse>(content, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
-            });
+            }) ?? throw new InvalidOperationException("Failed to deserialize mapping response");
 
-            if (mappingResponse == null)
+            if (mapping.HasError)
             {
-                _logger.LogError("Failed to deserialize mapping response");
-                throw new InvalidOperationException("Failed to deserialize mapping response");
+                _logger.LogError("Mapping API returned error: {Error}", mapping.Error);
+                throw new InvalidOperationException($"Mapping API error: {mapping.Error}");
             }
 
-            if (mappingResponse.HasError)
-            {
-                _logger.LogError("Mapping API returned error: {Error}", mappingResponse.Error);
-                throw new InvalidOperationException($"Mapping API error: {mappingResponse.Error}");
-            }
-
-            // Cache the mapping data
-            _cachedMapping = new CachedMappingData
-            {
-                Data = mappingResponse,
-                CachedAt = DateTime.UtcNow,
-            };
-
-            return mappingResponse;
+            _cached = mapping;
+            _cachedAt = DateTime.UtcNow;
+            _logger.LogInformation("Refreshed F-List mapping cache");
+            return mapping;
         }
-        catch (Exception ex)
+        finally
         {
-            _logger.LogError(ex, "Failed to refresh mapping cache");
-            throw;
+            _refreshLock.Release();
         }
     }
 }

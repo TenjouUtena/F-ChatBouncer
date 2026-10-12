@@ -179,29 +179,6 @@ public class FListCharacterDataService : IFListCharacterDataService
         }
     }
 
-    public async Task<CharacterDataResponse> GetCharacterDataWithMappingAsync(string characterName, string ticket, string account)
-    {
-        // Get character data
-        var characterData = await GetCharacterDataAsync(characterName, ticket, account);
-
-        // Get mapping data for human-readable names
-        try
-        {
-            var mapping = await _mappingService.GetMappingAsync();
-            
-            // Apply human-readable names to the character data
-            ApplyMappingToCharacterData(characterData, mapping);
-            
-            _logger.LogInformation("Applied mapping to character data for {CharacterName}", characterName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to apply mapping to character data for {CharacterName}, using raw data", characterName);
-            // Continue with raw data if mapping fails
-        }
-
-        return characterData;
-    }
 
     /// <summary>
     /// Gets character data with mapping and automatic ticket renewal on expiration
@@ -279,30 +256,11 @@ public class FListCharacterDataService : IFListCharacterDataService
             profileData.Kinks.Add(kinkInfo);
         }
 
+        profileData.ViewCount = characterData.ViewCount;
 
-        // Add view count
-        profileData.Info["View Count"] = characterData.ViewCount.ToString();
-
-        // Add images with detailed metadata
-        _logger.LogInformation("Processing {ImageCount} images for {CharacterName}", characterData.Images.Count, characterData.Name);
+        _logger.LogDebug("Processing {ImageCount} images for {CharacterName}", characterData.Images.Count, characterData.Name);
         if (characterData.Images.Any())
         {
-            var imageIds = string.Join(", ", characterData.Images.Select(img => img.ImageId));
-            profileData.Info["Images"] = imageIds;
-            
-            // Add detailed image information for frontend
-            foreach (var image in characterData.Images)
-            {
-                var imageKey = $"Image_{image.ImageId}";
-                var imageInfo = $"{image.ImageId}.{image.Extension}|{image.Width}x{image.Height}";
-                if (!string.IsNullOrEmpty(image.Description))
-                {
-                    imageInfo += $"|{image.Description}";
-                }
-                profileData.Info[imageKey] = imageInfo;
-            }
-
-            // Populate the new images array with structured data
             foreach (var image in characterData.Images)
             {
                 profileData.Images.Add(new ProfileImage

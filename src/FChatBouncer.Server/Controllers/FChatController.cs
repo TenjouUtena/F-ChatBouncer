@@ -157,7 +157,7 @@ public class FChatController : ControllerBase
     }
 
     [HttpGet("profile/{characterName}")]
-    public async Task<ActionResult<ProfileResponse>> GetProfile(string characterName, [FromQuery] bool allowStale = true)
+    public async Task<ActionResult<ProfileResponse>> GetProfile(string characterName)
     {
         try
         {
@@ -167,37 +167,16 @@ public class FChatController : ControllerBase
                 return Unauthorized();
             }
 
-            _logger.LogDebug("Profile request for character {CharacterName} (User: {UserId}, AllowStale: {AllowStale})",
-                characterName, userId, allowStale);
+            var (profile, fetchedAt, isStale, refreshQueued) = await _profileService.GetAsync(userId, characterName);
 
-            // Try to get cached profile first
-            // NOTE: GetCachedProfileAsync will automatically queue a request if no profile is found
-            var cachedProfile = await _profileService.GetCachedProfileAsync(userId, characterName, allowStale);
-            if (cachedProfile != null)
-            {
-                return Ok(new ProfileResponse
-                {
-                    CharacterName = characterName,
-                    ProfileData = cachedProfile,
-                    IsCached = true,
-                    Age = DateTime.UtcNow - cachedProfile.Timestamp
-                });
-            }
-
-            // No cached profile - GetCachedProfileAsync already queued the request
             return Ok(new ProfileResponse
             {
                 CharacterName = characterName,
-                ProfileData = null,
-                IsCached = false,
-                Message = "Profile request sent. Check back in a moment."
+                ProfileData = profile,
+                FetchedAt = fetchedAt,
+                IsStale = isStale,
+                RefreshQueued = refreshQueued
             });
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Rate limited"))
-        {
-            _logger.LogWarning("Profile request rate limited for character {CharacterName} (User: {UserId}): {Message}",
-                characterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value, ex.Message);
-            return StatusCode(429, new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -206,7 +185,6 @@ public class FChatController : ControllerBase
             return StatusCode(500, new { message = "Failed to get profile" });
         }
     }
-
     [HttpPost("profile/request")]
     [EnableRateLimiting(RateLimitPolicies.ProfileRequest)]
     public async Task<ActionResult> RequestProfile([FromBody] ProfileRequestDto request)
@@ -219,15 +197,9 @@ public class FChatController : ControllerBase
                 return Unauthorized();
             }
 
-            await _profileService.RequestProfileAsync(userId, request.CharacterName);
+            var queued = await _profileService.RequestRefreshAsync(userId, request.CharacterName);
 
-            return Ok(new { message = "Profile request sent successfully" });
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Rate limited"))
-        {
-            _logger.LogWarning("Profile request rate limited for character {CharacterName} (User: {UserId}): {Message}",
-                request.CharacterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value, ex.Message);
-            return StatusCode(429, new { message = ex.Message });
+            return Ok(new { queued });
         }
         catch (Exception ex)
         {
@@ -540,13 +512,13 @@ public class FChatController : ControllerBase
 
             _logger.LogDebug("Memo request for character {CharacterName} (User: {UserId})", characterName, userId);
 
-            var memoData = await _memoService.GetMemoAsync(userId, characterName);
+            var memo = await _memoService.GetMemoAsync(userId, characterName);
             
             return Ok(new MemoResponse
             {
                 CharacterName = characterName,
-                Memo = memoData?.Note,
-                HasMemo = !string.IsNullOrEmpty(memoData?.Note)
+                Memo = memo,
+                HasMemo = !string.IsNullOrEmpty(memo)
             });
         }
         catch (Exception ex)
@@ -554,31 +526,6 @@ public class FChatController : ControllerBase
             _logger.LogError(ex, "Failed to get memo for character {CharacterName} (User: {UserId})",
                 characterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
             return StatusCode(500, new { message = "Failed to get memo" });
-        }
-    }
-
-    [HttpPost("memo/{characterName}/refresh")]
-    public async Task<ActionResult> RefreshMemo(string characterName)
-    {
-        try
-        {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (userId == null)
-            {
-                return Unauthorized();
-            }
-
-            _logger.LogInformation("Refreshing memo for character {CharacterName} (User: {UserId})", characterName, userId);
-
-            await _memoService.RefreshMemoAsync(userId, characterName);
-            
-            return Ok(new { message = "Memo refreshed successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to refresh memo for character {CharacterName} (User: {UserId})",
-                characterName, User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
-            return StatusCode(500, new { message = "Failed to refresh memo" });
         }
     }
 
@@ -620,9 +567,9 @@ public class ProfileResponse
 {
     public string CharacterName { get; set; } = string.Empty;
     public ProfileData? ProfileData { get; set; }
-    public bool IsCached { get; set; }
-    public TimeSpan? Age { get; set; }
-    public string? Message { get; set; }
+    public DateTime? FetchedAt { get; set; }
+    public bool IsStale { get; set; }
+    public bool RefreshQueued { get; set; }
 }
 
 public class ProfileRequestDto

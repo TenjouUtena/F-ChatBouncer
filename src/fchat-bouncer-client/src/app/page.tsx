@@ -412,7 +412,7 @@ export default function Home() {
         
         try {
           // Fetch the profile via REST API
-          const profileResponse = await api.getProfile(token!, data.characterName, true);
+          const profileResponse = await api.getProfile(token!, data.characterName);
           console.debug('Successfully fetched profile after notification:', profileResponse);
           
           // Update the profile in the chat store

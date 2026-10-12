@@ -18,6 +18,7 @@ public class BouncerHub : Hub
     private readonly IMessageQueueService _messageQueueService;
     private readonly IFChatService _fChatService;
     private readonly IProfileService _profileService;
+    private readonly ICharacterService _characterService;
     private readonly TicketManager _ticketManager;
     private readonly ILogger<BouncerHub> _logger;
     private readonly IEncryptionService _encryptionService;
@@ -33,6 +34,7 @@ public class BouncerHub : Hub
         IMessageQueueService messageQueueService,
         IFChatService fChatService,
         IProfileService profileService,
+        ICharacterService characterService,
         TicketManager ticketManager,
         ILogger<BouncerHub> logger,
         IEncryptionService encryptionService)
@@ -42,6 +44,7 @@ public class BouncerHub : Hub
         _messageQueueService = messageQueueService;
         _fChatService = fChatService;
         _profileService = profileService;
+        _characterService = characterService;
         _ticketManager = ticketManager;
         _logger = logger;
         _encryptionService = encryptionService;
@@ -361,12 +364,13 @@ public class BouncerHub : Hub
 
         try
         {
-            await _profileService.RequestProfileAsync(userId, characterName);
+            var queued = await _profileService.RequestRefreshAsync(userId, characterName);
 
             // Notify client that profile request was sent
             await Clients.Caller.SendAsync("ProfileRequested", new
             {
                 CharacterName = characterName,
+                Queued = queued,
                 Message = $"Profile request sent for {characterName}"
             });
         }
@@ -382,47 +386,20 @@ public class BouncerHub : Hub
         var userId = Context.UserIdentifier;
         if (userId == null) return;
 
-        _logger.LogInformation("User {UserId} requesting basic info for character {CharacterName}", userId, characterName);
-
         try
         {
-            // Get cached profile data without triggering new requests
-            var profileData = await _profileService.GetCachedProfileAsync(userId, characterName, allowStale: true);
+            // Gender and status come from LIS/NLN/STA, not from the profile
+            var character = await _characterService.GetCharacterAsync(characterName);
 
-            if (profileData == null)
-            {
-                _logger.LogInformation("No cached profile data found for character {CharacterName} (User: {UserId})", characterName, userId);
-                await Clients.Caller.SendAsync("ReceiveBasicInfo", new
-                {
-                    CharacterName = characterName,
-                    Gender = (string?)null,
-                    Species = (string?)null,
-                    Status = (string?)null,
-                    CustomStatus = (string?)null,
-                    LastSeen = (DateTime?)null,
-                    HasData = false,
-                    Message = "No cached data available for this character"
-                });
-                return;
-            }
-
-            // Extract basic info from cached profile data
-            var basicInfo = new
+            await Clients.Caller.SendAsync("ReceiveBasicInfo", new
             {
                 CharacterName = characterName,
-                Gender = profileData.Gender ?? profileData.Info.GetValueOrDefault("Gender"),
-                Species = profileData.Info.GetValueOrDefault("Species"),
-                Status = profileData.Info.GetValueOrDefault("Status"),
-                CustomStatus = profileData.Info.GetValueOrDefault("Custom Status"),
-                LastSeen = profileData.Timestamp,
-                HasData = true,
-                Message = "Basic info retrieved from cached data"
-            };
-
-            _logger.LogInformation("Retrieved basic info for character {CharacterName} (User: {UserId}): Gender={Gender}, Species={Species}, Status={Status}", 
-                characterName, userId, basicInfo.Gender, basicInfo.Species, basicInfo.Status);
-
-            await Clients.Caller.SendAsync("ReceiveBasicInfo", basicInfo);
+                Gender = character?.Gender,
+                Status = character?.Status,
+                CustomStatus = character?.StatusMessage,
+                LastSeen = character?.LastSeen,
+                HasData = character != null
+            });
         }
         catch (Exception ex)
         {
@@ -832,32 +809,6 @@ public class BouncerHub : Hub
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send typing notification to {CharacterName} with status {Status} for user {UserId}", characterName, status, userId);
-        }
-    }
-
-    public async Task RequestProfileFromCharacter(string characterName, string requestingCharacter)
-    {
-        var userId = Context.UserIdentifier;
-        if (userId == null) return;
-
-        _logger.LogInformation("Character {RequestingCharacter} of user {UserId} requesting profile for character {CharacterName}", requestingCharacter, userId, characterName);
-
-        try
-        {
-            await _fChatService.RequestProfileAsync(userId, characterName, requestingCharacter);
-
-            // Notify client that profile request was sent
-            await Clients.Caller.SendAsync("ProfileRequested", new
-            {
-                CharacterName = characterName,
-                RequestingCharacter = requestingCharacter,
-                Message = $"Profile request sent for {characterName} from {requestingCharacter}"
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to request profile for character {CharacterName} from character {RequestingCharacter} (User: {UserId})", characterName, requestingCharacter, userId);
-            await Clients.Caller.SendAsync("ProfileError", $"Failed to request profile for {characterName}");
         }
     }
 

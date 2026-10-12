@@ -142,7 +142,6 @@ class SignalRService {
     this.connection.off('QueuedMessagesProcessed');
     this.connection.off('ProfileRequested');
     this.connection.off('ProfileError');
-    this.connection.off('ProfileReceived');
     this.connection.off('ProfileAvailable');
     // Multi-character event listeners
     this.connection.off('CharacterConnected');
@@ -603,10 +602,6 @@ this.onSearchResultsReceived = callback;
     this.addUniqueListener('ProfileError', callback);
   }
 
-  onProfileReceived(callback: (data: { CharacterName: string; ProfileData: string; Message: string }) => void): void {
-    this.addUniqueListener('ProfileReceived', callback);
-  }
-
   // Multi-character event listeners
   onCharacterConnected(callback: (data: { CharacterName: string; Message: string }) => void): void {
     this.addUniqueListener('CharacterConnected', callback);
@@ -995,12 +990,6 @@ this.onSearchResultsReceived = callback;
   async sendMessageFromCharacter(characterName: string, channel: string, content: string): Promise<void> {
     if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
       await this.connection.invoke('SendMessageFromCharacter', characterName, channel, content);
-    }
-  }
-
-  async requestProfileFromCharacter(characterName: string, requestingCharacter: string): Promise<void> {
-    if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
-      await this.connection.invoke('RequestProfileFromCharacter', characterName, requestingCharacter);
     }
   }
 

@@ -66,9 +66,7 @@ public class MetricsCollectionService : BackgroundService
         ApplicationMetrics.MessageQueueDepth.Set(queuedMessages);
 
         // Update profile queue depth
-        var profileQueueDepth = await dbContext.ProfileQueueItems
-            .Where(pq => pq.Status == Models.ProfileQueueStatus.Pending || pq.Status == Models.ProfileQueueStatus.Processing)
-            .CountAsync(cancellationToken);
+        var profileQueueDepth = _serviceProvider.GetRequiredService<IProfileFetchQueue>().PendingCount;
         ApplicationMetrics.ProfileQueueDepth.Set(profileQueueDepth);
 
         _logger.LogDebug("Metrics collected: {ActiveConnections} character connections, {ActiveSessions} user sessions, {MessageQueue} messages queued, {ProfileQueue} profiles queued",

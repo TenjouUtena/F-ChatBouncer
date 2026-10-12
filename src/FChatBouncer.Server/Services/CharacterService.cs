@@ -1,7 +1,6 @@
 using FChatBouncer.Server.Data;
 using FChatBouncer.Server.Models;
 using Microsoft.EntityFrameworkCore;
-using System.Text.Json;
 using Npgsql;
 
 namespace FChatBouncer.Server.Services;
@@ -26,127 +25,29 @@ public class CharacterService : ICharacterService
 
     public async Task<Character> GetOrCreateCharacterAsync(string characterName)
     {
-        _logger.LogDebug("Getting or creating character: {CharacterName}", characterName);
-
-        // First try to get existing character
         // Use AsTracking() because this character will likely be modified
         var character = await _context.Characters
             .AsTracking()
             .FirstOrDefaultAsync(c => c.Name == characterName);
 
-        if (character == null)
+        if (character != null)
         {
-            _logger.LogInformation("Creating new character: {CharacterName}", characterName);
-            
-            // Use PostgreSQL's ON CONFLICT to handle race conditions at the database level
-            try
-            {
-                // Try to insert the character using raw SQL with ON CONFLICT DO NOTHING
-                // This is the most robust way to handle race conditions
-                var sql = @"
-                    INSERT INTO ""Characters"" (""Name"", ""Status"", ""Gender"", ""FirstSeen"", ""LastSeen"", ""LastUpdated"", ""IsOnline"")
-                    VALUES (@name, 'offline', 'None', @now, @now, @now, false)
-                    ON CONFLICT (""Name"") DO NOTHING";
-                
-                var now = DateTime.UtcNow;
-                var rowsAffected = await _context.Database.ExecuteSqlRawAsync(sql, 
-                    new Npgsql.NpgsqlParameter("@name", characterName),
-                    new Npgsql.NpgsqlParameter("@now", now));
-                
-                if (rowsAffected > 0)
-                {
-                    // Character was successfully inserted
-                    _logger.LogInformation("Successfully created character: {CharacterName}", characterName);
-                    character = await _context.Characters
-                        .AsTracking()
-                        .FirstOrDefaultAsync(c => c.Name == characterName);
-                }
-                else
-                {
-                    // Character was not inserted (likely due to ON CONFLICT DO NOTHING)
-                    // This means another thread created it, so fetch the existing one
-                    _logger.LogInformation("Character {CharacterName} was created by another thread, fetching existing", characterName);
-                    character = await _context.Characters
-                        .AsTracking()
-                        .FirstOrDefaultAsync(c => c.Name == characterName);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Raw SQL insert failed for character {CharacterName}, falling back to standard approach", characterName);
-                
-                // Fallback to the original approach with retry logic
-                var maxRetries = 3;
-                var retryCount = 0;
-                
-                while (retryCount < maxRetries)
-                {
-                    try
-                    {
-                        // Double-check if character was created by another thread
-                        character = await _context.Characters
-                            .AsTracking()
-                            .FirstOrDefaultAsync(c => c.Name == characterName);
-                        
-                        if (character != null)
-                        {
-                            _logger.LogInformation("Character {CharacterName} was created by another thread, returning existing", characterName);
-                            break;
-                        }
-
-                        character = new Character
-                        {
-                            Name = characterName,
-                            Status = "offline",
-                            Gender = "None",
-                            FirstSeen = DateTime.UtcNow,
-                            LastSeen = DateTime.UtcNow,
-                            LastUpdated = DateTime.UtcNow
-                        };
-
-                        _context.Characters.Add(character);
-                        await _context.SaveChangesAsync();
-                        
-                        _logger.LogInformation("Successfully created character: {CharacterName}", characterName);
-                        break; // Success, exit retry loop
-                    }
-                    catch (DbUpdateException ex2) when (ex2.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-                    {
-                        // Handle unique constraint violation - character was created by another thread
-                        _logger.LogInformation("Character {CharacterName} was created by another thread (attempt {RetryCount}), retrieving existing character", characterName, retryCount + 1);
-                        
-                        // Clear the context and try to get the character again
-                        if (character != null)
-                        {
-                            _context.Entry(character).State = EntityState.Detached;
-                        }
-                        
-                        // Try to get the existing character
-                        character = await _context.Characters
-                            .AsTracking()
-                            .FirstOrDefaultAsync(c => c.Name == characterName);
-                        
-                        if (character != null)
-                        {
-                            _logger.LogInformation("Successfully retrieved existing character: {CharacterName}", characterName);
-                            break; // Found existing character, exit retry loop
-                        }
-                        
-                        retryCount++;
-                        if (retryCount >= maxRetries)
-                        {
-                            _logger.LogError("Failed to create or retrieve character {CharacterName} after {MaxRetries} attempts", characterName, maxRetries);
-                            throw new InvalidOperationException($"Character {characterName} could not be created or retrieved after {maxRetries} attempts");
-                        }
-                        
-                        // Exponential backoff delay before retry
-                        await Task.Delay(50 * (int)Math.Pow(2, retryCount));
-                    }
-                }
-            }
+            return character;
         }
 
-        return character!;
+        // ON CONFLICT DO NOTHING makes concurrent creation of the same name safe;
+        // whichever insert wins, the row exists afterwards.
+        var now = DateTime.UtcNow;
+        await _context.Database.ExecuteSqlRawAsync(@"
+            INSERT INTO ""Characters"" (""Name"", ""Status"", ""Gender"", ""FirstSeen"", ""LastSeen"", ""IsOnline"")
+            VALUES (@name, 'offline', 'None', @now, @now, false)
+            ON CONFLICT (""Name"") DO NOTHING",
+            new NpgsqlParameter("@name", characterName),
+            new NpgsqlParameter("@now", now));
+
+        return await _context.Characters
+            .AsTracking()
+            .FirstAsync(c => c.Name == characterName);
     }
 
     public async Task<Character?> GetCharacterAsync(string characterName)
@@ -169,17 +70,7 @@ public class CharacterService : ICharacterService
         var character = await GetOrCreateCharacterAsync(characterName);
         character.UpdateStatus(status, statusMessage, isOnline);
 
-        try
-        {
-            await _context.SaveChangesAsync();
-            _logger.LogDebug("Successfully updated character {CharacterName}: Status={Status}, Online={IsOnline}", 
-                characterName, character.Status, character.IsOnline);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Character {CharacterName} was updated by another thread, skipping duplicate update", characterName);
-        }
+        await _context.SaveChangesAsync();
     }
 
     public async Task UpdateCharacterGenderAsync(string characterName, string gender)
@@ -194,85 +85,7 @@ public class CharacterService : ICharacterService
 
         var character = await GetOrCreateCharacterAsync(characterName);
         character.Gender = gender;
-        character.LastUpdated = DateTime.UtcNow;
-
-        try
-        {
-            await _context.SaveChangesAsync();
-            _logger.LogDebug("Successfully updated character {CharacterName}: Gender={Gender}", characterName, character.Gender);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Character {CharacterName} was updated by another thread, skipping duplicate gender update", characterName);
-        }
-    }
-
-    public async Task UpdateCharacterProfileAsync(string characterName, ProfileData profileData)
-    {
-        _logger.LogDebug("Updating character profile: {CharacterName} with {ImageCount} images", characterName, profileData.Images.Count);
-
-        var character = await GetOrCreateCharacterAsync(characterName);
-        character.SetStructuredProfile(profileData);
-
-        // Also store raw profile data if available
-        if (!string.IsNullOrEmpty(character.ProfileData))
-        {
-            character.ProfileData = JsonSerializer.Serialize(profileData);
-        }
-
-        try
-        {
-            await _context.SaveChangesAsync();
-            _logger.LogInformation("Successfully updated character profile for {CharacterName} with {ImageCount} images", characterName, profileData.Images.Count);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Character {CharacterName} was updated by another thread, skipping duplicate profile update", characterName);
-        }
-    }
-
-    public async Task UpdateCharacterProfileAsync(string characterName, string profileData, string? rawProData = null)
-    {
-        _logger.LogDebug("Updating character profile from raw data: {CharacterName}", characterName);
-
-        var character = await GetOrCreateCharacterAsync(characterName);
-        character.ProfileData = profileData;
-        character.RawProData = rawProData;
-        character.LastUpdated = DateTime.UtcNow;
-
-        // Try to parse as structured data
-        try
-        {
-            var structuredProfile = JsonSerializer.Deserialize<ProfileData>(profileData);
-            if (structuredProfile != null)
-            {
-                character.SetStructuredProfile(structuredProfile);
-            }
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "Failed to parse profile data as structured format for character {CharacterName}", characterName);
-        }
-
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Character {CharacterName} was updated by another thread, skipping duplicate profile update", characterName);
-        }
-    }
-
-    public async Task<ProfileData?> GetCharacterProfileAsync(string characterName)
-    {
-        var character = await GetCharacterAsync(characterName);
-        var profileData = character?.GetStructuredProfile();
-        _logger.LogDebug("Retrieved profile for {CharacterName}: {ImageCount} images", characterName, profileData?.Images.Count ?? 0);
-        return profileData;
+        await _context.SaveChangesAsync();
     }
 
     public async Task<List<Character>> SearchCharactersAsync(string searchTerm, int limit = 50)
@@ -639,99 +452,20 @@ public class CharacterService : ICharacterService
 
     #region Character Discovery
 
-    public async Task<Character> DiscoverCharacterAsync(string characterName, string status = "online", string? statusMessage = null, string gender = "None")
+    public async Task UpdateCharacterPresenceAsync(string characterName, string status, string? statusMessage, string? gender, DateTime lastSeen)
     {
-        _logger.LogDebug("Discovering character: {CharacterName} (Status: {Status}, Gender: {Gender})", characterName, status, gender);
-
         var character = await GetOrCreateCharacterAsync(characterName);
+
+        // Characters reported by LIS/NLN/ICH are online by definition
         character.UpdateStatus(status, statusMessage, true);
-        character.Gender = gender;
 
-        try
+        if (!string.IsNullOrEmpty(gender) && gender != "None")
         {
-            await _context.SaveChangesAsync();
-            return character;
+            character.Gender = gender;
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Character {CharacterName} was discovered by another thread, returning existing character", characterName);
-            return await GetOrCreateCharacterAsync(characterName);
-        }
-    }
 
-    public async Task UpdateCharacterFromFChatDataAsync(string characterName, FChatCharacter fchatCharacter)
-    {
-        _logger.LogDebug("Updating character from F-Chat data: {CharacterName} (Status: {Status}, Gender: {Gender})", 
-            characterName, fchatCharacter.Status, fchatCharacter.Gender);
-
-        try
-        {
-            var character = await GetOrCreateCharacterAsync(characterName);
-            
-            // Always update status and ensure character is marked as online
-            character.UpdateStatus(fchatCharacter.Status, fchatCharacter.StatusMessage, true);
-            
-            // Update gender if provided and not empty
-            if (!string.IsNullOrEmpty(fchatCharacter.Gender) && fchatCharacter.Gender != "None")
-            {
-                character.Gender = fchatCharacter.Gender;
-                _logger.LogDebug("Updated gender for {CharacterName} to {Gender}", characterName, fchatCharacter.Gender);
-            }
-            
-            character.LastSeen = fchatCharacter.LastSeen;
-
-            await _context.SaveChangesAsync();
-            _logger.LogDebug("Successfully updated character {CharacterName}: Status={Status}, Gender={Gender}, Online={IsOnline}", 
-                characterName, character.Status, character.Gender, character.IsOnline);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Character {CharacterName} was updated by another thread, skipping duplicate update", characterName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating character {CharacterName} from F-Chat data", characterName);
-            throw;
-        }
-    }
-
-    public async Task UpdateCharacterFromChannelDataAsync(string characterName, ChannelCharacter channelCharacter)
-    {
-        _logger.LogDebug("Updating character from channel data: {CharacterName} (Status: {Status}, Gender: {Gender})", 
-            characterName, channelCharacter.Status, channelCharacter.Gender);
-
-        try
-        {
-            var character = await GetOrCreateCharacterAsync(characterName);
-            
-            // Always update status and ensure character is marked as online
-            character.UpdateStatus(channelCharacter.Status.ToString().ToLower(), channelCharacter.StatusMessage, true);
-            
-            // Update gender if provided and not empty
-            if (!string.IsNullOrEmpty(channelCharacter.Gender) && channelCharacter.Gender != "None")
-            {
-                character.Gender = channelCharacter.Gender;
-                _logger.LogDebug("Updated gender for {CharacterName} to {Gender}", characterName, channelCharacter.Gender);
-            }
-            
-            character.LastSeen = channelCharacter.LastSeenAt;
-
-            await _context.SaveChangesAsync();
-            _logger.LogDebug("Successfully updated character {CharacterName}: Status={Status}, Gender={Gender}, Online={IsOnline}", 
-                characterName, character.Status, character.Gender, character.IsOnline);
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Character {CharacterName} was updated by another thread, skipping duplicate update", characterName);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating character {CharacterName} from channel data", characterName);
-            throw;
-        }
+        character.LastSeen = lastSeen;
+        await _context.SaveChangesAsync();
     }
 
     #endregion
@@ -744,34 +478,6 @@ public class CharacterService : ICharacterService
         return await _context.Characters
             .Where(c => names.Contains(c.Name))
             .ToListAsync();
-    }
-
-    public async Task UpdateCharacterStatusesAsync(Dictionary<string, (string status, string? statusMessage, bool isOnline)> characterUpdates)
-    {
-        _logger.LogDebug("Updating {Count} character statuses", characterUpdates.Count);
-
-        var characterNames = characterUpdates.Keys.ToList();
-        var characters = await _context.Characters
-            .Where(c => characterNames.Contains(c.Name))
-            .ToListAsync();
-
-        foreach (var character in characters)
-        {
-            if (characterUpdates.TryGetValue(character.Name, out var update))
-            {
-                character.UpdateStatus(update.status, update.statusMessage, update.isOnline);
-            }
-        }
-
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException pgEx && pgEx.SqlState == "23505")
-        {
-            // Handle unique constraint violation - character was created/updated by another thread
-            _logger.LogWarning("Some characters were updated by another thread during bulk status update, skipping duplicate updates");
-        }
     }
 
     #endregion

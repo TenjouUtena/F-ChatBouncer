@@ -45,8 +45,7 @@ public class CharacterController : ControllerBase
                 Gender = character.Gender,
                 IsOnline = character.IsOnline,
                 LastSeen = character.LastSeen,
-                FirstSeen = character.FirstSeen,
-                LastUpdated = character.LastUpdated
+                FirstSeen = character.FirstSeen
             });
         }
         catch (Exception ex)
@@ -83,8 +82,7 @@ public class CharacterController : ControllerBase
                     Gender = c.Gender,
                     IsOnline = c.IsOnline,
                     LastSeen = c.LastSeen,
-                    FirstSeen = c.FirstSeen,
-                    LastUpdated = c.LastUpdated
+                    FirstSeen = c.FirstSeen
                 }).ToArray(),
                 TotalCount = characters.Count
             });
@@ -117,8 +115,7 @@ public class CharacterController : ControllerBase
                     Gender = c.Gender,
                     IsOnline = c.IsOnline,
                     LastSeen = c.LastSeen,
-                    FirstSeen = c.FirstSeen,
-                    LastUpdated = c.LastUpdated
+                    FirstSeen = c.FirstSeen
                 }).ToArray(),
                 TotalCount = characters.Count
             });
@@ -151,8 +148,7 @@ public class CharacterController : ControllerBase
                     Gender = c.Gender,
                     IsOnline = c.IsOnline,
                     LastSeen = c.LastSeen,
-                    FirstSeen = c.FirstSeen,
-                    LastUpdated = c.LastUpdated
+                    FirstSeen = c.FirstSeen
                 }).ToArray(),
                 TotalCount = characters.Count
             });
@@ -172,7 +168,8 @@ public class CharacterController : ControllerBase
     {
         try
         {
-            var profile = await _characterService.GetCharacterProfileAsync(characterName);
+            var character = await _characterService.GetCharacterAsync(characterName);
+            var profile = character?.Profile;
             if (profile == null)
             {
                 return NotFound(new { message = $"No profile data found for character '{characterName}'" });
@@ -182,7 +179,7 @@ public class CharacterController : ControllerBase
             {
                 CharacterName = characterName,
                 ProfileData = profile,
-                Timestamp = profile.Timestamp
+                Timestamp = character!.ProfileFetchedAt ?? profile.Timestamp
             });
         }
         catch (Exception ex)
@@ -260,8 +257,7 @@ public class CharacterController : ControllerBase
                 Gender = activeCharacter.Gender,
                 IsOnline = activeCharacter.IsOnline,
                 LastSeen = activeCharacter.LastSeen,
-                FirstSeen = activeCharacter.FirstSeen,
-                LastUpdated = activeCharacter.LastUpdated
+                FirstSeen = activeCharacter.FirstSeen
             });
         }
         catch (Exception ex)
@@ -320,7 +316,6 @@ public class UnifiedCharacterDto
     public bool IsOnline { get; set; }
     public DateTime LastSeen { get; set; }
     public DateTime FirstSeen { get; set; }
-    public DateTime LastUpdated { get; set; }
 }
 
 public class UnifiedCharacterListResponse
